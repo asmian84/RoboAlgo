@@ -890,9 +890,10 @@ function GammaExplorerPanel() {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'sniper-neg-gamma',    label: 'Gamma Sniper',           icon: '🎯' },
-  { id: 'sniper-technical',    label: 'Technical Sniper',        icon: '📍' },
-  { id: 'confluence',          label: 'All Confluence',          icon: '◉' },
+  { id: 'sniper-neg-gamma',    label: 'Gamma Sniper',    icon: '🎯' },
+  { id: 'sniper-technical',    label: 'Tech Sniper',     icon: '📍' },
+  { id: 'patterns',            label: 'Pattern Scan',    icon: '📊' },
+  { id: 'confluence',          label: 'Confluence',      icon: '◉' },
 ]
 
 // ── Gamma Squeeze Panel — real GEX from options chains ────────────────────────
@@ -1129,6 +1130,7 @@ export default function SignalsPage() {
       <div>
         {tab === 'sniper-neg-gamma' && <GammaSniperPanel data={gammaData} isLoading={gammaLoading} />}
         {tab === 'sniper-technical' && <TechnicalSniperPanel data={technicalData?.technical ?? []} isLoading={technicalLoading} />}
+        {tab === 'patterns'         && <PatternScanPage />}
         {tab === 'confluence'       && <ConfluenceFunnel />}
       </div>
     </div>

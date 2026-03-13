@@ -8,13 +8,12 @@ import { useAuth } from '../../context/AuthContext'
 // ── Nav links ─────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { path: '/command',   label: 'CMD',       title: 'Command Center'                         },
-  { path: '/',          label: 'DASH',      title: 'Dashboard'                              },
-  { path: '/chart',     label: 'CHART',     title: 'Charts'                                 },
-  { path: '/scan',      label: 'SCAN',      title: 'Scan — Matrix & Watchlist'              },
-  { path: '/signals',   label: 'SIG',       title: 'Signals — AI Recommendations'          },
-  { path: '/analytics', label: 'ANALYTICS', title: 'Analytics — Backtest & Evolution'       },
-  { path: '/paper',     label: 'PAPER',     title: 'Paper Trading'                          },
+  { path: '/command',   label: 'CMD',       title: 'Command Center'                                     },
+  { path: '/',          label: 'DASH',      title: 'Dashboard'                                          },
+  { path: '/chart',     label: 'CHART',     title: 'Charts'                                             },
+  { path: '/signals',   label: 'SCAN/SIG',  title: 'Scan & Signals — patterns, snipers, confluence'    },
+  { path: '/analytics', label: 'ANALYTICS', title: 'Analytics — Backtest & Evolution'                   },
+  { path: '/paper',     label: 'PAPER',     title: 'Paper Trading'                                      },
 ] as const
 
 // ── Market Breadth pill — replaces the old "SAFE_MODE" safety pill ────────────

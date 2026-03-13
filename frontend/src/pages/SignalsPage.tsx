@@ -295,6 +295,8 @@ function ConfluenceFunnel() {
 function RocketScannerPanel() {
   const navigate = useNavigate()
   const [expandedSym, setExpandedSym] = useState<string | null>(null)
+  const [trackedSymbols, setTrackedSymbols] = useState<Set<string>>(new Set())
+  const [filterTracked, setFilterTracked] = useState(false)
 
   const { data: statusData } = useQuery({
     queryKey: ['rocket', 'status'],
@@ -303,9 +305,10 @@ function RocketScannerPanel() {
   })
 
   // Auto-fetch on mount — results field is 'results', not 'candidates'
+  // Increased limit to 1000 for comprehensive list
   const { data: scanData, isLoading } = useQuery<any[]>({
     queryKey: ['rocket', 'scan'],
-    queryFn: () => api.get('/rocket/scan', { params: { limit: 20 } }).then(r => r.data?.results ?? []),
+    queryFn: () => api.get('/rocket/scan', { params: { limit: 1000 } }).then(r => r.data?.results ?? []),
     staleTime: 5 * 60_000,
   })
 
@@ -364,15 +367,30 @@ function RocketScannerPanel() {
         </div>
       )}
 
-      {/* Results — filtered for low price ($1-$20) + bullish + high confluence */}
+      {/* Filter toggle */}
+      {scanData && scanData.length > 0 && (
+        <div className="flex items-center gap-2 mb-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={filterTracked}
+              onChange={(e) => setFilterTracked(e.target.checked)}
+              className="w-4 h-4"
+            />
+            <span className="text-gray-400">Show tracked only ({trackedSymbols.size})</span>
+          </label>
+        </div>
+      )}
+
+      {/* Results — all gamma squeeze candidates */}
       {scanData && scanData.length > 0 && (() => {
-        const filtered = scanData.slice(0, 2)
+        const filtered = filterTracked ? scanData.filter(c => trackedSymbols.has(c.symbol)) : scanData
         return filtered.length > 0 ? (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
           {/* Column headers */}
           <div className="grid px-4 py-2 border-b border-gray-800 text-[10px] text-gray-600 uppercase tracking-widest"
-            style={{ gridTemplateColumns: '80px 90px 1fr 80px 100px 120px 60px' }}>
-            <span>Symbol</span><span>Rocket Score</span><span>Pattern · GEX · Squeeze · Vol</span>
+            style={{ gridTemplateColumns: '30px 80px 90px 1fr 80px 100px 120px 60px' }}>
+            <span>Track</span><span>Symbol</span><span>Rocket Score</span><span>Pattern · GEX · Squeeze · Vol</span>
             <span className="text-right">Confluence</span><span className="text-right">Price / R:R</span><span className="text-right">Gamma</span><span />
           </div>
           <div className="divide-y divide-gray-800/40">
@@ -382,12 +400,29 @@ function RocketScannerPanel() {
               return (
                 <div key={c.symbol}>
                   {/* Row */}
-                  <div className="grid items-center gap-3 px-4 py-3 hover:bg-gray-800/30 transition-colors cursor-pointer"
-                    style={{ gridTemplateColumns: '80px 90px 1fr 80px 100px 120px 60px' }}
-                    onClick={() => setExpandedSym(isExp ? null : c.symbol)}>
+                  <div className="grid items-center gap-3 px-4 py-3 hover:bg-gray-800/30 transition-colors"
+                    style={{ gridTemplateColumns: '30px 80px 90px 1fr 80px 100px 120px 60px' }}>
+
+                    {/* Tracking checkbox */}
+                    <div onClick={(e) => e.stopPropagation()} className="flex justify-center">
+                      <input
+                        type="checkbox"
+                        checked={trackedSymbols.has(c.symbol)}
+                        onChange={(e) => {
+                          const newSet = new Set(trackedSymbols)
+                          if (e.target.checked) newSet.add(c.symbol)
+                          else newSet.delete(c.symbol)
+                          setTrackedSymbols(newSet)
+                        }}
+                        className="w-4 h-4 cursor-pointer"
+                      />
+                    </div>
 
                     {/* Symbol */}
-                    <span className="font-mono font-bold text-sm text-gray-100">{c.symbol}</span>
+                    <span className="font-mono font-bold text-sm text-gray-100 cursor-pointer"
+                      onClick={() => setExpandedSym(isExp ? null : c.symbol)}>
+                      {c.symbol}
+                    </span>
 
                     {/* Score bar */}
                     <div className="flex items-center gap-2">

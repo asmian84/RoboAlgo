@@ -895,41 +895,151 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'confluence',          label: 'All Confluence',          icon: '◉' },
 ]
 
-// ── Sniper Panel ──────────────────────────────────────────────────────────────
-interface SniperPanelProps {
-  type: 'negative_gamma' | 'technical'
-  data: any[]
-}
+// ── Gamma Squeeze Panel — real GEX from options chains ────────────────────────
 
-function SniperPanel({ type, data }: SniperPanelProps) {
+function GammaSniperPanel({ data, isLoading }: { data: any[]; isLoading: boolean }) {
   const navigate = useNavigate()
-  const title = type === 'negative_gamma' ? 'Negative Gamma Sniper Entries' : 'Technical Sniper Entries'
-  const subtitle = type === 'negative_gamma'
-    ? 'Stocks at absolute bottoms with options-confirmed gamma traps'
-    : 'Stocks at absolute bottoms with RSI/MACD capitulation (includes no-options stocks like EONR)'
 
-  if (!data || data.length === 0) {
-    return (
-      <div className="space-y-4">
-        <div>
-          <h2 className="text-xl font-bold">{title}</h2>
-          <p className="text-sm text-gray-500">{subtitle}</p>
-        </div>
-        <div className="p-8 text-center text-gray-600">No {type === 'negative_gamma' ? 'negative gamma' : 'technical'} entry points found yet</div>
+  if (isLoading) return (
+    <div className="flex items-center gap-3 py-16">
+      <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+      <span className="text-gray-400 text-sm">Fetching live options chains + computing GEX…  (takes ~30–60 s)</span>
+    </div>
+  )
+
+  if (!data || data.length === 0) return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-bold">Gamma Squeeze Sniper</h2>
+        <p className="text-sm text-gray-500">Real options-chain GEX · Black-Scholes delta/gamma per strike</p>
       </div>
-    )
-  }
+      <div className="p-8 text-center text-gray-600">No gamma squeeze candidates found — try again after market open</div>
+    </div>
+  )
 
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl font-bold">{title}</h2>
-        <p className="text-sm text-gray-500">{subtitle}</p>
+        <h2 className="text-xl font-bold">Gamma Squeeze Sniper</h2>
+        <p className="text-sm text-gray-500">
+          Real options-chain GEX · Negative GEX at lows = dealer short gamma → explosive reversal
+        </p>
+        <p className="text-sm text-violet-400 mt-1">{data.length} candidates ranked by squeeze score</p>
+      </div>
+
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))' }}>
+        {data.map((entry: any) => {
+          const negGex  = entry.is_negative_gex
+          const gexLabel = negGex ? '🔴 NEG GEX' : '🟢 POS GEX'
+          const gexColor = negGex ? '#f87171' : '#34d399'
+          const score   = entry.gamma_squeeze_score ?? 0
+
+          return (
+            <div
+              key={entry.symbol}
+              onClick={() => navigate(`/chart/${entry.symbol}`)}
+              className="p-4 bg-gray-900 border rounded-lg cursor-pointer transition-all hover:scale-[1.01]"
+              style={{ borderColor: negGex ? 'rgba(248,113,113,0.35)' : 'rgba(55,65,81,1)' }}
+            >
+              {/* Header */}
+              <div className="flex justify-between items-start mb-3">
+                <div>
+                  <div className="font-black text-lg tracking-wide">{entry.symbol}</div>
+                  <div className="text-sm text-gray-400">${entry.current_price?.toFixed(2)}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-black" style={{ color: score >= 60 ? '#a78bfa' : score >= 40 ? '#f59e0b' : '#6b7280' }}>
+                    {score.toFixed(0)}
+                  </div>
+                  <div className="text-[10px] text-gray-500 uppercase tracking-wider">Squeeze Score</div>
+                </div>
+              </div>
+
+              {/* GEX badge + key metrics */}
+              <div className="flex gap-2 mb-3 flex-wrap">
+                <span className="px-2 py-0.5 rounded text-[11px] font-bold" style={{ background: negGex ? 'rgba(248,113,113,0.12)' : 'rgba(52,211,153,0.12)', color: gexColor }}>
+                  {gexLabel}
+                </span>
+                <span className="px-2 py-0.5 rounded text-[11px] bg-gray-800 text-gray-300">
+                  RSI {entry.rsi?.toFixed(0)}
+                </span>
+                <span className="px-2 py-0.5 rounded text-[11px] bg-gray-800 text-gray-300">
+                  {entry.dist_from_low_pct?.toFixed(1)}% from low
+                </span>
+                <span className="px-2 py-0.5 rounded text-[11px] bg-gray-800 text-gray-300">
+                  IV {entry.hist_vol_pct?.toFixed(0)}%
+                </span>
+              </div>
+
+              {/* Options metrics */}
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] mb-3">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Net GEX</span>
+                  <span className={negGex ? 'text-red-400' : 'text-emerald-400'}>
+                    {entry.net_gex >= 0 ? '+' : ''}{(entry.net_gex / 1e6).toFixed(1)}M
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Net Δ Hedge</span>
+                  <span className="text-gray-300">{(entry.net_delta_hedge / 1000).toFixed(0)}K shares</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">ATM P/C</span>
+                  <span className={entry.near_atm_pcr > 1.5 ? 'text-amber-400' : 'text-gray-300'}>
+                    {entry.near_atm_pcr?.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Call OI</span>
+                  <span className="text-gray-300">{entry.total_call_oi?.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">GEX score</span>
+                  <span className="text-violet-400">{entry.gex_score?.toFixed(0)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Put OI</span>
+                  <span className="text-gray-300">{entry.total_put_oi?.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div className="text-[11px] text-gray-500 pt-2 border-t border-gray-800 space-y-0.5">
+                {entry.notes?.map((n: string, i: number) => <div key={i}>{n}</div>)}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Technical Sniper Panel ────────────────────────────────────────────────────
+
+function TechnicalSniperPanel({ data, isLoading }: { data: any[]; isLoading: boolean }) {
+  const navigate = useNavigate()
+
+  if (isLoading) return (
+    <div className="flex items-center gap-3 py-16">
+      <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      <span className="text-gray-400 text-sm">Scanning for technical bottoms…</span>
+    </div>
+  )
+
+  if (!data || data.length === 0) return (
+    <div className="p-8 text-center text-gray-600">No technical entry points found</div>
+  )
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-bold">Technical Sniper</h2>
+        <p className="text-sm text-gray-500">Pure price action — RSI/MACD capitulation at lows · works for stocks without options (EONR-type)</p>
         <p className="text-sm text-emerald-400 mt-1">{data.length} candidates</p>
       </div>
 
-      {/* Table */}
-      <div className="grid gap-2 grid-cols-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))' }}>
+      <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))' }}>
         {data.map((entry: any) => (
           <div
             key={entry.symbol}
@@ -939,47 +1049,31 @@ function SniperPanel({ type, data }: SniperPanelProps) {
             <div className="flex justify-between items-start mb-2">
               <div>
                 <div className="font-bold text-lg">{entry.symbol}</div>
-                <div className="text-sm text-gray-500">${entry.current_price.toFixed(2)}</div>
+                <div className="text-sm text-gray-500">${entry.current_price?.toFixed(2)}</div>
               </div>
               <div className="text-right">
-                <div className="text-emerald-400 font-bold">{entry.entry_quality?.toFixed(0) || entry.readiness_score?.toFixed(0) || 'N/A'}</div>
-                <div className="text-xs text-gray-500">Entry Quality</div>
+                <div className="text-emerald-400 font-bold text-xl">{entry.entry_quality?.toFixed(0) ?? 'N/A'}</div>
+                <div className="text-xs text-gray-500">Quality</div>
               </div>
             </div>
 
-            {/* Score breakdown */}
-            <div className="grid grid-cols-2 gap-2 text-xs mb-2">
-              {entry.support_score !== undefined && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Support:</span>
-                  <span className="text-gray-300">{entry.support_score.toFixed(0)}</span>
-                </div>
-              )}
-              {entry.capitulation_score !== undefined && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Capitulation:</span>
-                  <span className="text-gray-300">{entry.capitulation_score.toFixed(0)}</span>
-                </div>
-              )}
-              {entry.rsi !== undefined && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">RSI:</span>
-                  <span className={entry.rsi < 25 ? 'text-red-400' : 'text-gray-300'}>{entry.rsi.toFixed(0)}</span>
-                </div>
-              )}
-              {entry.distance_from_60_low_pct !== undefined && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">From Low:</span>
-                  <span className="text-gray-300">{entry.distance_from_60_low_pct.toFixed(1)}%</span>
-                </div>
-              )}
+            <div className="grid grid-cols-3 gap-2 text-xs mb-2">
+              <div className="flex flex-col items-center p-1 bg-gray-800 rounded">
+                <span className="text-gray-500">RSI</span>
+                <span className={entry.rsi < 25 ? 'text-red-400 font-bold' : 'text-gray-300'}>{entry.rsi?.toFixed(0)}</span>
+              </div>
+              <div className="flex flex-col items-center p-1 bg-gray-800 rounded">
+                <span className="text-gray-500">Cap</span>
+                <span className="text-orange-400">{entry.capitulation_score?.toFixed(0)}</span>
+              </div>
+              <div className="flex flex-col items-center p-1 bg-gray-800 rounded">
+                <span className="text-gray-500">From Low</span>
+                <span className="text-gray-300">{entry.distance_from_all_low_pct?.toFixed(1)}%</span>
+              </div>
             </div>
 
-            {/* Notes */}
             <div className="text-xs text-gray-400 pt-2 border-t border-gray-800">
-              {entry.notes?.map((note: string, i: number) => (
-                <div key={i}>{note}</div>
-              ))}
+              {entry.notes?.map((note: string, i: number) => <div key={i}>{note}</div>)}
             </div>
           </div>
         ))}
@@ -991,15 +1085,26 @@ function SniperPanel({ type, data }: SniperPanelProps) {
 export default function SignalsPage() {
   const [tab, setTab] = useState<Tab>('sniper-neg-gamma')
 
-  // Sniper entry scanners - moved to main component for accessibility
-  const { data: sniperData } = useQuery<{ negative_gamma: any[]; technical: any[] }>({
-    queryKey: ['sniper', 'entry'],
+  // Real gamma squeeze scanner — uses live options chains + Black-Scholes GEX
+  const { data: gammaData = [], isLoading: gammaLoading } = useQuery<any[]>({
+    queryKey: ['sniper', 'gamma'],
+    queryFn: async () => {
+      const r = await api.get('/sniper-gamma/scan', { params: { top_n: 200 } })
+      return r.data?.results ?? []
+    },
+    staleTime: 20 * 60_000,
+    enabled: tab === 'sniper-neg-gamma',
+  })
+
+  // Technical sniper — pure price action, no options needed
+  const { data: technicalData, isLoading: technicalLoading } = useQuery<{ negative_gamma: any[]; technical: any[] }>({
+    queryKey: ['sniper', 'technical'],
     queryFn: async () => {
       const r = await api.get('/sniper-entry/scan', { params: { top_n: 500 } })
-      const results = r.data?.results ?? { negative_gamma: [], technical: [] }
-      return results
+      return r.data?.results ?? { negative_gamma: [], technical: [] }
     },
     staleTime: 5 * 60_000,
+    enabled: tab === 'sniper-technical',
   })
 
   return (
@@ -1022,9 +1127,9 @@ export default function SignalsPage() {
       </div>
 
       <div>
-        {tab === 'sniper-neg-gamma'    && <SniperPanel type="negative_gamma" data={sniperData?.negative_gamma ?? []} />}
-        {tab === 'sniper-technical'    && <SniperPanel type="technical" data={sniperData?.technical ?? []} />}
-        {tab === 'confluence'          && <ConfluenceFunnel />}
+        {tab === 'sniper-neg-gamma' && <GammaSniperPanel data={gammaData} isLoading={gammaLoading} />}
+        {tab === 'sniper-technical' && <TechnicalSniperPanel data={technicalData?.technical ?? []} isLoading={technicalLoading} />}
+        {tab === 'confluence'       && <ConfluenceFunnel />}
       </div>
     </div>
   )

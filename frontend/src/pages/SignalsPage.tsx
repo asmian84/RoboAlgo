@@ -297,6 +297,8 @@ function RocketScannerPanel() {
   const [expandedSym, setExpandedSym] = useState<string | null>(null)
   const [trackedSymbols, setTrackedSymbols] = useState<Set<string>>(new Set())
   const [filterTracked, setFilterTracked] = useState(false)
+  const [priceFilter, setPriceFilter] = useState<'penny' | 'all'>('penny') // penny = <$5
+  const [sortBy, setSortBy] = useState<'score' | 'price' | 'rr'>('score')
 
   const { data: statusData } = useQuery({
     queryKey: ['rocket', 'status'],
@@ -367,9 +369,10 @@ function RocketScannerPanel() {
         </div>
       )}
 
-      {/* Filter toggle */}
+      {/* Filters & Sort */}
       {scanData && scanData.length > 0 && (
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-4 mb-3 flex-wrap">
+          {/* Tracked filter */}
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"
@@ -377,14 +380,59 @@ function RocketScannerPanel() {
               onChange={(e) => setFilterTracked(e.target.checked)}
               className="w-4 h-4"
             />
-            <span className="text-gray-400">Show tracked only ({trackedSymbols.size})</span>
+            <span className="text-gray-400">Tracked only ({trackedSymbols.size})</span>
           </label>
+
+          {/* Price filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-600">Price:</span>
+            <select
+              value={priceFilter}
+              onChange={(e) => setPriceFilter(e.target.value as 'penny' | 'all')}
+              className="px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-300"
+            >
+              <option value="penny">Penny (&lt;$5)</option>
+              <option value="all">All Prices</option>
+            </select>
+          </div>
+
+          {/* Sort by */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-600">Sort:</span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'score' | 'price' | 'rr')}
+              className="px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-300"
+            >
+              <option value="score">Rocket Score ↓</option>
+              <option value="rr">Risk:Reward ↓</option>
+              <option value="price">Price ↑</option>
+            </select>
+          </div>
         </div>
       )}
 
-      {/* Results — all gamma squeeze candidates */}
+      {/* Results — all gamma squeeze candidates, sorted & filtered */}
       {scanData && scanData.length > 0 && (() => {
-        const filtered = filterTracked ? scanData.filter(c => trackedSymbols.has(c.symbol)) : scanData
+        let filtered = scanData
+          // Price filter
+          .filter(c => {
+            const price = c.current_price ?? 0
+            if (priceFilter === 'penny') return price > 0 && price < 5
+            return true
+          })
+          // Tracked filter
+          .filter(c => !filterTracked || trackedSymbols.has(c.symbol))
+
+        // Sort
+        if (sortBy === 'score') {
+          filtered.sort((a, b) => (b.rocket_score ?? 0) - (a.rocket_score ?? 0))
+        } else if (sortBy === 'rr') {
+          filtered.sort((a, b) => (b.risk_reward ?? 0) - (a.risk_reward ?? 0))
+        } else if (sortBy === 'price') {
+          filtered.sort((a, b) => (a.current_price ?? 0) - (b.current_price ?? 0))
+        }
+
         return filtered.length > 0 ? (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
           {/* Column headers */}
@@ -513,7 +561,7 @@ function RocketScannerPanel() {
           </div>
         </div>
       ) : (
-        <div className="py-10 text-center text-gray-600 text-sm">No gamma squeeze candidates detected.</div>
+        <div className="py-10 text-center text-gray-600 text-sm">No candidates match filters ({priceFilter === 'penny' ? 'Penny stocks' : 'All prices'}{filterTracked ? ' · Tracked only' : ''}).</div>
       )
       })()}
 

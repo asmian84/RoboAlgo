@@ -5,17 +5,6 @@ import { useAlerts, AlertModal } from '../alerts/AlertManager'
 import { useLiveQuote, useMarketBreadth } from '../../api/hooks'
 import { useAuth } from '../../context/AuthContext'
 
-// ── Nav links ─────────────────────────────────────────────────────────────────
-
-const NAV_ITEMS = [
-  { path: '/command',   label: 'CMD',       title: 'Command Center'                                     },
-  { path: '/',          label: 'DASH',      title: 'Dashboard'                                          },
-  { path: '/chart',     label: 'CHART',     title: 'Charts'                                             },
-  { path: '/signals',   label: 'SCAN/SIG',  title: 'Scan & Signals — patterns, snipers, confluence'    },
-  { path: '/analytics', label: 'ANALYTICS', title: 'Analytics — Backtest & Evolution'                   },
-  { path: '/paper',     label: 'PAPER',     title: 'Paper Trading'                                      },
-] as const
-
 // ── Market Breadth pill — replaces the old "SAFE_MODE" safety pill ────────────
 
 // Maps internal safety state (bullish-framed engine score) to market breadth direction.
@@ -102,26 +91,6 @@ export default function TopBar({ safety, currentSymbol }: Props) {
   return (
     <>
     <div className="flex items-center gap-2 px-3 h-12 bg-gray-950 border-b border-gray-800 select-none overflow-hidden">
-      {/* Brand */}
-      <div className="flex items-center gap-2 mr-2 shrink-0">
-        <span className="text-xs font-bold text-emerald-400 tracking-widest">ROBOALGO</span>
-        <span className="text-[10px] text-gray-600">v3</span>
-      </div>
-
-      {/* Nav items */}
-      <nav className="flex items-center gap-0.5">
-        {NAV_ITEMS.map(({ path, label, title }) => (
-          <button
-            key={path}
-            title={title}
-            onClick={() => navigate(path)}
-            className="px-2.5 py-1 rounded text-[11px] font-bold text-gray-500 hover:text-gray-200 hover:bg-gray-800 transition-colors"
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
-
       {/* Divider */}
       <div className="w-px h-4 bg-gray-800 mx-1 shrink-0" />
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useCommandCenter } from '../../api/hooks'
 import TopBar from './TopBar'
-import WatchlistPanel from '../terminal/WatchlistPanel'
+import SideNav from './SideNav'
 import CommandPalette from '../terminal/CommandPalette'
 
 interface Props {
@@ -50,19 +50,16 @@ export default function TerminalLayout({ children }: Props) {
     <>
       <CommandPalette isOpen={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
-      <div className="grid h-screen overflow-hidden bg-gray-950 text-gray-100" style={{ gridTemplateRows: '48px 1fr' }}>
-        <div className="border-b border-gray-800">
-          <TopBar safety={data?.market_safety} currentSymbol={activeSymbol} />
-        </div>
+      <div className="flex h-screen overflow-hidden bg-gray-950 text-gray-100">
+        {/* Left nav */}
+        <SideNav />
 
-        <div className="grid min-h-0 grid-cols-1 md:grid-cols-[240px_1fr]">
-          <aside className="flex flex-col min-h-0 border-r border-gray-800 bg-gray-950">
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <WatchlistPanel signals={signals} selectedSymbol={activeSymbol} />
-            </div>
-          </aside>
-
-          <main className="min-h-0 overflow-auto bg-gray-950 p-2">{children}</main>
+        {/* Right: topbar + content stacked */}
+        <div className="flex flex-col flex-1 min-w-0">
+          <div className="shrink-0 border-b border-gray-800">
+            <TopBar safety={data?.market_safety} currentSymbol={activeSymbol} />
+          </div>
+          <main className="flex-1 min-h-0 overflow-auto bg-gray-950 p-2">{children}</main>
         </div>
       </div>
     </>

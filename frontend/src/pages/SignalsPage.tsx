@@ -297,7 +297,7 @@ function RocketScannerPanel() {
   const [expandedSym, setExpandedSym] = useState<string | null>(null)
   const [trackedSymbols, setTrackedSymbols] = useState<Set<string>>(new Set())
   const [filterTracked, setFilterTracked] = useState(false)
-  const [priceFilter, setPriceFilter] = useState<'penny' | 'all'>('penny') // penny = <$5
+  const [priceFilter, setPriceFilter] = useState<'penny' | 'all'>('all') // penny = <$5, all = no limit
   const [sortBy, setSortBy] = useState<'score' | 'price' | 'rr'>('score')
 
   const { data: statusData } = useQuery({

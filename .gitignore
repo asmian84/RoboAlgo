@@ -1,8 +1,7 @@
-# Environment & secrets
+# Environment variables
 .env
 .env.local
 .env.*.local
-secrets/
 
 # Python
 __pycache__/
@@ -10,9 +9,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-venv/
-ENV/
-env/
 build/
 develop-eggs/
 dist/
@@ -28,19 +24,16 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-pip-log.txt
-pip-delete-this-directory.txt
-.pytest_cache/
-.coverage
-htmlcov/
+venv/
+ENV/
+env/
 
-# Node & frontend
+# Frontend
 node_modules/
-frontend/dist/
-frontend/build/
-frontend/.turbo/
-*.tsbuildinfo
-.pnpm-debug.log*
+npm-debug.log
+yarn-error.log
+dist/
+.DS_Store
 
 # IDE
 .vscode/
@@ -48,23 +41,8 @@ frontend/.turbo/
 *.swp
 *.swo
 *~
-.DS_Store
-*.iml
-
-# Logs
-*.log
-logs/
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
-postgres/
-
-# Misc
-.claude/
-.turbo/
-tmp/
-temp/
-cache/
-*.tmp

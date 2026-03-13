@@ -1,36 +1,39 @@
 services:
+  # FastAPI Backend
   - type: web
-    name: roboalgo-backend
-    runtime: python
+    name: roboalgo-api
+    env: python
     plan: standard
     buildCommand: pip install -r requirements.txt
-    startCommand: "uvicorn api.main:app --host 0.0.0.0 --port $PORT"
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11
+        value: "3.11"
       - key: DATABASE_URL
-        scope: shared
-      - key: FINNHUB_API_KEY
-        scope: shared
-      - key: YFINANCE_API_KEY
-        scope: shared
+        fromDatabase:
+          name: postgres_db
+          property: connectionString
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 10
 
-  - type: static
-    name: roboalgo-frontend
-    staticPublishPath: frontend/dist
+  # React Frontend
+  - type: static_site
+    name: roboalgo-web
     buildCommand: cd frontend && npm install && npm run build
-    envVars:
-      - key: VITE_API_URL
-        value: https://roboalgo-backend.onrender.com
+    staticPublishPath: frontend/dist
+    routes:
+      - path: /*
+        destination: /index.html
 
+  # PostgreSQL Database
   - type: pserv
-    name: roboalgo-postgres
-    plan: free
-    ipAllowList: []
-    envVars:
-      - key: POSTGRES_DB
-        value: roboalgo
-      - key: POSTGRES_USER
-        value: postgres
-      - key: POSTGRES_PASSWORD
-        scope: shared
+    name: postgres_db
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Allow all
+
+envVars:
+  - key: VITE_API_BASE_URL
+    value: https://roboalgo-api.onrender.com

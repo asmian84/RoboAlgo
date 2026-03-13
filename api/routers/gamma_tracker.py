@@ -10,7 +10,7 @@ import asyncio
 import time
 from typing import Optional
 
-router = APIRouter(prefix="/gamma-tracker", tags=["gamma_tracker"])
+router = APIRouter(tags=["gamma_tracker"])
 logger = logging.getLogger(__name__)
 
 # Global cache

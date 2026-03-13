@@ -11,7 +11,7 @@ import asyncio
 import time
 from typing import Optional
 
-router = APIRouter(prefix="/sniper-entry", tags=["sniper_entry"])
+router = APIRouter(tags=["sniper_entry"])
 logger = logging.getLogger(__name__)
 
 # Global cache
@@ -42,7 +42,7 @@ def _run_sniper_scan(
     technical_entries = []
 
     for sym, df in price_data.items():
-        if df is None or len(df) < 50:
+        if df is None or len(df) < 30:
             continue
 
         try:
@@ -58,108 +58,122 @@ def _run_sniper_scan(
             if current_price <= 0:
                 continue
 
+            n = len(close)
+
+            # ── WILDER'S RSI (proper calculation) ──
+            delta = np.diff(close)
+            gain = np.where(delta > 0, delta, 0.0)
+            loss = np.where(delta < 0, -delta, 0.0)
+            period = 14
+            if len(gain) >= period:
+                avg_gain = np.mean(gain[:period])
+                avg_loss = np.mean(loss[:period])
+                for g, l in zip(gain[period:], loss[period:]):
+                    avg_gain = (avg_gain * (period - 1) + g) / period
+                    avg_loss = (avg_loss * (period - 1) + l) / period
+                rsi = 100 - (100 / (1 + avg_gain / avg_loss)) if avg_loss > 0 else 100.0
+            else:
+                rsi = 50.0
+
             # ── SUPPORT / LOCAL LOW ──
-            # Find lowest point in last 60 bars
-            low_60 = np.min(low[-60:])
-            low_200 = np.min(low[-200:])
-            distance_from_60_low = ((current_price - low_60) / low_60 * 100) if low_60 > 0 else 0
-            distance_from_200_low = ((current_price - low_200) / low_200 * 100) if low_200 > 0 else 0
+            bars_back = min(60, n)
+            bars_back_200 = min(n, n)
+            low_60  = np.min(low[-bars_back:])
+            low_all = np.min(low)
+            distance_from_60_low  = ((current_price - low_60)  / low_60  * 100) if low_60  > 0 else 0
+            distance_from_all_low = ((current_price - low_all) / low_all * 100) if low_all > 0 else 0
 
-            # Must be CLOSE to a low (within 3%)
-            at_local_low = distance_from_60_low < 3
-            near_52w_low = distance_from_200_low < 5
+            # Proximity buckets: at_low (<10%), near_low (10-25%), bouncing (25-40%)
+            at_local_low   = distance_from_60_low  < 10
+            near_52w_low   = distance_from_all_low < 15
+            bouncing_off   = distance_from_all_low < 40
 
-            if not (at_local_low or near_52w_low):
+            if not bouncing_off:
                 continue
 
-            # ── CAPITULATION SIGNALS ──
-            # 1. RSI extreme oversold
-            delta = np.diff(close)
-            gain = np.where(delta > 0, delta, 0)
-            loss = np.where(delta < 0, -delta, 0)
-            avg_gain = np.mean(gain[-14:])
-            avg_loss = np.mean(loss[-14:])
-            rs = avg_gain / avg_loss if avg_loss > 0 else 0
-            rsi = 100 - (100 / (1 + rs)) if rs > 0 else 100
+            # ── OVERSOLD FLAGS ──
+            rsi_extreme  = rsi < 25
+            rsi_oversold = rsi < 35
+            rsi_weak     = rsi < 45
 
-            rsi_oversold = rsi < 25
-            extreme_oversold = rsi < 15
+            # ── MACD (EMA-based) ──
+            def ema(arr, span):
+                k = 2 / (span + 1)
+                e = arr[0]
+                for v in arr[1:]:
+                    e = v * k + e * (1 - k)
+                return e
 
-            # 2. MACD - below signal and starting to diverge
-            sma12 = np.mean(close[-12:])
-            sma26 = np.mean(close[-26:])
-            macd = sma12 - sma26
-            signal = np.mean([sma12 - sma26 for sma12, sma26 in
-                            zip(np.convolve(close, np.ones(12)/12, mode='valid'),
-                                np.convolve(close, np.ones(26)/26, mode='valid'))][-9:])
-            macd_below_signal = macd < signal
-            macd_bouncing = (close[-1] - close[-5]) > 0  # Price up last 5 bars
+            if n >= 26:
+                ema12 = ema(close, 12)
+                ema26 = ema(close, 26)
+                macd_val = ema12 - ema26
+                # Signal: 9-period EMA of MACD (approximate)
+                macd_series = [ema(close[:i], 12) - ema(close[:i], 26) for i in range(26, n+1)]
+                signal_val = ema(np.array(macd_series), 9) if len(macd_series) >= 9 else macd_val
+                macd_below_signal = macd_val < signal_val
+                macd_bouncing = close[-1] > close[-5] if n >= 5 else False
+                macd_histogram_rising = (macd_val - signal_val) > (macd_series[-2] - signal_val) if len(macd_series) >= 2 else False
+            else:
+                macd_below_signal = False
+                macd_bouncing = close[-1] > close[-3] if n >= 3 else False
+                macd_histogram_rising = False
 
-            # 3. Volume Capitulation
-            recent_vol = np.mean(volume[-5:])
-            vol_20 = np.mean(volume[-20:])
-            vol_60 = np.mean(volume[-60:])
-            volume_dried_up = recent_vol < vol_20 * 0.7  # Current vol < 70% of 20-day avg
-            vol_down_days = np.sum(np.diff(close[-5:]) < 0)  # Multiple down days
+            # ── VOLUME CAPITULATION ──
+            recent_vol   = np.mean(volume[-3:])
+            vol_20       = np.mean(volume[-min(20, n):])
+            vol_60       = np.mean(volume[-min(60, n):])
+            volume_dried_up    = recent_vol < vol_20 * 0.75
+            volume_spike_down  = recent_vol > vol_20 * 1.5   # big sell volume = capitulation
+            vol_accumulating   = recent_vol > vol_20 * 1.2   # rising volume = accumulation
 
-            # 4. Time in oversold
-            rsi_oversold_days = 0
-            for i in range(1, 21):
-                delta_i = np.diff(close[-i-14:-i])
-                gain_i = np.where(delta_i > 0, delta_i, 0)
-                loss_i = np.where(delta_i < 0, -delta_i, 0)
-                avg_gain_i = np.mean(gain_i)
-                avg_loss_i = np.mean(loss_i)
-                rs_i = avg_gain_i / avg_loss_i if avg_loss_i > 0 else 0
-                rsi_i = 100 - (100 / (1 + rs_i)) if rs_i > 0 else 100
-                if rsi_i < 25:
-                    rsi_oversold_days += 1
-                else:
-                    break
-
-            # 5. Bounce setup (volume increasing on up days)
-            last_5_up_vol = []
-            for i in range(1, 6):
-                if close[-i] > close[-(i+1)]:
-                    last_5_up_vol.append(volume[-i])
-            up_vol_avg = np.mean(last_5_up_vol) if last_5_up_vol else 0
-            vol_avg_overall = np.mean(volume[-20:])
-            bounce_vol_strong = up_vol_avg > vol_avg_overall * 0.8
+            # ── BB WIDTH (volatility squeeze) ──
+            sma20 = np.mean(close[-min(20, n):])
+            std20 = np.std(close[-min(20, n):])
+            bb_pct = (4 * std20 / sma20 * 100) if sma20 > 0 else 100
+            volatility_compressed = bb_pct < 6
 
             # ── ENTRY SCORE (0-100) ──
-            # Components:
-            support_score = (100 - distance_from_60_low * 10) if distance_from_60_low < 5 else (100 - distance_from_200_low * 5)
+            # Support score: closer to low = better
+            if at_local_low:
+                support_score = 100 - distance_from_60_low * 5
+            elif near_52w_low:
+                support_score = 75 - distance_from_all_low * 2
+            else:
+                support_score = max(0, 50 - distance_from_all_low)
+
+            # Capitulation score: RSI oversold + volume signals
             capitulation_score = (
-                (40 if extreme_oversold else 25 if rsi_oversold else 0) +
-                (15 if macd_below_signal else 0) +
+                (35 if rsi_extreme else 20 if rsi_oversold else 10 if rsi_weak else 0) +
                 (20 if volume_dried_up else 0) +
-                (10 if vol_down_days >= 2 else 0)
+                (15 if volume_spike_down else 0) +
+                (15 if macd_below_signal else 0) +
+                (10 if not macd_bouncing else 0)  # Still falling = setup building
             )
+
+            # Bounce score: early signs of reversal
             bounce_score = (
-                (15 if macd_bouncing else 0) +
-                (15 if bounce_vol_strong else 0)
+                (25 if macd_bouncing else 0) +
+                (20 if vol_accumulating else 0) +
+                (20 if macd_histogram_rising else 0) +
+                (15 if rsi > 30 and rsi_oversold else 0)   # RSI recovering from oversold
             )
-            time_score = min(rsi_oversold_days * 2, 20)  # Max 20 points
 
-            entry_quality = (support_score * 0.25 + capitulation_score * 0.40 + bounce_score * 0.20 + time_score * 0.15)
+            entry_quality = (
+                support_score     * 0.30 +
+                capitulation_score * 0.45 +
+                bounce_score      * 0.25
+            )
 
-            # Must have minimum capitulation
-            if capitulation_score < 30:
+            # Minimum bar: must have SOME oversold + near a low
+            if capitulation_score < 10 or entry_quality < 15:
                 continue
 
-            # ── NEGATIVE GAMMA CHECK ──
-            # Simple proxy: volatility compression + price at low = gamma trap
-            sma20 = np.mean(close[-20:])
-            std20 = np.std(close[-20:])
-            bb_width = 2 * std20
-            bb_pct = (bb_width / sma20) * 100 if sma20 > 0 else 100
-
-            volatility_compressed = bb_pct < 8
+            # ── NEGATIVE GAMMA PROXY ──
             negative_gamma_proxy = (
-                at_local_low and
+                (at_local_low or near_52w_low) and
                 rsi_oversold and
-                volatility_compressed and
-                capitulation_score > 40
+                volatility_compressed
             )
 
             # ── Build result ──
@@ -170,18 +184,18 @@ def _run_sniper_scan(
                 'support_score': float(support_score),
                 'capitulation_score': float(capitulation_score),
                 'bounce_score': float(bounce_score),
-                'time_score': float(time_score),
                 'rsi': float(rsi),
-                'rsi_oversold_days': int(rsi_oversold_days),
                 'distance_from_60_low_pct': float(distance_from_60_low),
-                'distance_from_200_low_pct': float(distance_from_200_low),
+                'distance_from_all_low_pct': float(distance_from_all_low),
                 'volume_dried_up': bool(volume_dried_up),
                 'macd_bouncing': bool(macd_bouncing),
                 'bb_width_pct': float(bb_pct),
+                'volume_dried_up': bool(volume_dried_up),
+                'macd_bouncing': bool(macd_bouncing),
                 'notes': [
-                    f"RSI: {rsi:.0f} (oversold {rsi_oversold_days}d)",
-                    f"Price: {distance_from_60_low:.1f}% from 60-day low",
-                    f"Cap Score: {capitulation_score:.0f}/100"
+                    f"RSI: {rsi:.0f}{'  ⚡ extreme oversold' if rsi_extreme else '  oversold' if rsi_oversold else ''}",
+                    f"Price: {distance_from_60_low:.1f}% from 60d low  /  {distance_from_all_low:.1f}% from all-time low",
+                    f"Cap: {capitulation_score:.0f}  Bounce: {bounce_score:.0f}  Quality: {entry_quality:.0f}",
                 ]
             }
 

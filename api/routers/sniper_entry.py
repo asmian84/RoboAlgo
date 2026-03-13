@@ -131,7 +131,7 @@ def _run_sniper_scan(
             sma20 = np.mean(close[-min(20, n):])
             std20 = np.std(close[-min(20, n):])
             bb_pct = (4 * std20 / sma20 * 100) if sma20 > 0 else 100
-            volatility_compressed = bb_pct < 6
+            volatility_compressed = bb_pct < 20  # loosened — high-vol market
 
             # ── ENTRY SCORE (0-100) ──
             # Support score: closer to low = better

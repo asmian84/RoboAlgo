@@ -18,7 +18,7 @@ from api.routers import (
     geometry, price_distribution,
     signal_confidence, strategy_health,
     options_data,
-    rocket_scanner, gamma_tracker,
+    rocket_scanner, gamma_tracker, sniper_entry,
 )
 
 app = FastAPI(title="RoboAlgo API", version="1.0.0")
@@ -74,6 +74,7 @@ app.include_router(strategy_health.router,   prefix="/api/strategy-health",   ta
 app.include_router(options_data.router,      prefix="/api/options",           tags=["options_data"])
 app.include_router(rocket_scanner.router,    prefix="/api/rocket",            tags=["rocket_scanner"])
 app.include_router(gamma_tracker.router,     prefix="/api/gamma-tracker",     tags=["gamma_tracker"])
+app.include_router(sniper_entry.router,      prefix="/api/sniper-entry",      tags=["sniper_entry"])
 
 
 @app.get("/api/health")

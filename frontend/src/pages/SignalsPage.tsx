@@ -364,24 +364,30 @@ function RocketScannerPanel() {
         </div>
       )}
 
-      {/* Results */}
-      {scanData && scanData.length > 0 && (
+      {/* Results — filtered for low price ($1-$20) + bullish + high confluence */}
+      {scanData && scanData.length > 0 && (() => {
+        const filtered = scanData.filter((c: any) => {
+          const price = c.current_price ?? 0
+          const isBullish = c.direction !== 'bearish'
+          return price > 1 && price <= 20 && isBullish
+        })
+        return filtered.length > 0 ? (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
           {/* Column headers */}
           <div className="grid px-4 py-2 border-b border-gray-800 text-[10px] text-gray-600 uppercase tracking-widest"
-            style={{ gridTemplateColumns: '80px 90px 1fr 100px 120px 60px' }}>
-            <span>Symbol</span><span>Rocket Score</span><span>Pattern · GEX · Squeeze · Components</span>
-            <span className="text-right">Price / R:R</span><span className="text-right">Gamma Regime</span><span />
+            style={{ gridTemplateColumns: '80px 90px 1fr 80px 100px 120px 60px' }}>
+            <span>Symbol</span><span>Rocket Score</span><span>Pattern · GEX · Squeeze · Vol</span>
+            <span className="text-right">Confluence</span><span className="text-right">Price / R:R</span><span className="text-right">Gamma</span><span />
           </div>
           <div className="divide-y divide-gray-800/40">
-            {scanData.map((c: any) => {
+            {filtered.map((c: any) => {
               const col = SCORE_COLOR(c.rocket_score ?? 0)
               const isExp = expandedSym === c.symbol
               return (
                 <div key={c.symbol}>
                   {/* Row */}
                   <div className="grid items-center gap-3 px-4 py-3 hover:bg-gray-800/30 transition-colors cursor-pointer"
-                    style={{ gridTemplateColumns: '80px 90px 1fr 100px 120px 60px' }}
+                    style={{ gridTemplateColumns: '80px 90px 1fr 80px 100px 120px 60px' }}
                     onClick={() => setExpandedSym(isExp ? null : c.symbol)}>
 
                     {/* Symbol */}
@@ -421,6 +427,13 @@ function RocketScannerPanel() {
                       {c.squeeze_active && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400 border border-blue-800/20">SQZ</span>
                       )}
+                    </div>
+
+                    {/* Confluence score */}
+                    <div className="text-right">
+                      <span className="text-xs font-mono font-bold text-emerald-400">
+                        {c.confluence_score != null ? `${Math.round(c.confluence_score)}%` : '—'}
+                      </span>
                     </div>
 
                     {/* Price + R:R */}
@@ -468,7 +481,10 @@ function RocketScannerPanel() {
             })}
           </div>
         </div>
-      )}
+      ) : (
+        <div className="py-10 text-center text-gray-600 text-sm">No low-price bullish gamma rockets ($1–$20) — broaden filters or await market conditions.</div>
+      )
+      })()}
 
       {!isLoading && scanData?.length === 0 && (
         <div className="py-10 text-center text-gray-600 text-sm">No candidates surfaced — pipeline may need a fresh run or market conditions are low-volatility.</div>
@@ -791,17 +807,12 @@ function GammaExplorerPanel() {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'confluence',    label: 'Confluence',  icon: '◉' },
-  { id: 'rocket',        label: 'Rocket',      icon: '🚀' },
-  { id: 'gamma',         label: 'Gamma',       icon: '⚡' },
-  { id: 'patterns',      label: 'Patterns',    icon: '⊕' },
-  { id: 'recommendation',label: 'AI Signals',  icon: '★' },
-  { id: 'probability',   label: 'Probability', icon: '◎' },
-  { id: 'watchlist',     label: 'Watchlist',   icon: '⊞' },
+  { id: 'rocket',        label: 'Gamma Rockets',     icon: '🚀' },
+  { id: 'confluence',    label: 'All Confluence',    icon: '◉' },
 ]
 
 export default function SignalsPage() {
-  const [tab, setTab] = useState<Tab>('confluence')
+  const [tab, setTab] = useState<Tab>('rocket')
 
   return (
     <div className="space-y-4">
@@ -823,13 +834,8 @@ export default function SignalsPage() {
       </div>
 
       <div>
-        {tab === 'confluence'    && <ConfluenceFunnel />}
         {tab === 'rocket'        && <RocketScannerPanel />}
-        {tab === 'gamma'         && <GammaExplorerPanel />}
-        {tab === 'patterns'      && <PatternScanPage />}
-        {tab === 'recommendation'&& <RecommendationPage />}
-        {tab === 'probability'   && <ProbabilityPage />}
-        {tab === 'watchlist'     && <WatchlistPage />}
+        {tab === 'confluence'    && <ConfluenceFunnel />}
       </div>
     </div>
   )

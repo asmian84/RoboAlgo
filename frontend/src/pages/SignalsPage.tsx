@@ -366,11 +366,7 @@ function RocketScannerPanel() {
 
       {/* Results — filtered for low price ($1-$20) + bullish + high confluence */}
       {scanData && scanData.length > 0 && (() => {
-        const filtered = scanData.filter((c: any) => {
-          const price = c.current_price ?? 0
-          const isBullish = c.direction !== 'bearish'
-          return price > 1 && price <= 20 && isBullish
-        })
+        const filtered = scanData.slice(0, 2)
         return filtered.length > 0 ? (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
           {/* Column headers */}
@@ -482,7 +478,7 @@ function RocketScannerPanel() {
           </div>
         </div>
       ) : (
-        <div className="py-10 text-center text-gray-600 text-sm">No low-price bullish gamma rockets ($1–$20) — broaden filters or await market conditions.</div>
+        <div className="py-10 text-center text-gray-600 text-sm">No gamma squeeze candidates detected.</div>
       )
       })()}
 

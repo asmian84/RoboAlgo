@@ -1764,8 +1764,8 @@ export default function ChartPage() {
   const detectedPatterns = (() => {
     const sorted = (patterns || [])
       .filter((p) => {
-        const status = p.status ?? 'NOT_PRESENT'
-        return status !== 'NOT_PRESENT' && status !== 'FAILED'
+        const status = p.status ?? 'FORMING'
+        return status !== 'NOT_PRESENT' && status !== 'FAILED' && status !== 'FORMING'
       })
       .sort((a, b) => (b.confidence ?? b.probability ?? b.strength * 100) - (a.confidence ?? a.probability ?? a.strength * 100))
     // Deduplicate by pattern_name — keep highest-confidence entry
@@ -2696,7 +2696,7 @@ export default function ChartPage() {
                 return (
                   <div
                     key={`${p.date}-${p.pattern_name}-${i}`}
-                    className={`rounded border transition-all overflow-hidden ${
+                    className={`rounded border transition-all overflow-hidden h-[68px] flex flex-col ${
                       selected ? 'border-gray-600 shadow-sm' : 'border-gray-800/80'
                     }`}
                     style={{
@@ -2707,7 +2707,7 @@ export default function ChartPage() {
                   >
                     {/* Card header — click to select / deselect overlay */}
                     <button
-                      className="w-full text-left px-2 pt-2 pb-1.5 hover:bg-white/[0.02] transition-colors"
+                      className="w-full text-left px-2 pt-2 pb-1.5 hover:bg-white/[0.02] transition-colors flex-1"
                       onClick={() => setActivePatternName(prev => prev === p.pattern_name ? null : p.pattern_name)}
                     >
                       <div className="flex items-center gap-1.5 mb-1">
@@ -2752,8 +2752,9 @@ export default function ChartPage() {
                       </div>
                     </button>
 
-                    {/* Always-visible analysis section — no click required */}
-                    <div className="px-2 pb-2 pt-0.5 border-t border-gray-800/30 space-y-1.5">
+                    {/* Analysis section — only visible when card is selected */}
+                    {selected && (
+                    <div className="px-2 pb-2 pt-0.5 border-t border-gray-800/30 space-y-1.5 flex-1 overflow-y-auto">
 
                       {/* Key levels row — always shown */}
                       {hasBreakout && (
@@ -2863,6 +2864,7 @@ export default function ChartPage() {
                         </div>
                       )}
                     </div>
+                    )}
                   </div>
                 )
               })

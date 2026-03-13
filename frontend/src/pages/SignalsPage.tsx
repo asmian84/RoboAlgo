@@ -27,7 +27,7 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Tab = 'confluence' | 'rocket' | 'gamma' | 'patterns' | 'recommendation' | 'probability' | 'watchlist'
+type Tab = 'confluence' | 'sniper-neg-gamma' | 'sniper-technical' | 'gamma' | 'patterns' | 'recommendation' | 'probability' | 'watchlist'
 
 type Profile = 'scalper' | 'daytrader' | 'swing' | 'investor' | 'all'
 
@@ -890,12 +890,117 @@ function GammaExplorerPanel() {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'rocket',        label: 'Gamma Rockets',     icon: '🚀' },
-  { id: 'confluence',    label: 'All Confluence',    icon: '◉' },
+  { id: 'sniper-neg-gamma',    label: 'Gamma Sniper',           icon: '🎯' },
+  { id: 'sniper-technical',    label: 'Technical Sniper',        icon: '📍' },
+  { id: 'confluence',          label: 'All Confluence',          icon: '◉' },
 ]
 
+// ── Sniper Panel ──────────────────────────────────────────────────────────────
+interface SniperPanelProps {
+  type: 'negative_gamma' | 'technical'
+  data: any[]
+}
+
+function SniperPanel({ type, data }: SniperPanelProps) {
+  const navigate = useNavigate()
+  const title = type === 'negative_gamma' ? 'Negative Gamma Sniper Entries' : 'Technical Sniper Entries'
+  const subtitle = type === 'negative_gamma'
+    ? 'Stocks at absolute bottoms with options-confirmed gamma traps'
+    : 'Stocks at absolute bottoms with RSI/MACD capitulation (includes no-options stocks like EONR)'
+
+  if (!data || data.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-xl font-bold">{title}</h2>
+          <p className="text-sm text-gray-500">{subtitle}</p>
+        </div>
+        <div className="p-8 text-center text-gray-600">No {type === 'negative_gamma' ? 'negative gamma' : 'technical'} entry points found yet</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-bold">{title}</h2>
+        <p className="text-sm text-gray-500">{subtitle}</p>
+        <p className="text-sm text-emerald-400 mt-1">{data.length} candidates</p>
+      </div>
+
+      {/* Table */}
+      <div className="grid gap-2 grid-cols-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))' }}>
+        {data.map((entry: any) => (
+          <div
+            key={entry.symbol}
+            onClick={() => navigate(`/chart/${entry.symbol}`)}
+            className="p-3 bg-gray-900 border border-gray-800 rounded hover:border-emerald-700 cursor-pointer transition"
+          >
+            <div className="flex justify-between items-start mb-2">
+              <div>
+                <div className="font-bold text-lg">{entry.symbol}</div>
+                <div className="text-sm text-gray-500">${entry.current_price.toFixed(2)}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-emerald-400 font-bold">{entry.entry_quality?.toFixed(0) || entry.readiness_score?.toFixed(0) || 'N/A'}</div>
+                <div className="text-xs text-gray-500">Entry Quality</div>
+              </div>
+            </div>
+
+            {/* Score breakdown */}
+            <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+              {entry.support_score !== undefined && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Support:</span>
+                  <span className="text-gray-300">{entry.support_score.toFixed(0)}</span>
+                </div>
+              )}
+              {entry.capitulation_score !== undefined && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Capitulation:</span>
+                  <span className="text-gray-300">{entry.capitulation_score.toFixed(0)}</span>
+                </div>
+              )}
+              {entry.rsi !== undefined && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">RSI:</span>
+                  <span className={entry.rsi < 25 ? 'text-red-400' : 'text-gray-300'}>{entry.rsi.toFixed(0)}</span>
+                </div>
+              )}
+              {entry.distance_from_60_low_pct !== undefined && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">From Low:</span>
+                  <span className="text-gray-300">{entry.distance_from_60_low_pct.toFixed(1)}%</span>
+                </div>
+              )}
+            </div>
+
+            {/* Notes */}
+            <div className="text-xs text-gray-400 pt-2 border-t border-gray-800">
+              {entry.notes?.map((note: string, i: number) => (
+                <div key={i}>{note}</div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function SignalsPage() {
-  const [tab, setTab] = useState<Tab>('rocket')
+  const [tab, setTab] = useState<Tab>('sniper-neg-gamma')
+
+  // Sniper entry scanners - moved to main component for accessibility
+  const { data: sniperData } = useQuery<{ negative_gamma: any[]; technical: any[] }>({
+    queryKey: ['sniper', 'entry'],
+    queryFn: async () => {
+      const r = await api.get('/sniper-entry/scan', { params: { top_n: 500 } })
+      const results = r.data?.results ?? { negative_gamma: [], technical: [] }
+      return results
+    },
+    staleTime: 5 * 60_000,
+  })
 
   return (
     <div className="space-y-4">
@@ -917,8 +1022,9 @@ export default function SignalsPage() {
       </div>
 
       <div>
-        {tab === 'rocket'        && <RocketScannerPanel />}
-        {tab === 'confluence'    && <ConfluenceFunnel />}
+        {tab === 'sniper-neg-gamma'    && <SniperPanel type="negative_gamma" data={sniperData?.negative_gamma ?? []} />}
+        {tab === 'sniper-technical'    && <SniperPanel type="technical" data={sniperData?.technical ?? []} />}
+        {tab === 'confluence'          && <ConfluenceFunnel />}
       </div>
     </div>
   )

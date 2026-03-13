@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@layer base {
+  :root {
+    --ra-bullish: #22c55e;
+    --ra-bearish: #ef4444;
+    --ra-compression: #3b82f6;
+    --ra-expansion: #f97316;
+    --ra-liquidity: #a855f7;
+  }
+
+  body {
+    @apply bg-gray-950 text-gray-100 antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    @apply w-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-900;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded bg-gray-700;
+  }
+}
+
+@layer utilities {
+  .gap-compact {
+    @apply gap-1;
+  }
+
+  .gap-normal {
+    @apply gap-2;
+  }
+
+  .gap-loose {
+    @apply gap-4;
+  }
+}

@@ -877,9 +877,9 @@ function ExpertView({
         <span className="text-xs text-gray-600">{volRegime} · {isComp ? 'COMPRESSED' : isBreakout ? 'BREAKOUT' : 'TRENDING'}</span>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:items-stretch">
         {/* Left col */}
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           {/* Stage gates */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-2">
             <div className="flex items-center justify-between">
@@ -933,7 +933,7 @@ function ExpertView({
         </div>
 
         {/* Right col */}
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           {/* Trade levels */}
           {entry > 0 && (
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -995,32 +995,51 @@ function ExpertView({
             <BearishETFListCard etfList={etfList} onSelect={onShortETF} />
           )}
 
-          {/* All patterns */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold mb-3">
-              All Patterns ({patterns.length})
-            </p>
-            {patterns.length === 0 ? (
-              <p className="text-xs text-gray-600">None detected</p>
-            ) : (
-              <div className="space-y-1.5">
-                {patterns.map((p, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs">
-                    <span className={`w-16 shrink-0 ${
-                      p.status === 'BREAKOUT' ? 'text-emerald-400' :
-                      p.status === 'READY'    ? 'text-amber-400'   :
-                      p.status === 'FORMING'  ? 'text-gray-400'    : 'text-gray-600'
-                    }`}>{p.status}</span>
-                    <span className="text-gray-300 flex-1 truncate">{p.pattern_name}</span>
-                    <span className={`${p.direction === 'bullish' ? 'text-emerald-500' : p.direction === 'bearish' ? 'text-red-400' : 'text-gray-500'}`}>
-                      {p.direction === 'bullish' ? '↑' : p.direction === 'bearish' ? '↓' : '→'}
-                    </span>
-                    <span className="text-gray-600 font-mono">{fmt(p.confidence ?? p.probability, 0)}%</span>
-                  </div>
-                ))}
+          {/* All patterns — READY/BREAKOUT/COMPLETED only, top 10 pinned + rest scrollable */}
+          {(() => {
+            const readyPatterns = patterns
+              .filter(p => ['READY', 'BREAKOUT', 'COMPLETED'].includes(p.status ?? ''))
+              .sort((a, b) => (b.confidence ?? b.probability ?? 0) - (a.confidence ?? a.probability ?? 0))
+            const top10  = readyPatterns.slice(0, 10)
+            const extras = readyPatterns.slice(10)
+            const PatternRow = ({ p, i }: { p: (typeof patterns)[number]; i: number }) => (
+              <div key={i} className="flex items-center gap-2 text-xs py-0.5 border-b border-gray-800/30 last:border-0">
+                <span className={`w-16 shrink-0 font-semibold ${
+                  p.status === 'BREAKOUT' ? 'text-emerald-400' :
+                  p.status === 'READY'    ? 'text-amber-400'   :
+                  p.status === 'COMPLETED'? 'text-sky-400'     : 'text-gray-600'
+                }`}>{p.status}</span>
+                <span className="text-gray-200 flex-1 truncate">{p.pattern_name}</span>
+                <span className={`${p.direction === 'bullish' ? 'text-emerald-500' : p.direction === 'bearish' ? 'text-red-400' : 'text-gray-500'}`}>
+                  {p.direction === 'bullish' ? '↑' : p.direction === 'bearish' ? '↓' : '→'}
+                </span>
+                <span className="text-gray-600 font-mono w-8 text-right">{fmt(p.confidence ?? p.probability, 0)}%</span>
               </div>
-            )}
-          </div>
+            )
+            return (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex-1 flex flex-col min-h-0">
+                <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold mb-3 shrink-0">
+                  Ready Patterns ({readyPatterns.length})
+                </p>
+                {readyPatterns.length === 0 ? (
+                  <p className="text-xs text-gray-600">No confirmed patterns yet</p>
+                ) : (
+                  <div className="flex flex-col flex-1 min-h-0">
+                    {/* Top 10 always visible */}
+                    <div className="space-y-0">
+                      {top10.map((p, i) => <PatternRow key={i} p={p} i={i} />)}
+                    </div>
+                    {/* Rest scrollable */}
+                    {extras.length > 0 && (
+                      <div className="mt-1 max-h-48 overflow-y-auto border-t border-gray-800/50 pt-1">
+                        {extras.map((p, i) => <PatternRow key={i + 10} p={p} i={i + 10} />)}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </div>
       </div>
 

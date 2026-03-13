@@ -306,11 +306,15 @@ function RocketScannerPanel() {
     refetchInterval: 30_000,
   })
 
-  // Auto-fetch on mount — results field is 'results', not 'candidates'
-  // Increased limit to 1000 for comprehensive list
+  // Auto-fetch on mount — API uses 'top_n' (max 50), min_price=0 for pennies
   const { data: scanData, isLoading } = useQuery<any[]>({
     queryKey: ['rocket', 'scan'],
-    queryFn: () => api.get('/rocket/scan', { params: { limit: 1000 } }).then(r => r.data?.results ?? []),
+    queryFn: async () => {
+      const r = await api.get('/rocket/scan', { params: { top_n: 50, min_price: 0 } })
+      const results = r.data?.results ?? []
+      console.log('Rocket scan response:', { dataKeys: Object.keys(r.data || {}), resultsLength: results.length, firstResult: results[0]?.symbol })
+      return results
+    },
     staleTime: 5 * 60_000,
   })
 

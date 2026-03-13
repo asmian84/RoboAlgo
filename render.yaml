@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: roboalgo-backend
+    runtime: python
+    plan: standard
+    buildCommand: pip install -r requirements.txt
+    startCommand: "uvicorn api.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: DATABASE_URL
+        scope: shared
+      - key: FINNHUB_API_KEY
+        scope: shared
+      - key: YFINANCE_API_KEY
+        scope: shared
+
+  - type: static
+    name: roboalgo-frontend
+    staticPublishPath: frontend/dist
+    buildCommand: cd frontend && npm install && npm run build
+    envVars:
+      - key: VITE_API_URL
+        value: https://roboalgo-backend.onrender.com
+
+  - type: pserv
+    name: roboalgo-postgres
+    plan: free
+    ipAllowList: []
+    envVars:
+      - key: POSTGRES_DB
+        value: roboalgo
+      - key: POSTGRES_USER
+        value: postgres
+      - key: POSTGRES_PASSWORD
+        scope: shared

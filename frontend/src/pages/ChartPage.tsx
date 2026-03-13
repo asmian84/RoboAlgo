@@ -2134,7 +2134,10 @@ export default function ChartPage() {
                     )}
                   </div>
                   <div className="max-h-80 overflow-y-auto py-1">
-                    {detectedPatterns.map((p) => {
+                    {detectedPatterns
+                      .filter((p) => p.status !== 'FORMING')
+                      .slice(0, 10)
+                      .map((p) => {
                       const kind    = classifyPattern(p)
                       const color   = patternColor(kind, p.direction)
                       const isAct   = activePatternName === p.pattern_name

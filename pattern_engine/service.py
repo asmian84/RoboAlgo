@@ -277,7 +277,23 @@ class PatternService:
         """Run every detector, collect ALL results (not just best-per-category).
 
         Skips detectors that don't apply at the given resolution_minutes.
+        Applies the Matrix Profile discord gate first: if current price action
+        is structurally anomalous (no historical precedent), all pattern signals
+        are suppressed — pattern rules lose edge in uncharted territory.
         """
+        # ── Matrix Profile discord gate ───────────────────────────────────────
+        # Invisible to the user — signals simply don't appear during anomalies.
+        # Only applied when we have enough history (60+ bars) and daily+ data.
+        if len(df) >= 60 and resolution_minutes >= 1440:   # daily+ only
+            try:
+                from analytics_engine.discord_gate import is_anomalous  # noqa: PLC0415
+                close_arr = df['close'].astype(float).to_numpy()
+                if is_anomalous(close_arr):
+                    logger.info("Discord gate suppressed all patterns for %s", symbol)
+                    return []
+            except Exception as exc:
+                logger.debug("Discord gate error for %s: %s", symbol, exc)
+
         results: list[dict[str, Any]] = []
         for category, detector_fn in CATEGORY_DETECTORS:
             # Timeframe routing — skip detectors that need longer bars
@@ -306,20 +322,22 @@ class PatternService:
         results.sort(key=lambda p: p.get("confidence", 0.0), reverse=True)
 
         # ── Global minimum confidence filter ─────────────────────────────────
-        # Per-category minimum thresholds — only high-quality patterns surface.
+        # Per-category minimum thresholds — quality over quantity.
+        # Astro is excluded from signal scoring entirely (no price causality);
+        # behavioral patterns require 75% to kill FOMO/staircase noise.
         CATEGORY_MIN_CONF = {
-            "harmonic":        68.0,   # Must pass tight ratio + structural gates
-            "chart":           55.0,   # Chart patterns with confluence
-            "gann":            60.0,
-            "wyckoff":         55.0,
-            "candlestick":     60.0,   # Candlestick signals need to be clear
-            "behavioral":      55.0,
-            "indicator":       60.0,
-            "volume":          55.0,
-            "measured_move":   55.0,
-            "strategy":        55.0,
-            "market_analysis": 55.0,
-            "astro":           50.0,   # Astro is informational
+            "harmonic":        68.0,   # Tight Fibonacci + structural gates — keep as-is
+            "chart":           62.0,   # Raised: confluence must confirm structure
+            "gann":            65.0,   # Raised: geometric projection needs structure support
+            "wyckoff":         62.0,   # Raised: institutional phase requires clarity
+            "candlestick":     65.0,   # Raised: age-decay already kills stale signals
+            "behavioral":      75.0,   # ↑↑ RAISED: kills FOMO/staircase/wave4 noise
+            "indicator":       65.0,   # Raised: divergences need to be unambiguous
+            "volume":          62.0,   # Raised: volume patterns need clear structure
+            "measured_move":   60.0,   # Modest raise
+            "strategy":        62.0,   # Raised
+            "market_analysis": 62.0,   # Raised
+            "astro":           999.0,  # EXCLUDED from scoring — no price causality
         }
         filtered = []
         for r in results:

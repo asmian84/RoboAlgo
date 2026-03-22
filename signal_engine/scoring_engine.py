@@ -7,13 +7,13 @@ Combines inputs from:
   ┌─────────────────────┬────────┬──────────────────────────────────────────┐
   │ Factor              │ Weight │ Source                                   │
   ├─────────────────────┼────────┼──────────────────────────────────────────┤
-  │ cycle_alignment     │  0.25  │ cycle_engine / wave_phase                │
-  │ gex_signal          │  0.25  │ options_engine (GEX regime + distance)   │
+  │ gex_signal          │  0.30  │ options_engine (GEX regime + distance)   │
+  │ structure_quality   │  0.20  │ pattern_engine (harmonic, VCP, chart)    │
   │ momentum_strength   │  0.20  │ scanner_engine / price data              │
+  │ cycle_alignment     │  0.15  │ cycle_engine / wave_phase                │
   │ volatility_state    │  0.15  │ market_regime / volatility_engine        │
-  │ structure_quality   │  0.10  │ pattern_engine / structure               │
-  │ catalyst_score      │  0.05  │ context_engine                           │
   └─────────────────────┴────────┴──────────────────────────────────────────┘
+  catalyst_score removed — fires <5% of scans, no meaningful average contribution.
 
 Output per symbol:
   {
@@ -45,21 +45,27 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ── Weight table ──────────────────────────────────────────────────────────────
+# Philosophy: GEX is the most forward-looking signal (options market tells the
+# future more than price history). Structure quality raised because harmonic
+# patterns pass 5 independent gates — cheapening them at 10% was wrong.
+# Cycle alignment trimmed: it's unvalidated vs GEX which has real edge.
+# Catalyst removed from formula — fires <5% of the time, meaningless average weight.
 WEIGHTS = {
-    "cycle_alignment":   0.25,
-    "gex_signal":        0.25,
-    "momentum_strength": 0.20,
-    "volatility_state":  0.15,
-    "structure_quality": 0.10,
-    "catalyst_score":    0.05,
+    "cycle_alignment":   0.15,   # ↓ trimmed — unvalidated vs GEX
+    "gex_signal":        0.30,   # ↑ options Greeks are the smartest signal
+    "momentum_strength": 0.20,   # ← unchanged
+    "volatility_state":  0.15,   # ← unchanged
+    "structure_quality": 0.20,   # ↑↑ harmonic/VCP patterns deserve real weight
+    # catalyst_score removed — fires <5% of scans, dead weight in the average
 }
 
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9, "Weights must sum to 1.0"
 
 # ── Confidence thresholds ─────────────────────────────────────────────────────
-_CONF_HIGH   = 0.72
-_CONF_MEDIUM = 0.52
-_CONF_LOW    = 0.35   # below this → discard
+# Raised HIGH bar: GEX(30%) + structure(20%) + momentum(20%) all need to align.
+_CONF_HIGH   = 0.75   # ↑ from 0.72 — fewer, better HIGH signals
+_CONF_MEDIUM = 0.55   # ↑ from 0.52
+_CONF_LOW    = 0.40   # ↑ from 0.35 — discard more aggressively
 
 
 @dataclass

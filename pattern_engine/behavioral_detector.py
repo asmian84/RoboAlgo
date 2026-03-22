@@ -133,15 +133,54 @@ def detect(symbol: str, df: pd.DataFrame) -> list[dict[str, Any]]:
                 conf = round(min(55 + (1 - abs(c_ratio-1.0)) * 25, 85), 1)
                 found.setdefault("ABC Correction", (i, "bullish", conf))
 
-        # 5. Staircase Uptrend
-        if len(recent_sl) >= 3:
-            sl_vals_asc = [v for _, v in recent_sl[-4:]]
-            asc_lows = all(sl_vals_asc[k] > sl_vals_asc[k-1] for k in range(1, len(sl_vals_asc)))
-            last_sl_idx = recent_sl[-1][0]
-            at_step = (i - last_sl_idx) <= 5
-            if asc_lows and at_step and curr_close >= curr_open:
-                conf = round(min(55 + len(recent_sl) * 5, 88), 1)
-                found.setdefault("Staircase Uptrend", (i, "bullish", conf))
+        # 5. Volatility Contraction Pattern (VCP)
+        # Requires 3+ progressively tighter pullbacks from a prior advance,
+        # with volume drying up — the institutional pre-breakout setup.
+        # Replaces "Staircase Uptrend" (which fired on every trend, adding no edge).
+        if i >= 40 and len(recent_sl) >= 3 and len(recent_sh) >= 2:
+            # Prior advance: close must be above 50-bar SMA (trend context)
+            ma50_val = float(close.iloc[max(0, i-50):i+1].mean())
+            in_uptrend = curr_close > ma50_val * 1.02
+
+            if in_uptrend:
+                # Measure depth of last 3 pullbacks from swing high to swing low
+                sl_vals = [v for _, v in recent_sl[-3:]]
+                sh_vals = [v for _, v in recent_sh[-3:]]
+                if len(sl_vals) >= 2 and len(sh_vals) >= 2:
+                    # Each pullback depth: (swing_high - swing_low) / swing_high
+                    pullbacks = []
+                    for k in range(min(len(sh_vals), len(sl_vals))):
+                        sh_v = sh_vals[k] if k < len(sh_vals) else sh_vals[-1]
+                        sl_v = sl_vals[k]
+                        if sh_v > 0:
+                            pullbacks.append((sh_v - sl_v) / sh_v)
+
+                    # VCP: each pullback must be tighter than the last (contracting)
+                    contracting = len(pullbacks) >= 2 and all(
+                        pullbacks[k] < pullbacks[k-1] for k in range(1, len(pullbacks))
+                    )
+                    # Volume must be drying up (last 5 bars < 70% of prior 20-bar avg)
+                    recent_vol  = float(volume.iloc[i-5:i+1].mean()) if i >= 5 else avg_v
+                    vol_drying  = recent_vol < avg_v * 0.70
+
+                    # Final pullback must be shallow (<8%) and recent
+                    last_pull   = pullbacks[-1] if pullbacks else 1.0
+                    last_sl_idx = recent_sl[-1][0]
+                    still_fresh = (i - last_sl_idx) <= 8
+
+                    if contracting and vol_drying and last_pull < 0.08 and still_fresh:
+                        # Breakout level is the most recent swing high
+                        vcp_breakout = float(recent_sh[-1][1]) * 1.001
+                        pullback_pct = round(last_pull * 100, 1)
+                        # Confidence: deeper contraction + stronger vol dry-up = higher conf
+                        vol_contraction = max(0, 1 - recent_vol / max(avg_v * 0.70, 1e-6))
+                        conf = round(min(
+                            70
+                            + (1 - last_pull / 0.08) * 15   # tighter = better
+                            + vol_contraction * 10,           # drier = better
+                            92
+                        ), 1)
+                        found.setdefault("VCP (Volatility Contraction)", (i, "bullish", conf))
 
         # 6. Herd Exhaustion
         if rsi > 74 and curr_close > bb_up and i >= 3:
@@ -167,14 +206,22 @@ def detect(symbol: str, df: pd.DataFrame) -> list[dict[str, Any]]:
                 conf = round(min(50 + drop_15 * 200, 88), 1)
                 found.setdefault("Dead Cat Bounce", (i, "bearish", conf))
 
-        # 8. FOMO Breakout
-        if i >= 20 and 50 < rsi < 72:
-            resist_20 = float(high.iloc[i-20:i].max())
-            ret_5d = (curr_close - float(close.iloc[i-5])) / float(close.iloc[i-5]) if i >= 5 and float(close.iloc[i-5]) > 0 else 0
-            if (curr_close > resist_20 * 1.005 and curr_vol > avg_v * 1.45 and
-                    ret_5d < 0.15 and curr_close >= curr_open):
-                conf = round(min(55 + (curr_vol/avg_v - 1.45) * 20, 88), 1)
-                found.setdefault("FOMO Breakout", (i, "bullish", conf))
+        # 8. Confirmed Breakout (formerly FOMO Breakout — tightened significantly)
+        # Requires: 3%+ break above 20-bar resistance, 2.0× volume surge, RSI 52-72,
+        # AND at least one prior failed attempt at the level (reduces false breakouts).
+        if i >= 25 and 52 < rsi < 72:
+            resist_20  = float(high.iloc[i-20:i].max())
+            break_pct  = (curr_close - resist_20) / resist_20 if resist_20 > 0 else 0
+            ret_5d     = (curr_close - float(close.iloc[i-5])) / float(close.iloc[i-5]) if i >= 5 and float(close.iloc[i-5]) > 0 else 0
+            # Prior test: price touched within 0.5% of resistance in last 10 bars (not today)
+            prior_test = any(
+                float(high.iloc[j]) >= resist_20 * 0.995 and j < i
+                for j in range(max(0, i-10), i)
+            )
+            if (break_pct >= 0.03 and curr_vol > avg_v * 2.0 and
+                    ret_5d < 0.12 and curr_close >= curr_open and prior_test):
+                conf = round(min(72 + (curr_vol / avg_v - 2.0) * 8, 90), 1)
+                found.setdefault("Confirmed Breakout", (i, "bullish", conf))
 
         # 9. V-Bottom Reversal
         if i >= 3 and rsi < 38:

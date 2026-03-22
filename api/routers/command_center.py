@@ -12,6 +12,7 @@ Result is cached for 60 seconds to minimise repeated computation.
 """
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import datetime, timedelta
 from typing import Any, Callable
@@ -75,23 +76,27 @@ def get_command_center():
 
     result: dict[str, Any] = {"generated_at": datetime.utcnow().isoformat() + "Z"}
 
-    # Run all collectors in parallel.
-    # IMPORTANT: do NOT use `with ThreadPoolExecutor` — the context manager calls
-    # shutdown(wait=True) which blocks until every thread finishes, even after we've
-    # already collected results via future.result(timeout=...).  Instead we call
-    # shutdown(wait=False, cancel_futures=True) after collecting so slow threads are
-    # abandoned and the request returns immediately.
+    # Run all collectors in parallel with a GLOBAL deadline.
+    # Bug fixed: per-future timeout=9s applied sequentially = 9 × 9 = 81s worst case.
+    # Fix: compute a single end_time, and shrink each future's timeout to the
+    # remaining budget.  Total wall-time is always ≤ _COLLECTOR_TIMEOUT + 1 seconds.
     pool = ThreadPoolExecutor(max_workers=len(collectors))
     try:
         futures = {
             pool.submit(_run_collector, name, fn, fb): name
             for name, fn, fb in collectors
         }
+        # Global deadline — all futures must finish within this window
+        deadline = time.monotonic() + _COLLECTOR_TIMEOUT + 1
+
+        fallback_map = {name: fb for name, _, fb in collectors}
+
         for future in futures:
-            name = futures[future]
-            fallback = next(fb for n, _, fb in collectors if n == name)
+            name     = futures[future]
+            fallback = fallback_map.get(name, {})
+            remaining = max(0.05, deadline - time.monotonic())
             try:
-                key, value = future.result(timeout=_COLLECTOR_TIMEOUT + 1)
+                key, value = future.result(timeout=remaining)
                 result[key] = value
             except FuturesTimeout:
                 result[name] = fallback

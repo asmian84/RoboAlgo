@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useCommandCenter } from '../../api/hooks'
-import TopBar from './TopBar'
 import SideNav from './SideNav'
+import MacroTickerBar from './MacroTickerBar'
 import CommandPalette from '../terminal/CommandPalette'
 
 interface Props {
@@ -30,18 +30,11 @@ export default function TerminalLayout({ children }: Props) {
       const target = event.target as HTMLElement
       const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT'
       if (isInput) return
-
-      if (event.key === '/') {
-        event.preventDefault()
-        setPaletteOpen(true)
-      }
-
       if (event.key.toLowerCase() === 'c') {
         event.preventDefault()
         navigate(`/chart${activeSymbol ? `?symbol=${activeSymbol}` : ''}`)
       }
     }
-
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [activeSymbol, navigate])
@@ -51,14 +44,11 @@ export default function TerminalLayout({ children }: Props) {
       <CommandPalette isOpen={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
       <div className="flex h-screen overflow-hidden bg-gray-950 text-gray-100">
-        {/* Left nav */}
-        <SideNav />
+        <SideNav safety={data?.market_safety} currentSymbol={activeSymbol} />
 
-        {/* Right: topbar + content stacked */}
-        <div className="flex flex-col flex-1 min-w-0">
-          <div className="shrink-0 border-b border-gray-800">
-            <TopBar safety={data?.market_safety} currentSymbol={activeSymbol} />
-          </div>
+        {/* ── Right column: ticker bar + page content ── */}
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          <MacroTickerBar />
           <main className="flex-1 min-h-0 overflow-auto bg-gray-950 p-2">{children}</main>
         </div>
       </div>

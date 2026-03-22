@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCommandCenter, useMarketBreadth } from '../api/hooks'
 import type { MarketBreadthData } from '../api/hooks'
@@ -59,6 +60,200 @@ const RISK_MODE_COLORS: Record<string, string> = {
 
 // ── Market Breadth Panel (McClellan, VIX, Fear/Greed) ─────────────────────────
 
+// ── Fear & Greed Deep Panel ────────────────────────────────────────────────────
+function FearGreedDeepPanel({ breadth }: { breadth: MarketBreadthData }) {
+  const fg         = breadth.fear_greed
+  const label      = breadth.fear_greed_label ?? 'N/A'
+  const history    = breadth.fear_greed_history ?? []
+  const components = breadth.fear_greed_components ?? []
+
+  const fgColor = (v: number | null | undefined) =>
+    v == null ? '#6b7280' :
+    v < 20 ? '#ef4444' : v < 40 ? '#f97316' : v < 60 ? '#9ca3af' : v < 80 ? '#22c55e' : '#10b981'
+
+  const ratingColor = (r: string) => {
+    const l = r.toLowerCase()
+    return l.includes('extreme fear') ? '#ef4444'
+         : l.includes('fear')        ? '#f97316'
+         : l.includes('neutral')     ? '#9ca3af'
+         : l.includes('extreme greed') ? '#10b981'
+         : l.includes('greed')       ? '#22c55e'
+         : '#6b7280'
+  }
+
+  // Semi-circle gauge
+  const fgPct = fg != null ? Math.max(0, Math.min(100, fg)) : 50
+  // Arc goes left (0%=Fear=180°) → top (50%=Neutral=90°) → right (100%=Greed=0°)
+  // SVG Y-axis is flipped, so needleY uses MINUS sin
+  const fgAngleMath = (1 - fgPct / 100) * 180   // 180° at 0, 0° at 100
+  const rad         = (fgAngleMath * Math.PI) / 180
+  const needleX     = 50 + 38 * Math.cos(rad)
+  const needleY     = 50 - 38 * Math.sin(rad)    // minus = SVG Y flip
+  const mainColor = fgColor(fg)
+
+  // Sparkline from history
+  const sparkYs = history.map(p => p.y)
+  const sparkMin = Math.min(...sparkYs, 0)
+  const sparkMax = Math.max(...sparkYs, 100)
+  const sparkRange = sparkMax - sparkMin || 1
+  const toSvgY = (y: number) => 40 - ((y - sparkMin) / sparkRange) * 38
+  const sparkPath = sparkYs.length > 1
+    ? sparkYs.map((y, i) => `${i === 0 ? 'M' : 'L'} ${(i / (sparkYs.length - 1)) * 200} ${toSvgY(y)}`).join(' ')
+    : ''
+
+  // Previous periods
+  const periods = [
+    { label: 'Prev Close', value: breadth.fear_greed_prev_close },
+    { label: '1 Week Ago', value: breadth.fear_greed_prev_1w },
+    { label: '1 Month Ago', value: breadth.fear_greed_prev_1m },
+    { label: '1 Year Ago', value: breadth.fear_greed_prev_1y },
+  ]
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest">
+          Fear &amp; Greed Index · CNN
+        </h3>
+        <span className="text-[10px] text-gray-600">Source: production.dataviz.cnn.io</span>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        {/* Left: gauge + score + periods */}
+        <div className="flex flex-col items-center gap-3">
+          {/* Gauge */}
+          <svg viewBox="0 0 100 60" className="w-36 h-20">
+            <defs>
+              <linearGradient id="fgGrad2" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%"   stopColor="#ef4444" stopOpacity="0.7" />
+                <stop offset="25%"  stopColor="#f97316" stopOpacity="0.7" />
+                <stop offset="50%"  stopColor="#9ca3af" stopOpacity="0.5" />
+                <stop offset="75%"  stopColor="#22c55e" stopOpacity="0.7" />
+                <stop offset="100%" stopColor="#10b981" stopOpacity="0.7" />
+              </linearGradient>
+            </defs>
+            {/* Zone labels */}
+            <text x="2"  y="58" fontSize="5" fill="#ef4444" opacity="0.6">FEAR</text>
+            <text x="78" y="58" fontSize="5" fill="#22c55e" opacity="0.6">GREED</text>
+            {/* Arc */}
+            <path d="M5 50 A45 45 0 0 1 95 50" fill="none" stroke="url(#fgGrad2)" strokeWidth="10" strokeLinecap="round" />
+            {/* Needle */}
+            {fg != null && (
+              <line x1="50" y1="50" x2={needleX.toFixed(1)} y2={needleY.toFixed(1)}
+                stroke={mainColor} strokeWidth="2.5" strokeLinecap="round" />
+            )}
+            <circle cx="50" cy="50" r="3.5" fill={mainColor} />
+          </svg>
+
+          {/* Score + label */}
+          <div className="text-center -mt-2">
+            <div className="text-3xl font-black font-mono" style={{ color: mainColor }}>
+              {fg != null ? fg.toFixed(0) : '—'}
+            </div>
+            <div className="text-xs font-semibold mt-0.5" style={{ color: mainColor }}>{label}</div>
+          </div>
+
+          {/* Previous periods */}
+          <div className="w-full grid grid-cols-2 gap-1.5 mt-1">
+            {periods.map(p => {
+              const delta = fg != null && p.value != null ? fg - p.value : null
+              const dColor = delta == null ? '#6b7280' : delta > 0 ? '#ef4444' : '#22c55e'
+              return (
+                <div key={p.label} className="bg-gray-950 border border-gray-800 rounded-lg p-2 text-center">
+                  <div className="text-[9px] text-gray-600 mb-0.5">{p.label}</div>
+                  <div className="text-xs font-mono font-bold" style={{ color: fgColor(p.value ?? null) }}>
+                    {p.value != null ? p.value.toFixed(0) : '—'}
+                  </div>
+                  {delta != null && (
+                    <div className="text-[9px] font-mono" style={{ color: dColor }}>
+                      {delta > 0 ? '▼' : '▲'} {Math.abs(delta).toFixed(1)}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Centre: 60-day sparkline */}
+        <div className="flex flex-col gap-2">
+          <div className="text-[10px] text-gray-500 font-medium">60-Day History</div>
+          <div className="bg-gray-950 border border-gray-800 rounded-lg p-2 flex-1 min-h-[120px] relative">
+            <svg viewBox="0 0 200 40" className="w-full h-full" preserveAspectRatio="none">
+              {/* Zone fills */}
+              <rect x="0" y={toSvgY(80)} width="200" height={toSvgY(60)-toSvgY(80)} fill="#22c55e" opacity="0.04" />
+              <rect x="0" y={toSvgY(60)} width="200" height={toSvgY(40)-toSvgY(60)} fill="#9ca3af" opacity="0.04" />
+              <rect x="0" y={toSvgY(40)} width="200" height={toSvgY(20)-toSvgY(40)} fill="#f97316" opacity="0.04" />
+              <rect x="0" y={toSvgY(20)} width="200" height={toSvgY(0) -toSvgY(20)} fill="#ef4444" opacity="0.06" />
+              {/* Zone lines */}
+              {[20, 40, 60, 80].map(z => (
+                <line key={z} x1="0" y1={toSvgY(z)} x2="200" y2={toSvgY(z)}
+                  stroke="#ffffff" strokeWidth="0.3" strokeOpacity="0.08" strokeDasharray="2 2" />
+              ))}
+              {/* Sparkline */}
+              {sparkPath && (
+                <path d={sparkPath} fill="none" stroke={mainColor} strokeWidth="1.2" strokeLinejoin="round" />
+              )}
+              {/* Latest dot */}
+              {sparkYs.length > 0 && (
+                <circle cx="200" cy={toSvgY(sparkYs[sparkYs.length - 1])} r="2" fill={mainColor} />
+              )}
+            </svg>
+            {/* Zone labels on right */}
+            <div className="absolute right-1 top-0 h-full flex flex-col justify-between text-[7px] text-gray-700 py-0.5">
+              <span style={{ color: '#10b981' }}>EG</span>
+              <span style={{ color: '#22c55e' }}>G</span>
+              <span style={{ color: '#9ca3af' }}>N</span>
+              <span style={{ color: '#f97316' }}>F</span>
+              <span style={{ color: '#ef4444' }}>EF</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Right: 7 component bars */}
+        <div className="flex flex-col gap-2">
+          <div className="text-[10px] text-gray-500 font-medium">Components</div>
+          <div className="space-y-1.5">
+            {components.map(c => {
+              const score = c.score ?? 0
+              const color = ratingColor(c.rating)
+              return (
+                <div key={c.key} className="group relative">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-[9px] text-gray-400 truncate max-w-[140px]" title={c.description}>
+                      {c.label}
+                    </span>
+                    <span className="text-[9px] font-mono font-bold ml-1 shrink-0" style={{ color }}>
+                      {score.toFixed(0)}
+                    </span>
+                  </div>
+                  <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${Math.max(2, score)}%`, backgroundColor: color }}
+                    />
+                  </div>
+                  <div className="text-[8px] capitalize mt-0.5" style={{ color, opacity: 0.7 }}>
+                    {c.rating}
+                  </div>
+                  {/* Hover tooltip with description */}
+                  <div className="pointer-events-none absolute bottom-full left-0 mb-1 w-52 bg-gray-900 border border-gray-700 rounded-lg p-2 text-[9px] text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-xl leading-relaxed">
+                    <p className="font-bold mb-0.5" style={{ color }}>{c.label}</p>
+                    <p>{c.description}</p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
 function MarketBreadthPanel({ breadth }: { breadth: MarketBreadthData }) {
   const vix   = breadth.vix
   const mco   = breadth.mco
@@ -74,10 +269,11 @@ function MarketBreadthPanel({ breadth }: { breadth: MarketBreadthData }) {
     fg < 20 ? '#ef4444' : fg < 40 ? '#f97316' : fg < 60 ? '#9ca3af' : fg < 80 ? '#22c55e' : '#10b981'
 
   // Semi-circle gauge for Fear/Greed
-  const fgPct   = fg != null ? Math.max(0, Math.min(100, fg)) : 50
-  const fgAngle = (fgPct / 100) * 180 - 90 // -90° (left=fear) to +90° (right=greed)
-  const needleX = 50 + 38 * Math.cos((fgAngle * Math.PI) / 180)
-  const needleY = 50 + 38 * Math.sin((fgAngle * Math.PI) / 180)
+  const fgPct       = fg != null ? Math.max(0, Math.min(100, fg)) : 50
+  const fgAngleMath = (1 - fgPct / 100) * 180          // 180°=left/Fear → 0°=right/Greed
+  const fgRad       = (fgAngleMath * Math.PI) / 180
+  const needleX     = 50 + 38 * Math.cos(fgRad)
+  const needleY     = 50 - 38 * Math.sin(fgRad)         // minus = SVG Y-axis flip
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -204,55 +400,40 @@ function ActiveStrategyBanner({ data }: { data: ActiveStrategyData }) {
 
   return (
     <div
-      className="rounded-xl border px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3"
+      className="rounded-xl border px-4 py-3"
       style={{ borderColor: color + '55', background: color + '0d' }}
     >
-      {/* Left: Regime + Strategy */}
-      <div className="flex items-center gap-3 flex-1">
-        <span className="text-2xl" role="img">{icon}</span>
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-gray-500 uppercase tracking-wider">Market Regime</span>
-            <span
-              className="px-2 py-0.5 rounded text-sm font-bold"
-              style={{ color, background: color + '22' }}
-            >
-              {data.dominant_regime}
-            </span>
-            <span className="text-gray-700">·</span>
-            <span className="text-xs text-gray-500 uppercase tracking-wider">Strategy Mode</span>
-            <span className="text-sm font-bold text-white">{data.strategy_type}</span>
-          </div>
-          <p className="text-xs text-gray-500 mt-0.5 max-w-xl">{data.entry_description}</p>
-        </div>
-      </div>
+      {/* Row 1: Regime badge + strategy name + risk pills — all inline */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-lg shrink-0" role="img">{icon}</span>
+        <span
+          className="px-2 py-0.5 rounded text-xs font-black tracking-wide shrink-0"
+          style={{ color, background: color + '22' }}
+        >
+          {data.dominant_regime}
+        </span>
+        <span className="text-gray-700 shrink-0">·</span>
+        <span className="text-sm font-bold text-white shrink-0">{data.strategy_type}</span>
 
-      {/* Right: Risk metrics */}
-      <div className="flex items-center gap-4 text-xs shrink-0">
-        <div className="text-center">
-          <p className="text-gray-600">Risk/Trade</p>
-          <p className="font-mono font-bold text-gray-200">
-            {(data.risk_per_trade * 100).toFixed(1)}%
-          </p>
-        </div>
-        <div className="text-center">
-          <p className="text-gray-600">Max Positions</p>
-          <p className="font-mono font-bold text-gray-200">{data.max_positions}</p>
-        </div>
-        <div className="text-center">
-          <p className="text-gray-600">Size</p>
-          <p className="font-mono font-bold text-gray-200">{data.position_multiplier}×</p>
-        </div>
-        <div className="text-center">
-          <p className="text-gray-600">Risk Mode</p>
+        {/* Risk pills — same row, pushed right on wide, wraps on narrow */}
+        <div className="flex items-center gap-3 ml-auto text-xs shrink-0">
+          <span className="text-gray-600">Risk <span className="font-mono font-bold text-gray-200">{(data.risk_per_trade * 100).toFixed(1)}%</span></span>
+          <span className="text-gray-700">|</span>
+          <span className="text-gray-600">Pos <span className="font-mono font-bold text-gray-200">{data.max_positions}</span></span>
+          <span className="text-gray-700">|</span>
+          <span className="text-gray-600">Size <span className="font-mono font-bold text-gray-200">{data.position_multiplier}×</span></span>
+          <span className="text-gray-700">|</span>
           <span
-            className="px-1.5 py-0.5 rounded font-bold uppercase"
+            className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase"
             style={{ color: modeColor, background: modeColor + '22' }}
           >
             {data.risk_mode}
           </span>
         </div>
       </div>
+
+      {/* Row 2: description */}
+      <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">{data.entry_description}</p>
 
       {/* Regime distribution pills */}
       {Object.keys(data.regime_counts).length > 0 && (
@@ -758,17 +939,30 @@ function MetricTile({ label, value, color, sub }: { label: string; value: string
 // ── Panel 5: System Health ─────────────────────────────────────────────────────
 
 function SystemHealthPanel({ data }: { data: CommandCenterData['system_health'] }) {
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null)
+
+  const triggerRefresh = async () => {
+    setRefreshing(true); setRefreshMsg(null)
+    try {
+      await fetch('/api/pipeline/refresh-prices', { method: 'POST' })
+      setRefreshMsg('Refresh started — this may take 1-2 min. Page will update automatically.')
+    } catch { setRefreshMsg('Failed to start refresh') }
+    finally { setRefreshing(false) }
+  }
+
   const score = data.data_quality_score ?? 0
   const scoreColor = score >= 90 ? '#22c55e' : score >= 75 ? '#eab308' : score >= 50 ? '#f97316' : '#ef4444'
   const scoreLabel = score >= 90 ? 'Excellent' : score >= 75 ? 'Good' : score >= 50 ? 'Fair' : 'Poor'
 
   const pipelineColors: Record<string, string> = { OK: '#22c55e', STALE: '#eab308', ERROR: '#ef4444' }
   const pipelineColor = pipelineColors[data.pipeline_status] ?? '#6b7280'
+  const needsRefresh  = data.pipeline_status === 'ERROR' || data.pipeline_status === 'STALE'
 
   return (
     <PanelCard title="System Health" subtitle="Data quality & pipeline status">
       <div className="p-4 space-y-4">
-        {/* ── Quality score ── */}
+        {/* ── Quality score + pipeline status ── */}
         <div className="flex items-center gap-4">
           <div
             className="flex-none w-20 h-20 rounded-full border-4 flex flex-col items-center justify-center"
@@ -780,7 +974,21 @@ function SystemHealthPanel({ data }: { data: CommandCenterData['system_health'] 
             <span className="text-xs" style={{ color: scoreColor }}>{scoreLabel}</span>
           </div>
           <div className="flex-1 space-y-2">
-            <StatusRow label="Pipeline" value={data.pipeline_status} color={pipelineColor} />
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500">Pipeline</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold" style={{ color: pipelineColor }}>{data.pipeline_status}</span>
+                {needsRefresh && (
+                  <button
+                    onClick={triggerRefresh}
+                    disabled={refreshing}
+                    className="text-[9px] px-1.5 py-0.5 rounded font-bold bg-blue-900/40 text-blue-400 border border-blue-700/50 hover:bg-blue-800/60 disabled:opacity-50 transition-colors"
+                  >
+                    {refreshing ? '↻…' : '↻ Refresh'}
+                  </button>
+                )}
+              </div>
+            </div>
             <StatusRow
               label="Last Update"
               value={data.last_data_update
@@ -788,13 +996,24 @@ function SystemHealthPanel({ data }: { data: CommandCenterData['system_health'] 
                 : '—'}
               color={pipelineColor}
             />
-            <StatusRow
-              label="Instruments"
-              value={String(data.total_instruments ?? 0)}
-              color="#9ca3af"
-            />
+            <StatusRow label="Instruments" value={String(data.total_instruments ?? 0)} color="#9ca3af" />
           </div>
         </div>
+
+        {/* Refresh message */}
+        {refreshMsg && (
+          <div className="text-[10px] text-blue-400 bg-blue-900/20 border border-blue-800/40 rounded-lg px-3 py-2">
+            {refreshMsg}
+          </div>
+        )}
+
+        {/* Stale data explanation */}
+        {needsRefresh && !refreshMsg && (
+          <div className="text-[10px] text-gray-500 bg-gray-800/40 rounded-lg px-3 py-2">
+            DB price data is stale — live scanner & charts use yfinance directly and are unaffected.
+            Hit <span className="text-blue-400 font-bold">↻ Refresh</span> to pull missing days (incremental, fast).
+          </div>
+        )}
 
         {/* ── Issue summary ── */}
         {data.data_issues && (
@@ -897,10 +1116,17 @@ export default function CommandCenterPage() {
         </div>
       </div>
 
-      {/* ── Error state ── */}
-      {isError && (
+      {/* ── Error state — only shown when there is no cached/live data at all ── */}
+      {isError && !data && (
         <div className="bg-red-900/20 border border-red-900 rounded-xl p-4 text-red-400 text-sm">
           Failed to load Command Center data. Ensure the API is running and the pipeline has been executed at least once.
+        </div>
+      )}
+      {/* ── Subtle stale-data banner when fetch fails but we have cached data ── */}
+      {isError && data && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-amber-900/20 border border-amber-800/40 rounded-lg text-xs text-amber-400">
+          <span>⚠</span>
+          <span>Could not refresh — showing cached data. Retrying…</span>
         </div>
       )}
 
@@ -924,6 +1150,11 @@ export default function CommandCenterPage() {
           {/* Row 0.5: Market Breadth — VIX + McClellan + Fear/Greed */}
           {breadth && !breadth.error && <MarketBreadthPanel breadth={breadth} />}
 
+          {/* Row 0.6: Fear & Greed Deep Dive — all 7 CNN components + history */}
+          {breadth && !breadth.error && (breadth.fear_greed_components?.length ?? 0) > 0 && (
+            <FearGreedDeepPanel breadth={breadth} />
+          )}
+
           {/* Market Heatmap — right below Market Internals */}
           {data.market_state_summary?.instruments?.length > 0 && (
             <MarketHeatmap instruments={data.market_state_summary.instruments} />
@@ -939,14 +1170,14 @@ export default function CommandCenterPage() {
             </div>
           </div>
 
-          {/* Signal Reliability (2/3) + Market Safety (1/3) */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2">
+          {/* Signal Reliability (1/2) + Market Safety (1/2) — equal proportions */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
               {data.signal_reliability && (
                 <SignalReliabilityPanel data={data.signal_reliability} />
               )}
             </div>
-            <div className="lg:col-span-1">
+            <div>
               {data.market_safety && (
                 <MarketSafetyPanel data={data.market_safety} />
               )}

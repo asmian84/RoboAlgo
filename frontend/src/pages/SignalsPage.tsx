@@ -1,21 +1,16 @@
 /**
- * Signals — unified hub for all signal types.
+ * Signals — unified hub.
  *
  * Tabs:
- *   Confluence  — staged funnel: Full → Near → Developing → Watching
- *   Rocket      — 5-stage scanner: patterns + gamma + volatility coupled
- *   Gamma       — GEX / VEX / DEX explorer per symbol
- *   Patterns    — batch pattern scanner with TF selector
- *   AI Signals  — existing recommendation engine
- *   Probability — XGBoost gauges
+ *   Pounce Scanner — pre-scanned confluence gems, long-only, auto-refreshed
+ *   Confluence     — 4-stage funnel (Full → Near → Developing → Watching)
+ *   Patterns       — batch chart pattern scanner
  */
 
 import { useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import RecommendationPage from './RecommendationPage'
-import ProbabilityPage    from './ProbabilityPage'
 import PatternScanPage    from './PatternScanPage'
-import WatchlistPage      from './WatchlistPage'
+import QuantPanel         from './QuantPage'
 import { useConfluenceScore } from '../api/hooks'
 import api from '../api/client'
 import { useQuery } from '@tanstack/react-query'
@@ -27,7 +22,7 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Tab = 'confluence' | 'sniper-neg-gamma' | 'sniper-technical' | 'gamma' | 'patterns' | 'recommendation' | 'probability' | 'watchlist'
+type Tab = 'confluence' | 'patterns' | 'quant'
 
 type Profile = 'scalper' | 'daytrader' | 'swing' | 'investor' | 'all'
 
@@ -114,7 +109,7 @@ const PROFILE_FILTERS: Record<Profile, (e: FunnelEntry) => boolean> = {
 
 // ── Confluence Funnel ─────────────────────────────────────────────────────────
 
-function ConfluenceFunnel() {
+export function ConfluenceFunnel() {
   const navigate = useNavigate()
   const [profile, setProfile] = useState<Profile>('all')
 
@@ -890,10 +885,9 @@ function GammaExplorerPanel() {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'sniper-neg-gamma',    label: 'Gamma Sniper',    icon: '🎯' },
-  { id: 'sniper-technical',    label: 'Tech Sniper',     icon: '📍' },
-  { id: 'patterns',            label: 'Pattern Scan',    icon: '📊' },
-  { id: 'confluence',          label: 'Confluence',      icon: '◉' },
+  { id: 'quant',      label: 'Scanner',    icon: '◎' },
+  { id: 'confluence', label: 'Confluence', icon: '◉' },
+  { id: 'patterns',   label: 'Patterns',   icon: '📊' },
 ]
 
 // ── Gamma Squeeze Panel — real GEX from options chains ────────────────────────
@@ -1083,56 +1077,110 @@ function TechnicalSniperPanel({ data, isLoading }: { data: any[]; isLoading: boo
   )
 }
 
-export default function SignalsPage() {
-  const [tab, setTab] = useState<Tab>('sniper-neg-gamma')
+// ── Penny Sniper Panel ────────────────────────────────────────────────────────
 
-  // Real gamma squeeze scanner — uses live options chains + Black-Scholes GEX
-  const { data: gammaData = [], isLoading: gammaLoading } = useQuery<any[]>({
-    queryKey: ['sniper', 'gamma'],
-    queryFn: async () => {
-      const r = await api.get('/sniper-gamma/scan', { params: { top_n: 200 } })
-      return r.data?.results ?? []
-    },
-    staleTime: 20 * 60_000,
-    enabled: tab === 'sniper-neg-gamma',
-  })
+function PennySniperPanel({ data, isLoading }: { data: any[]; isLoading: boolean }) {
+  const navigate = useNavigate()
 
-  // Technical sniper — pure price action, no options needed
-  const { data: technicalData, isLoading: technicalLoading } = useQuery<{ negative_gamma: any[]; technical: any[] }>({
-    queryKey: ['sniper', 'technical'],
-    queryFn: async () => {
-      const r = await api.get('/sniper-entry/scan', { params: { top_n: 500 } })
-      return r.data?.results ?? { negative_gamma: [], technical: [] }
-    },
-    staleTime: 5 * 60_000,
-    enabled: tab === 'sniper-technical',
-  })
+  if (isLoading) return (
+    <div className="flex items-center gap-3 py-16">
+      <div className="w-5 h-5 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
+      <span className="text-gray-400 text-sm">Scanning ~500 penny stocks via live data… (takes ~60 s first run)</span>
+    </div>
+  )
+
+  if (!data || data.length === 0) return (
+    <div className="p-8 text-center text-gray-600">No penny setups found right now — try again after market open</div>
+  )
 
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-2xl font-black text-white tracking-tight">SIGNALS</h2>
-        <p className="text-xs text-gray-500 mt-0.5">Staged confluence · patterns · AI · probability — all in one place</p>
+        <h2 className="text-xl font-bold">💎 Penny Sniper — Millionaire Makers</h2>
+        <p className="text-sm text-gray-500">
+          Stocks $0.10–$20 · near 52w lows · volume picking up · RSI oversold — EONR-type setups
+        </p>
+        <p className="text-sm text-yellow-400 mt-1">{data.length} setups found</p>
       </div>
 
-      <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit flex-wrap">
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              tab === t.id ? 'bg-emerald-700 text-white' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
-            }`}>
-            <span>{t.icon}</span>
-            <span>{t.label}</span>
-          </button>
-        ))}
-      </div>
+      <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
+        {data.map((entry: any, i: number) => {
+          const score = entry.rocket_score ?? 0
+          const scoreColor = score >= 70 ? '#fbbf24' : score >= 50 ? '#f59e0b' : '#9ca3af'
+          const volHigh = (entry.vol_ratio ?? 0) >= 2
 
+          return (
+            <div
+              key={entry.symbol}
+              onClick={() => navigate(`/chart?symbol=${entry.symbol}`)}
+              className="p-3 bg-gray-900 border rounded-lg cursor-pointer transition-all hover:scale-[1.01]"
+              style={{ borderColor: score >= 65 ? 'rgba(251,191,36,0.4)' : 'rgba(55,65,81,1)' }}
+            >
+              {/* Header */}
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-gray-600 font-mono">#{i + 1}</span>
+                    <span className="font-black text-lg tracking-wide">{entry.symbol}</span>
+                    {(entry.vol_ratio ?? 0) >= 5 && (
+                      <span className="text-[9px] bg-red-900/70 text-red-300 border border-red-700/50 px-1.5 py-0.5 rounded font-bold animate-pulse">
+                        🔥 {entry.vol_ratio?.toFixed(0)}×
+                      </span>
+                    )}
+                    {(entry.vol_ratio ?? 0) >= 2 && (entry.vol_ratio ?? 0) < 5 && (
+                      <span className="text-[9px] bg-yellow-900/60 text-yellow-400 border border-yellow-700/40 px-1.5 py-0.5 rounded font-bold">VOL {entry.vol_ratio?.toFixed(1)}×</span>
+                    )}
+                  </div>
+                  <div className="flex items-baseline gap-2 mt-0.5">
+                    <span className="text-sm font-mono text-gray-300">${entry.price?.toFixed(entry.price < 1 ? 4 : 2)}</span>
+                    {entry.dist_from_low != null && entry.dist_from_low < 50 && (
+                      <span className="text-[9px] text-yellow-600">{entry.dist_from_low.toFixed(0)}% from low</span>
+                    )}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-black" style={{ color: scoreColor }}>{score.toFixed(0)}</div>
+                  <div className="text-[9px] text-gray-600 uppercase tracking-wider">Rocket Score</div>
+                </div>
+              </div>
+
+              {/* Signal scores */}
+              <div className="grid grid-cols-3 gap-x-2 gap-y-0.5 text-[10px] mb-2">
+                {[
+                  { label: `RSI ${entry.rsi?.toFixed(0)}`, val: entry.rsi_score, color: entry.rsi_score > 50 ? '#34d399' : '#9ca3af' },
+                  { label: 'Cap',    val: entry.cap_score,  color: entry.cap_score > 50  ? '#fbbf24' : '#9ca3af' },
+                  { label: 'Coil',   val: entry.coil_score, color: entry.coil_score > 50 ? '#60a5fa' : '#9ca3af' },
+                  { label: 'BB Sqz', val: entry.bb_score,   color: entry.bb_score > 50   ? '#a78bfa' : '#9ca3af' },
+                  { label: 'MACD',   val: entry.macd_score, color: entry.macd_score > 50  ? '#f472b6' : '#9ca3af' },
+                  { label: 'Volume', val: entry.vol_score,  color: entry.vol_score > 50  ? '#34d399' : '#9ca3af' },
+                ].map(({ label, val, color }) => (
+                  <div key={label} className="flex justify-between gap-1">
+                    <span className="text-gray-600">{label}</span>
+                    <span style={{ color }}>{val != null ? val.toFixed(0) : '—'}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Notes */}
+              <div className="text-[10px] text-gray-500 pt-1.5 border-t border-gray-800 space-y-0.5">
+                {entry.notes?.map((n: string, j: number) => <div key={j}>{n}</div>)}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+export default function SignalsPage() {
+  return (
+    <div className="space-y-4">
       <div>
-        {tab === 'sniper-neg-gamma' && <GammaSniperPanel data={gammaData} isLoading={gammaLoading} />}
-        {tab === 'sniper-technical' && <TechnicalSniperPanel data={technicalData?.technical ?? []} isLoading={technicalLoading} />}
-        {tab === 'patterns'         && <PatternScanPage />}
-        {tab === 'confluence'       && <ConfluenceFunnel />}
+        <h2 className="text-2xl font-black text-white tracking-tight">SIGNALS</h2>
+        <p className="text-xs text-gray-500 mt-0.5">Pre-scanned setups · confluence zones · chart patterns</p>
       </div>
+      <QuantPanel />
     </div>
   )
 }

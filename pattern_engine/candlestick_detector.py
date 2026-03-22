@@ -23,9 +23,9 @@ def _status_from_age(age: int) -> str:
     """age = bars since pattern, 0 = current bar."""
     if age == 0:
         return "FORMING"
-    if age <= 3:
+    if age <= 2:
         return "READY"
-    return "FORMING"  # weakening but still notable
+    return "FAILED"   # candlestick signals expire — stale = invalid
 
 
 def detect(symbol: str, df: pd.DataFrame) -> list[dict[str, Any]]:
@@ -45,8 +45,9 @@ def detect(symbol: str, df: pd.DataFrame) -> list[dict[str, Any]]:
     # We'll collect: pattern_name → (bar_idx, direction, confidence)
     found: dict[str, tuple[int, str, float]] = {}
 
-    # Scan last 10 bars (or fewer if df is short)
-    start = max(2, n - 10)
+    # Scan last 5 bars only — candlestick signals are very time-sensitive;
+    # anything older than 5 bars is noise.
+    start = max(2, n - 5)
 
     for i in range(start, n):
         c2 = df.iloc[i]
@@ -149,12 +150,16 @@ def detect(symbol: str, df: pd.DataFrame) -> list[dict[str, Any]]:
             invalidation = price - atr
             target = price + atr
 
+        # Age decay: fresh (age=0) → full, age=1 → 85%, age=2 → 65%, age≥3 → expired (FAILED, filtered by service)
+        age_mult = 1.0 if age == 0 else (0.85 if age == 1 else 0.65)
+        final_conf = round(conf * age_mult, 1)
+
         results.append({
             "pattern_name": pattern_name,
             "pattern_category": "candlestick",
             "status": status,
             "direction": direction,
-            "confidence": round(conf * (0.8 if age > 2 else 1.0), 1),
+            "confidence": final_conf,
             "breakout_level": breakout,
             "invalidation_level": invalidation,
             "target": target,

@@ -215,3 +215,131 @@ def get_news(symbol: str, days: int = 7, limit: int = 20):
         ]
     except Exception as e:
         return []
+
+
+# ── Company name lookup ────────────────────────────────────────────────────────
+import time as _time
+
+_company_cache: dict[str, dict] = {}
+_COMPANY_TTL = 3600  # 1 hour
+
+
+@router.get("/company/{symbol}")
+def get_company(symbol: str):
+    """Return company name, sector and exchange for a symbol.
+    Tries Finnhub profile2 first, falls back to yfinance fast_info.
+    Cached 1 hour — called from the frontend search dropdown.
+    """
+    sym = symbol.upper()
+    cached = _company_cache.get(sym)
+    if cached and _time.time() - cached["_ts"] < _COMPANY_TTL:
+        return {k: v for k, v in cached.items() if k != "_ts"}
+
+    result = {"symbol": sym, "name": None, "sector": None, "exchange": None}
+
+    # ── Primary: Finnhub profile2 ─────────────────────────────────────────────
+    client = _finnhub()
+    if client:
+        try:
+            p = client.company_profile2(symbol=sym)
+            if p and p.get("name"):
+                result = {
+                    "symbol":   sym,
+                    "name":     p.get("name"),
+                    "sector":   p.get("finnhubIndustry"),
+                    "exchange": p.get("exchange"),
+                }
+                _company_cache[sym] = {**result, "_ts": _time.time()}
+                return result
+        except Exception:
+            pass
+
+    # ── Fallback: yfinance ────────────────────────────────────────────────────
+    try:
+        import yfinance as yf
+        info = yf.Ticker(sym).fast_info
+        name = getattr(info, "display_name", None) or getattr(info, "long_name", None)
+        if name:
+            result["name"] = name
+    except Exception:
+        pass
+
+    _company_cache[sym] = {**result, "_ts": _time.time()}
+    return result
+
+
+# ── Macro market ticker ────────────────────────────────────────────────────────
+# Global markets — indices, commodities, FX, crypto
+_MACRO_SYMS = [
+    ("^GSPTSE",  "S&P/TSX"),
+    ("^DJI",     "Dow Jones"),
+    ("^GSPC",    "S&P 500"),
+    ("^IXIC",    "Nasdaq"),
+    ("CL=F",     "WTI Crude"),
+    ("BZ=F",     "Brent"),
+    ("GC=F",     "Gold"),
+    ("CAD=X",    "USD/CAD"),
+    ("EURUSD=X", "EUR/USD"),
+    ("BTC-USD",  "Bitcoin"),
+]
+_macro_cache: dict = {"ts": 0.0, "data": []}
+_MACRO_TTL  = 30  # seconds — longer cache to avoid Yahoo rate limits with 10 symbols
+
+
+@router.get("/macro")
+def get_macro():
+    """Live macro snapshot — global indices, commodities, FX, crypto. Cached 30s."""
+    global _macro_cache
+    now = _time.time()
+    if now - _macro_cache["ts"] < _MACRO_TTL:
+        return {"items": _macro_cache["data"], "cached": True}
+
+    items = []
+
+    try:
+        import yfinance as yf
+        syms   = [s for s, _ in _MACRO_SYMS]
+        names  = {s: n for s, n in _MACRO_SYMS}
+        # yf.download is a single HTTP request — much less likely to rate-limit
+        df = yf.download(
+            syms,
+            period="2d",
+            interval="1d",
+            group_by="ticker",
+            auto_adjust=True,
+            progress=False,
+            threads=False,
+        )
+        for sym in syms:
+            try:
+                # Multi-ticker download: df[sym]["Close"] is a Series
+                if len(syms) > 1:
+                    closes = df[sym]["Close"].dropna()
+                else:
+                    closes = df["Close"].dropna()
+                if len(closes) < 1:
+                    continue
+                price = float(closes.iloc[-1])
+                prev  = float(closes.iloc[-2]) if len(closes) >= 2 else price
+                chg   = round(price - prev, 6)
+                pct   = round((chg / prev * 100) if prev else 0, 2)
+                items.append({
+                    "symbol": sym,
+                    "name":   names[sym],
+                    "price":  round(price, 4),
+                    "change": round(chg, 4),
+                    "pct":    pct,
+                })
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Only update cache when we got data — stale data is better than empty
+    if items:
+        _macro_cache = {"ts": now, "data": items}
+    elif _macro_cache["data"]:
+        # Rate-limited: bump timestamp so we don't hammer again immediately
+        _macro_cache["ts"] = now - _MACRO_TTL + 10  # retry in 10 s
+
+    return {"items": _macro_cache["data"], "cached": not bool(items)}

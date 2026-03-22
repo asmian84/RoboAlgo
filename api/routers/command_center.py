@@ -6,12 +6,15 @@ GET /api/command-center
   Returns: market_state_summary, opportunity_map, active_trades,
            portfolio_risk, system_health
 
-30-second in-memory cache to avoid hammering all engines on every poll.
+Collectors run in parallel (ThreadPoolExecutor) with an 8-second per-collector
+timeout so the endpoint always responds in < 10 s regardless of engine speed.
+Result is cached for 60 seconds to minimise repeated computation.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import APIRouter
 
@@ -19,7 +22,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ── In-memory cache ────────────────────────────────────────────────────────────
-_CACHE_TTL_SECONDS = 30
+_CACHE_TTL_SECONDS = 60          # cache lives 60 s — reduces hammering engines
+_COLLECTOR_TIMEOUT = 8           # each panel has max 8 s to respond
 _cache: dict[str, Any] = {"data": None, "expires_at": datetime.min}
 
 
@@ -32,29 +36,72 @@ def _set_cache(data: dict) -> None:
     _cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_CACHE_TTL_SECONDS)
 
 
+def _run_collector(name: str, fn: Callable, fallback: Any) -> tuple[str, Any]:
+    """Run a single panel collector with a timeout. Returns (name, result)."""
+    try:
+        return name, fn()
+    except FuturesTimeout:
+        logger.warning(f"Command center: {name} timed out after {_COLLECTOR_TIMEOUT}s")
+        return name, fallback
+    except Exception as e:
+        logger.warning(f"Command center: {name} error — {e}")
+        return name, fallback
+
+
 # ── Main endpoint ──────────────────────────────────────────────────────────────
 
 @router.get("")
 def get_command_center():
     """
     Aggregate and return the full Command Center state.
-    Cached for 30 seconds to reduce engine load on frequent polling.
+    All panel collectors run in parallel with an 8 s timeout each.
+    Cached for 60 seconds.
     """
     if _is_cache_valid():
         return _cache["data"]
 
-    result = {
-        "active_strategy":      _get_active_strategy(),
-        "market_state_summary": _get_market_state_summary(),
-        "opportunity_radar":    _get_opportunity_radar(),
-        "opportunity_map":      _get_opportunity_map(),
-        "active_trades":        _get_active_trades(),
-        "portfolio_risk":       _get_portfolio_risk(),
-        "system_health":        _get_system_health(),
-        "signal_reliability":   _get_signal_reliability(),
-        "market_safety":        _get_market_safety(),
-        "generated_at":         datetime.utcnow().isoformat() + "Z",
-    }
+    # Define collectors with their fallback values
+    collectors: list[tuple[str, Callable, Any]] = [
+        ("active_strategy",      _get_active_strategy,      {"dominant_regime": "UNKNOWN", "error": "timeout"}),
+        ("market_state_summary", _get_market_state_summary, {"counts": {}, "instruments": []}),
+        ("opportunity_radar",    _get_opportunity_radar,    {"instruments": [], "early_stage_count": 0}),
+        ("opportunity_map",      _get_opportunity_map,      {"signals": []}),
+        ("active_trades",        _get_active_trades,        {"trades": [], "count": 0}),
+        ("portfolio_risk",       _get_portfolio_risk,       {"account_equity": 0, "open_positions": 0}),
+        ("system_health",        _get_system_health,        {"pipeline_status": "UNKNOWN", "data_quality_score": 0}),
+        ("signal_reliability",   _get_signal_reliability,   {"strategies": [], "system_reliability": None}),
+        ("market_safety",        _get_market_safety,        {"safety_state": "CAUTION", "trading_allowed": True}),
+    ]
+
+    result: dict[str, Any] = {"generated_at": datetime.utcnow().isoformat() + "Z"}
+
+    # Run all collectors in parallel.
+    # IMPORTANT: do NOT use `with ThreadPoolExecutor` — the context manager calls
+    # shutdown(wait=True) which blocks until every thread finishes, even after we've
+    # already collected results via future.result(timeout=...).  Instead we call
+    # shutdown(wait=False, cancel_futures=True) after collecting so slow threads are
+    # abandoned and the request returns immediately.
+    pool = ThreadPoolExecutor(max_workers=len(collectors))
+    try:
+        futures = {
+            pool.submit(_run_collector, name, fn, fb): name
+            for name, fn, fb in collectors
+        }
+        for future in futures:
+            name = futures[future]
+            fallback = next(fb for n, _, fb in collectors if n == name)
+            try:
+                key, value = future.result(timeout=_COLLECTOR_TIMEOUT + 1)
+                result[key] = value
+            except FuturesTimeout:
+                result[name] = fallback
+                logger.warning(f"Command center timeout: {name}")
+            except Exception as e:
+                result[name] = fallback
+                logger.warning(f"Command center error {name}: {e}")
+    finally:
+        # Abandon any threads still running — don't block the HTTP response
+        pool.shutdown(wait=False, cancel_futures=True)
 
     _set_cache(result)
     return result
@@ -198,7 +245,7 @@ def _get_opportunity_map() -> dict:
         from confluence_engine.score import ConfluenceEngine
 
         engine  = ConfluenceEngine()
-        signals = engine.get_top_signals(min_tier="WATCH", limit=25)
+        signals = engine.get_top_signals(min_tier="WATCH", limit=10)  # cap at 10 — each symbol runs 7 engines
 
         # Pre-load quality scores for enrichment
         from analytics_engine.setup_quality import SetupQualityScorer

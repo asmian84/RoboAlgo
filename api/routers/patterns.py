@@ -417,7 +417,75 @@ def get_patterns_for_symbol(
     Omit tf (or use daily/1d) to use daily bars from the DB with yfinance fallback.
     """
     resolution_minutes = _TF_RESOLUTION.get(tf.lower().strip(), 0)
-    patterns = service.detect_for_symbol(symbol.upper(), resolution_minutes)[:limit]
+    raw_patterns = service.detect_for_symbol(symbol.upper(), resolution_minutes)
+
+    # ── Output filtering: quality over quantity ────────────────────────────
+    # 1. Remove non-active statuses (FAILED, NOT_PRESENT are noise)
+    ACTIVE = {"FORMING", "READY", "BREAKOUT", "COMPLETED"}
+    raw_patterns = [p for p in raw_patterns if p.get("status") in ACTIVE]
+
+    # 2. Per-category caps — prevent any single category from flooding
+    CATEGORY_CAPS = {
+        "harmonic":        2,   # max 2 harmonic patterns (e.g. Gartley + Crab)
+        "chart":           4,   # max 4 chart patterns
+        "gann":            1,   # only 1 Gann overlay
+        "wyckoff":         1,   # only 1 Wyckoff structure
+        "candlestick":     2,   # max 2 candlestick patterns (only fresh ones survive)
+        "behavioral":      2,
+        "indicator":       2,
+        "volume":          2,
+        "measured_move":   1,
+        "strategy":        3,   # limit strategy signal spam
+        "market_analysis": 2,
+        "astro":           1,   # 1 astro pattern max — informational only
+    }
+    cat_count: dict[str, int] = {}
+    filtered: list[dict] = []
+    for p in sorted(raw_patterns, key=lambda x: x.get("confidence", 0), reverse=True):
+        cat = p.get("pattern_category", "chart")
+        cap = CATEGORY_CAPS.get(cat, 2)
+        if cat_count.get(cat, 0) < cap:
+            cat_count[cat] = cat_count.get(cat, 0) + 1
+            filtered.append(p)
+
+    # 3. Minimum confidence floor after category filtering (belt + suspenders)
+    filtered = [p for p in filtered if (p.get("confidence") or 0) >= 55.0]
+
+    # 4. Resolve contradictory pattern pairs — keep only the higher-confidence one
+    # Each tuple: (pattern_A, pattern_B) — only one should survive per group
+    CONTRADICTORY_PAIRS: list[tuple[str, str]] = [
+        ("Gap Up",                           "Gap Down"),
+        ("RSI(2) Oversold Setup",            "RSI(2) Overbought Exit"),
+        ("Stochastic Pop",                   "Stochastic Drop"),
+        ("CCI Correction Bullish",           "CCI Correction Bearish"),
+        ("Golden Cross Setup",               "Death Cross Setup"),
+        ("MACD Bullish Crossover",           "MACD Bearish Crossover"),
+        ("MACD Zero Line Cross Up",          "MACD Zero Line Cross Down"),
+        ("RSI Regular Bullish Divergence",   "RSI Regular Bearish Divergence"),
+        ("Dow Trend Reversal Signal Bullish", "Dow Trend Reversal Signal Bearish"),
+        ("Ichimoku TK Cross Bullish",        "Ichimoku TK Cross Bearish"),
+        ("Above Ichimoku Cloud",             "Below Ichimoku Cloud"),
+        ("Elder Impulse Bullish",            "Elder Impulse Bearish"),
+        ("Healthy Uptrend",                  "Healthy Downtrend"),
+    ]
+    present_names = {p.get("pattern_name", ""): p for p in filtered}
+    to_remove: set[str] = set()
+    for name_a, name_b in CONTRADICTORY_PAIRS:
+        if name_a in present_names and name_b in present_names:
+            pa, pb = present_names[name_a], present_names[name_b]
+            # Remove the lower-confidence one; prefer BREAKOUT/READY over FORMING
+            def _priority(pat: dict) -> float:
+                status_bonus = {"BREAKOUT": 10, "READY": 5, "COMPLETED": 8, "FORMING": 0}
+                return (pat.get("confidence") or 0) + status_bonus.get(pat.get("status", ""), 0)
+            if _priority(pa) >= _priority(pb):
+                to_remove.add(name_b)
+            else:
+                to_remove.add(name_a)
+    filtered = [p for p in filtered if p.get("pattern_name", "") not in to_remove]
+
+    # 5. Global cap — user wants quality not quantity
+    patterns = filtered[:min(limit, 12)]
+
     now = datetime.utcnow().date().isoformat()
     out = []
     for p in patterns:

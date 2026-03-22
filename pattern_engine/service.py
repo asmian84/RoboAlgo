@@ -257,9 +257,16 @@ class PatternService:
 
         if status not in ("NOT_PRESENT", "FAILED"):
             confluence = compute_confluence(normalized, price_data)
-            # Blend: 60% detector confidence + 40% confluence so strong patterns keep their score
-            blended = 0.60 * base_conf + 0.40 * confluence["confluence_score"]
             import numpy as np
+            category = raw.get("pattern_category", "chart")
+            if category == "harmonic":
+                # Harmonic patterns have already gone through tight ratio + structural validation.
+                # Use detector confidence directly — don't let a loose confluence score inflate
+                # or deflate carefully validated patterns.
+                blended = base_conf
+            else:
+                # For other categories: 70% detector confidence + 30% confluence (reduced from 40%)
+                blended = 0.70 * base_conf + 0.30 * confluence["confluence_score"]
             normalized["confidence"] = float(np.clip(blended, 0, 100))
             normalized["confluence"] = confluence
         return normalized
@@ -297,9 +304,33 @@ class PatternService:
                     category, symbol, resolution_minutes, exc, exc_info=True,
                 )
         results.sort(key=lambda p: p.get("confidence", 0.0), reverse=True)
+
+        # ── Global minimum confidence filter ─────────────────────────────────
+        # Per-category minimum thresholds — only high-quality patterns surface.
+        CATEGORY_MIN_CONF = {
+            "harmonic":        68.0,   # Must pass tight ratio + structural gates
+            "chart":           55.0,   # Chart patterns with confluence
+            "gann":            60.0,
+            "wyckoff":         55.0,
+            "candlestick":     60.0,   # Candlestick signals need to be clear
+            "behavioral":      55.0,
+            "indicator":       60.0,
+            "volume":          55.0,
+            "measured_move":   55.0,
+            "strategy":        55.0,
+            "market_analysis": 55.0,
+            "astro":           50.0,   # Astro is informational
+        }
+        filtered = []
+        for r in results:
+            cat = r.get("pattern_category", "chart")
+            min_conf = CATEGORY_MIN_CONF.get(cat, 55.0)
+            if r.get("confidence", 0.0) >= min_conf:
+                filtered.append(r)
+
         # Deduplicate by pattern_name — keep the highest-confidence instance
         seen: dict[str, dict] = {}
-        for r in results:
+        for r in filtered:
             name = r.get("pattern_name", "")
             if name and name not in seen:
                 seen[name] = r

@@ -6,8 +6,9 @@ import CommandCenterPage   from './pages/CommandCenterPage'
 import RegimeTimelinePage  from './pages/RegimeTimelinePage'
 import PaperTradingPage    from './pages/PaperTradingPage'
 import OpportunityMatrixPage from './pages/OpportunityMatrixPage'
-import AnalyticsPage         from './pages/AnalyticsPage'
+import EdgePage              from './pages/EdgePage'
 import TickerIntelPage       from './pages/TickerIntelPage'
+import SettingsPage          from './pages/SettingsPage'
 import LoginPage             from './pages/LoginPage'
 import { AlertProvider }     from './components/alerts/AlertManager'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -33,13 +34,13 @@ function ProtectedLayout() {
       <TerminalLayout>
         <Routes>
           {/* ── Primary nav (6 sidebar items) ── */}
-          <Route path="/"          element={<TickerIntelPage />} />
-          <Route path="/intel"     element={<TickerIntelPage />} />
-          <Route path="/chart"     element={<ChartPage />} />
-          <Route path="/signals"   element={<SignalsPage />} />
-          <Route path="/analytics" element={<AnalyticsPage />} />
-          <Route path="/paper"     element={<PaperTradingPage />} />
-          <Route path="/command"   element={<CommandCenterPage />} />
+          <Route path="/"       element={<Navigate to="/edge" replace />} />
+          <Route path="/edge"   element={<EdgePage />} />
+          <Route path="/intel"  element={<TickerIntelPage />} />
+          <Route path="/chart"  element={<ChartPage />} />
+          <Route path="/signals" element={<SignalsPage />} />
+          <Route path="/paper"  element={<PaperTradingPage />} />
+          <Route path="/command" element={<CommandCenterPage />} />
 
           {/* ── Consolidated redirects — Signals hub ── */}
           <Route path="/scan"           element={<Navigate to="/signals" replace />} />
@@ -48,16 +49,20 @@ function ProtectedLayout() {
           <Route path="/recommendation" element={<Navigate to="/signals" replace />} />
           <Route path="/comparison"     element={<Navigate to="/signals" replace />} />
 
-          {/* ── Consolidated redirects — Analytics hub ── */}
-          <Route path="/backtest"  element={<Navigate to="/analytics" replace />} />
-          <Route path="/evolution" element={<Navigate to="/analytics" replace />} />
-          <Route path="/research"  element={<Navigate to="/analytics" replace />} />
-          <Route path="/features"  element={<Navigate to="/analytics" replace />} />
+          {/* ── Consolidated redirects — Edge hub ── */}
+          <Route path="/analytics" element={<Navigate to="/edge" replace />} />
+          <Route path="/dashboard" element={<Navigate to="/edge" replace />} />
+          <Route path="/backtest"  element={<Navigate to="/edge" replace />} />
+          <Route path="/evolution" element={<Navigate to="/edge" replace />} />
+          <Route path="/research"  element={<Navigate to="/edge" replace />} />
+          <Route path="/features"  element={<Navigate to="/edge" replace />} />
 
-          {/* ── Consolidated redirects — Intel hub ── */}
+          {/* ── Legacy Intel redirects ── */}
           <Route path="/bull-bear" element={<Navigate to="/intel" replace />} />
           <Route path="/cycles"    element={<Navigate to="/intel" replace />} />
-          <Route path="/dashboard" element={<Navigate to="/intel" replace />} />
+
+          {/* ── Settings ── */}
+          <Route path="/settings"        element={<SettingsPage />} />
 
           {/* ── Deep-link aliases (unique pages, kept accessible) ── */}
           <Route path="/matrix"          element={<OpportunityMatrixPage />} />

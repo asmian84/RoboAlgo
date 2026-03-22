@@ -248,12 +248,36 @@ export function useBullBearAnalysis() {
   })
 }
 
+const _CMD_LS_KEY = 'roboalgo:cmd-center-v1'
+
+function _cmdReadCache(): CommandCenterData | undefined {
+  try {
+    const raw = localStorage.getItem(_CMD_LS_KEY)
+    return raw ? JSON.parse(raw) as CommandCenterData : undefined
+  } catch { return undefined }
+}
+
+function _cmdWriteCache(d: CommandCenterData) {
+  try { localStorage.setItem(_CMD_LS_KEY, JSON.stringify(d)) } catch {}
+}
+
 export function useCommandCenter() {
+  // Serve stale localStorage data instantly while the network request runs
+  const initialData = _cmdReadCache()
+
   return useQuery<CommandCenterData>({
     queryKey: ['command-center'],
-    queryFn: () => api.get('/command-center').then(r => r.data),
+    queryFn: async () => {
+      const r = await api.get('/command-center')
+      _cmdWriteCache(r.data)          // persist fresh data for next load
+      return r.data
+    },
     staleTime: 30_000,
     refetchInterval: 60_000,
+    initialData,
+    // If we have cache, treat it as stale (0 ms old → refetch immediately but show cache)
+    initialDataUpdatedAt: initialData ? 0 : undefined,
+    retry: 2,
   })
 }
 
@@ -490,10 +514,26 @@ export interface MarketBreadthData {
   // SPY momentum
   spy_momentum:         number | null
   spy_above_ma:         boolean | null
-  // Fear/Greed composite
+  // Fear/Greed — CNN live index
   fear_greed:           number | null
   fear_greed_label:     string
   fear_greed_direction: 'bullish' | 'bearish' | 'neutral'
+  // Previous period comparisons
+  fear_greed_prev_close?: number | null
+  fear_greed_prev_1w?:    number | null
+  fear_greed_prev_1m?:    number | null
+  fear_greed_prev_1y?:    number | null
+  // Historical sparkline (last 60 days)
+  fear_greed_history?: { x: number; y: number }[]
+  // 7 component indicators
+  fear_greed_components?: {
+    key:         string
+    label:       string
+    description: string
+    score:       number | null
+    rating:      string
+    spark:       { x: number; y: number }[]
+  }[]
   error?:               string
 }
 

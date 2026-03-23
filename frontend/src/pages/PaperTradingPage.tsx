@@ -7,8 +7,9 @@
  * Starting balance is configurable: $10K · $25K · $100K · $250K · $1M · custom.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import axios from 'axios'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -458,6 +459,7 @@ export default function PaperTradingPage() {
   const [showSetup,  setShowSetup]  = useState(false)
   const [closeOrder, setCloseOrder] = useState<PaperOrder | null>(null)
   const [showReset,  setShowReset]  = useState(false)
+  const [tab, setTab] = useState<'trading' | 'report'>('trading')
 
   // Read prefill from URL params (set by Intel page "Paper Trade" button)
   const prefill = {
@@ -490,6 +492,46 @@ export default function PaperTradingPage() {
     saveAccount(acct)
   }, [])
 
+  // Map local order IDs to trade logger IDs for outcome updates
+  const tradeLogMap = useRef<Map<number, string>>(new Map())
+
+  // Auto-log trade entry
+  async function logTradeEntry(order: PaperOrder) {
+    try {
+      const res = await axios.post('/api/trades/log-entry', {
+        symbol: order.symbol,
+        timeframe: 'daily',
+        entry_price: order.entry,
+        target_price: order.target,
+        stop_price: order.stop,
+        signals: {},  // Can enhance later with actual signal data
+        screenshot_base64: null,
+        notes: `${order.direction === 'buy' ? 'Long' : 'Short'} | Risk/Reward: ${order.target && order.stop ? ((order.target - order.entry) / (order.entry - order.stop)).toFixed(1) : '—'}`,
+      })
+      // Store mapping of local order ID → trade logger ID
+      tradeLogMap.current.set(order.id, res.data.trade_id)
+    } catch (e) {
+      console.warn('Failed to log trade entry:', e)
+    }
+  }
+
+  // Auto-log trade outcome
+  async function logTradeOutcome(order: PaperOrder) {
+    const tradeId = tradeLogMap.current.get(order.id)
+    if (!tradeId) return  // No logger ID, skip
+
+    try {
+      await axios.patch(`/api/trades/log-outcome/${tradeId}`, {
+        exit_price: order.exitPrice ?? 0,
+        exit_time: order.exitTime,
+        reason: order.pnl ? (order.pnl > 0 ? 'hit_target' : 'stopped_out') : 'manual_exit',
+      })
+      tradeLogMap.current.delete(order.id)
+    } catch (e) {
+      console.warn('Failed to log trade outcome:', e)
+    }
+  }
+
   function handleCreate(balance: number) {
     const acct = defaultAccount(balance)
     setAccount(acct)
@@ -515,6 +557,8 @@ export default function PaperTradingPage() {
       orders:   [...account.orders, newOrder],
       nextId:   account.nextId + 1,
     })
+    // Auto-log trade entry
+    logTradeEntry(newOrder)
   }
 
   function handleCloseConfirm(exitPrice: number) {
@@ -522,10 +566,10 @@ export default function PaperTradingPage() {
     const { size, entry, direction } = closeOrder
     const pnl      = (exitPrice - entry) * size * (direction === 'buy' ? 1 : -1)
     const returned = size * entry   // return reserved capital
+    const exitTime = new Date().toISOString()
+    const closedOrder = { ...closeOrder, status: 'closed' as const, exitPrice, exitTime, pnl: parseFloat(pnl.toFixed(2)) }
     const updatedOrders = account.orders.map(o =>
-      o.id === closeOrder.id
-        ? { ...o, status: 'closed' as const, exitPrice, exitTime: new Date().toISOString(), pnl: parseFloat(pnl.toFixed(2)) }
-        : o
+      o.id === closeOrder.id ? closedOrder : o
     )
     // Earn 1 token for every 5 winning trades (as a reward mechanic)
     const wins    = updatedOrders.filter(o => o.status === 'closed' && (o.pnl ?? 0) > 0).length
@@ -536,6 +580,8 @@ export default function PaperTradingPage() {
       tokens:         account.tokens + bonusToken,
       orders:         updatedOrders,
     })
+    // Auto-log trade outcome
+    logTradeOutcome(closedOrder)
     setCloseOrder(null)
   }
 

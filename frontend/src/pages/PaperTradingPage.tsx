@@ -310,12 +310,14 @@ function QuickTradePanel({
   onSubmit: (order: Omit<PaperOrder, 'id' | 'timestamp' | 'status'>) => void
   prefill: { symbol?: string; direction?: 'buy' | 'sell'; entry?: number; stop?: number; target?: number }
 }) {
-  const [symbol,    setSymbol]    = useState(prefill.symbol    ?? 'AAPL')
-  const [direction, setDirection] = useState<'buy' | 'sell'>(prefill.direction ?? 'buy')
-  const [entry,     setEntry]     = useState(prefill.entry     ?? 0)
-  const [stop,      setStop]      = useState(prefill.stop      ?? 0)
-  const [target,    setTarget]    = useState(prefill.target    ?? 0)
-  const [riskPct,   setRiskPct]   = useState(1.0)  // % of account to risk
+  const [symbol,      setSymbol]      = useState(prefill.symbol    ?? 'AAPL')
+  const [direction,   setDirection]   = useState<'buy' | 'sell'>(prefill.direction ?? 'buy')
+  const [entryType,   setEntryType]   = useState<'market' | 'limit'>('limit')  // market vs limit order
+  const [entry,       setEntry]       = useState(prefill.entry     ?? 0)
+  const [stop,        setStop]        = useState(prefill.stop      ?? 0)
+  const [target,      setTarget]      = useState(prefill.target    ?? 0)
+  const [riskPct,     setRiskPct]     = useState(1.0)  // % of account to risk
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null)  // for market orders
 
   // Update when prefill changes (e.g., navigating from Intel page)
   useEffect(() => {
@@ -381,10 +383,44 @@ function QuickTradePanel({
           </div>
         </div>
 
+        {/* Entry Type Toggle */}
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Entry Method</label>
+          <div className="flex gap-1">
+            {(['market', 'limit'] as const).map(type => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setEntryType(type)}
+                className={`flex-1 py-1.5 rounded text-xs font-bold transition-colors ${
+                  entryType === type ? 'bg-blue-900/40 border-blue-600/60 text-blue-300' : 'border border-gray-700 text-gray-500 hover:text-gray-200'
+                }`}
+              >
+                {type === 'market' ? '⚡ Market' : '🎯 Limit'}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Prices */}
         <div className="grid grid-cols-3 gap-2">
+          {/* Entry Price */}
+          <div>
+            <label className="text-xs block mb-1" style={{ color: '#f3f4f6' }}>
+              {entryType === 'market' ? 'Entry (Mkt)' : 'Entry (Limit)'}
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              value={entry || ''}
+              onChange={e => setEntry(parseFloat(e.target.value) || 0)}
+              placeholder={entryType === 'market' ? 'Current price' : 'Limit price'}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs font-mono text-gray-200 focus:outline-none focus:border-emerald-600"
+            />
+          </div>
+
+          {/* Stop + Target */}
           {[
-            { label: 'Entry',  value: entry,  setter: setEntry,  color: '#f3f4f6' },
             { label: 'Stop',   value: stop,   setter: setStop,   color: '#ef4444' },
             { label: 'Target', value: target, setter: setTarget, color: '#22c55e' },
           ].map(({ label, value, setter, color }) => (

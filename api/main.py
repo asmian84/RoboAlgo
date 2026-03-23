@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routers import (
     instruments, prices, indicators, features, cycles, signals,
     analysis, patterns, quotes, mtf, recommendation, backtest,
-    trendlines, alphavantage, paper_trading, volatility,
+    trendlines, alphavantage, paper_trading, trades, volatility,
     confluence, compression, breakout, market_state,
     analytics, strategy, command_center,
     pipeline, trade_coach, evolution,
@@ -51,6 +51,7 @@ app.include_router(backtest.router, prefix="/api/backtest", tags=["backtest"])
 app.include_router(trendlines.router, prefix="/api/trendlines", tags=["trendlines"])
 app.include_router(alphavantage.router, prefix="/api/av", tags=["alphavantage"])
 app.include_router(paper_trading.router, prefix="/api/paper", tags=["paper_trading"])
+app.include_router(trades.router, prefix="/api/trades", tags=["trades"])
 app.include_router(volatility.router,    prefix="/api/volatility",    tags=["volatility"])
 app.include_router(confluence.router,   prefix="/api/confluence",    tags=["confluence"])
 app.include_router(compression.router,  prefix="/api/compression",   tags=["compression"])

@@ -4,6 +4,7 @@ import { useCommandCenter } from '../../api/hooks'
 import SideNav from './SideNav'
 import MacroTickerBar from './MacroTickerBar'
 import CommandPalette from '../terminal/CommandPalette'
+import { TradeLogger } from '../TradeLogger'
 
 interface Props {
   children: React.ReactNode
@@ -42,6 +43,7 @@ export default function TerminalLayout({ children }: Props) {
   return (
     <>
       <CommandPalette isOpen={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <TradeLogger symbol={activeSymbol} />
 
       <div className="flex h-screen overflow-hidden bg-gray-950 text-gray-100">
         <SideNav safety={data?.market_safety} currentSymbol={activeSymbol} />

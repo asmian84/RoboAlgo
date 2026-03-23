@@ -328,6 +328,23 @@ function QuickTradePanel({
     if (prefill.target)    setTarget(prefill.target)
   }, [prefill.symbol, prefill.direction, prefill.entry, prefill.stop, prefill.target])
 
+  // Fetch current market price for market orders
+  useEffect(() => {
+    if (entryType === 'market' && symbol) {
+      const fetchPrice = async () => {
+        try {
+          const res = await axios.get(`/api/quote/${symbol.toUpperCase()}`)
+          const price = res.data.price
+          setCurrentPrice(price)
+          setEntry(price)
+        } catch {
+          // Silently fail if price fetch unavailable
+        }
+      }
+      fetchPrice()
+    }
+  }, [entryType, symbol])
+
   // Auto-size based on risk %
   const riskPerShare  = entry > 0 && stop > 0 ? Math.abs(entry - stop) : 0
   const accountRisk   = account.currentBalance * (riskPct / 100)
@@ -415,7 +432,12 @@ function QuickTradePanel({
               value={entry || ''}
               onChange={e => setEntry(parseFloat(e.target.value) || 0)}
               placeholder={entryType === 'market' ? 'Current price' : 'Limit price'}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs font-mono text-gray-200 focus:outline-none focus:border-emerald-600"
+              disabled={entryType === 'market'}
+              className={`w-full rounded-lg px-2 py-1.5 text-xs font-mono border focus:outline-none ${
+                entryType === 'market'
+                  ? 'bg-gray-700 border-gray-600 text-gray-400 cursor-not-allowed'
+                  : 'bg-gray-800 border-gray-700 text-gray-200 focus:border-emerald-600'
+              }`}
             />
           </div>
 
@@ -459,18 +481,24 @@ function QuickTradePanel({
 
         {/* Metrics */}
         {entry > 0 && stop > 0 && effectiveSize > 0 && (
-          <div className="grid grid-cols-3 gap-2 text-xs bg-gray-800/50 rounded-lg px-3 py-2">
-            <div>
-              <p className="text-gray-600">Position</p>
-              <p className="font-mono text-gray-300">${(positionValue / 1000).toFixed(1)}K</p>
+          <div className="space-y-2">
+            <div className="text-xs bg-gray-800/50 rounded-lg px-3 py-2">
+              <p className="text-gray-600">Position Value</p>
+              <p className="font-mono text-gray-300">{effectiveSize} × ${fmt(entry, 2)} = ${fmt(positionValue, 0)}</p>
             </div>
-            <div>
-              <p className="text-gray-600">Risk</p>
-              <p className="font-mono text-red-400">${fmt(riskAmount, 0)}</p>
-            </div>
-            <div>
-              <p className="text-gray-600">R:R</p>
-              <p className="font-mono text-emerald-400">{rrRatio ? `1:${rrRatio}` : '—'}</p>
+            <div className="grid grid-cols-3 gap-2 text-xs bg-gray-800/50 rounded-lg px-3 py-2">
+              <div>
+                <p className="text-gray-600">Risk</p>
+                <p className="font-mono text-red-400">${fmt(riskAmount, 0)}</p>
+              </div>
+              <div>
+                <p className="text-gray-600">R:R</p>
+                <p className="font-mono text-emerald-400">{rrRatio ? `1:${rrRatio}` : '—'}</p>
+              </div>
+              <div>
+                <p className="text-gray-600">Available After</p>
+                <p className="font-mono text-blue-400">${fmt(account.currentBalance - positionValue, 0)}</p>
+              </div>
             </div>
           </div>
         )}

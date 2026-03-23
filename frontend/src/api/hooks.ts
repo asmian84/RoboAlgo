@@ -109,13 +109,51 @@ export function usePatternCatalogue() {
   })
 }
 
+// ── localStorage cache helpers — pattern scan + confluence ────────────────────
+const _SCAN_LS_PREFIX = 'roboalgo:pattern-scan-v1'
+const _CONF_LS_KEY    = 'roboalgo:confluence-top-v1'
+
+function _lsRead<T>(key: string): T | undefined {
+  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) as T : undefined }
+  catch { return undefined }
+}
+function _lsWrite(key: string, d: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(d)) } catch {}
+}
+
 export function usePatternScan(enabled = true, tf?: string) {
+  const lsKey     = `${_SCAN_LS_PREFIX}:${tf ?? 'daily'}`
+  const initialData = _lsRead<PatternScanEntry[]>(lsKey)
+
   return useQuery<PatternScanEntry[]>({
     queryKey: ['patterns', 'scan', tf ?? 'daily'],
-    queryFn: () => api.get('/patterns/scan', { params: tf ? { tf } : {} }).then(r => r.data),
+    queryFn: async () => {
+      const d = await api.get('/patterns/scan', { params: tf ? { tf } : {} }).then(r => r.data)
+      _lsWrite(lsKey, d)
+      return d
+    },
     enabled,
-    staleTime: 5 * 60_000,   // matches backend 5-min TTL cache
-    gcTime:    10 * 60_000,
+    staleTime:            5 * 60_000,
+    gcTime:               10 * 60_000,
+    initialData,
+    initialDataUpdatedAt: initialData ? 0 : undefined,   // treat cache as stale → refetch immediately
+  })
+}
+
+export function useTopConfluenceSignals(tier = 'WATCH', limit = 60) {
+  const lsKey     = `${_CONF_LS_KEY}:${tier}:${limit}`
+  const initialData = _lsRead<ConfluenceResult[]>(lsKey)
+
+  return useQuery<ConfluenceResult[]>({
+    queryKey: ['confluence', 'top', tier, limit],
+    queryFn: async () => {
+      const d = await api.get('/confluence/top', { params: { tier, limit } }).then(r => r.data?.signals ?? [])
+      _lsWrite(lsKey, d)
+      return d
+    },
+    staleTime:            2 * 60_000,
+    initialData,
+    initialDataUpdatedAt: initialData ? 0 : undefined,
   })
 }
 

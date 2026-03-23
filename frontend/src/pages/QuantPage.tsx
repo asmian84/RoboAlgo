@@ -148,6 +148,35 @@ function ErrorBox({ msg }: { msg: string }) {
   )
 }
 
+// ── Thin refresh bar — 2px gradient strip shown during background refetch ────────
+const _POUNCE_LS_KEY = 'roboalgo:pounce-v1'
+
+function RefreshBar({ active }: { active: boolean }) {
+  const [width,  setWidth]  = useState(0)
+  const [fading, setFading] = useState(false)
+
+  useEffect(() => {
+    if (active) {
+      setFading(false); setWidth(0)
+      const t = setTimeout(() => setWidth(80), 30)
+      return () => clearTimeout(t)
+    } else {
+      setWidth(100)
+      const t = setTimeout(() => setFading(true), 300)
+      return () => clearTimeout(t)
+    }
+  }, [active])
+
+  if (!active && fading) return null
+  return (
+    <div className="h-[2px] w-full rounded-full overflow-hidden bg-transparent"
+         style={{ opacity: fading ? 0 : 1, transition: 'opacity 0.4s ease' }}>
+      <div className="h-full rounded-full bg-gradient-to-r from-violet-500 via-blue-400 to-emerald-400"
+           style={{ width: `${width}%`, transition: active ? 'width 6s ease-out' : 'width 0.25s ease-in' }} />
+    </div>
+  )
+}
+
 // ── Scan progress bar — replaces the generic spinner during long scans ─────────
 const SCAN_STAGES = [
   { at:  0, label: 'Initialising scanner…' },
@@ -1905,7 +1934,13 @@ function SymbolDrawer({ setup, onClose }: { setup: ScanSetup; onClose: () => voi
 }
 
 function PounceTab() {
-  const [data,         setData]         = useState<PounceScanResult | null>(null)
+  const [data,         setData]         = useState<PounceScanResult | null>(() => {
+    // Seed from localStorage on first render — instant display, no flicker
+    try {
+      const raw = localStorage.getItem(_POUNCE_LS_KEY)
+      return raw ? JSON.parse(raw) as PounceScanResult : null
+    } catch { return null }
+  })
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState('')
   const [bandIdx,      setBandIdx]      = useState(0)
@@ -1942,6 +1977,8 @@ function PounceTab() {
         params: { include_bear: true, force },  // bear ETFs always included
       })
       setData(res.data)
+      // Persist fresh result for next visit
+      try { localStorage.setItem(_POUNCE_LS_KEY, JSON.stringify(res.data)) } catch { /* quota */ }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setError(msg ?? 'Scan failed')
@@ -1950,7 +1987,7 @@ function PounceTab() {
     }
   }
 
-  // Auto-load on mount
+  // Auto-load on mount — background refresh (cached data already shown if available)
   useEffect(() => { runScan() }, [])
 
   const band    = PRICE_BANDS[bandIdx]
@@ -2016,6 +2053,9 @@ function PounceTab() {
           </button>
         ))}
       </div>
+
+      {/* Thin refresh bar — shown during background fetch when cached data is visible */}
+      <RefreshBar active={loading && data != null} />
 
       {error && <ErrorBox msg={error} />}
 

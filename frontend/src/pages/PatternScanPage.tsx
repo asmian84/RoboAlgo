@@ -8,11 +8,36 @@
  * Results come from GET /api/patterns/scan (5-min backend TTL cache).
  */
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePatternScan } from '../api/hooks'
 import { useQueryClient } from '@tanstack/react-query'
 import type { PatternScanEntry } from '../types'
+
+// ── Shared RefreshBar (thin 2px progress bar for background fetches) ──────────
+function RefreshBar({ active }: { active: boolean }) {
+  const [width, setWidth]   = useState(0)
+  const [fading, setFading] = useState(false)
+  useEffect(() => {
+    if (active) {
+      setFading(false); setWidth(0)
+      const t = setTimeout(() => setWidth(80), 30)
+      return () => clearTimeout(t)
+    } else {
+      setWidth(100)
+      const t = setTimeout(() => setFading(true), 300)
+      return () => clearTimeout(t)
+    }
+  }, [active])
+  if (!active && fading) return null
+  return (
+    <div className="h-[2px] w-full rounded-full overflow-hidden bg-transparent"
+         style={{ opacity: fading ? 0 : 1, transition: 'opacity 0.4s ease' }}>
+      <div className="h-full rounded-full bg-gradient-to-r from-violet-500 via-blue-400 to-emerald-400"
+           style={{ width: `${width}%`, transition: active ? 'width 6s ease-out' : 'width 0.25s ease-in' }} />
+    </div>
+  )
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -154,23 +179,23 @@ export default function PatternScanPage() {
     else { setSortKey(key); setSortAsc(false) }
   }
 
-  // ── Loading skeleton ────────────────────────────────────────────────────────
+  // ── Loading skeleton (no cache: first-ever load) ───────────────────────────
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 gap-4 text-gray-500">
-        <div className="relative">
-          <div className="w-10 h-10 rounded-full border-2 border-gray-700 border-t-blue-500 animate-spin" />
-        </div>
-        <div className="text-center">
-          <p className="text-sm font-medium text-gray-400">Scanning all instruments…</p>
-          <p className="text-xs text-gray-600 mt-1">Running pattern detection in parallel · this takes ~10–20 s on first load</p>
-        </div>
+      <div className="space-y-3">
+        <RefreshBar active />
+        <p className="text-xs text-gray-600">Running pattern detection · ~10–20 s on first load</p>
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="h-12 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" />
+        ))}
       </div>
     )
   }
 
   return (
     <div className="space-y-3">
+      {/* Thin bar — background refresh when cached data is shown */}
+      <RefreshBar active={isFetching} />
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">

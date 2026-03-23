@@ -7,7 +7,7 @@
  *   Patterns       — batch chart pattern scanner
  */
 
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import PatternScanPage    from './PatternScanPage'
 import QuantPanel         from './QuantPage'
@@ -15,6 +15,7 @@ import { useConfluenceScore } from '../api/hooks'
 import api from '../api/client'
 import { useQuery } from '@tanstack/react-query'
 import type { ConfluenceResult } from '../api/hooks'
+import { useTopConfluenceSignals } from '../api/hooks'
 import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid,
   Tooltip, ReferenceLine, ResponsiveContainer, Legend,
@@ -74,12 +75,48 @@ const TIER_COLOR: Record<string, string> = {
 
 // ── Top-signals hook (uses existing /confluence/top) ─────────────────────────
 
-function useTopSignals(tier = 'WATCH', limit = 50) {
-  return useQuery<ConfluenceResult[]>({
-    queryKey: ['confluence', 'top', tier, limit],
-    queryFn:  () => api.get('/confluence/top', { params: { tier, limit } }).then(r => r.data?.signals ?? []),
-    staleTime: 2 * 60_000,
-  })
+// ── Thin refresh progress bar ─────────────────────────────────────────────────
+// Shows a 2px bar at the top of a section while data is loading.
+// When active:  animates 0 → 80% over ~6s (ease-out).
+// When done:    snaps to 100%, then fades out in 400ms.
+function RefreshBar({ active }: { active: boolean }) {
+  const [width, setWidth]   = useState(0)
+  const [fading, setFading] = useState(false)
+
+  useEffect(() => {
+    if (active) {
+      setFading(false)
+      setWidth(0)
+      const t = setTimeout(() => setWidth(80), 30)
+      return () => clearTimeout(t)
+    } else {
+      setWidth(100)
+      const t = setTimeout(() => setFading(true), 300)
+      return () => clearTimeout(t)
+    }
+  }, [active])
+
+  if (!active && fading && width === 100) return null   // fully done — unmount
+
+  return (
+    <div
+      className="h-[2px] w-full rounded-full overflow-hidden bg-transparent"
+      style={{ opacity: fading ? 0 : 1, transition: 'opacity 0.4s ease' }}
+    >
+      <div
+        className="h-full rounded-full bg-gradient-to-r from-violet-500 via-blue-400 to-emerald-400"
+        style={{
+          width: `${width}%`,
+          transition: active ? 'width 6s ease-out' : 'width 0.25s ease-in',
+        }}
+      />
+    </div>
+  )
+}
+
+// kept for backward-compat within this file — delegates to the cached hook
+function useTopSignals(tier = 'WATCH', limit = 60) {
+  return useTopConfluenceSignals(tier, limit)
 }
 
 // ── Profile filter definitions ────────────────────────────────────────────────
@@ -113,7 +150,9 @@ export function ConfluenceFunnel() {
   const navigate = useNavigate()
   const [profile, setProfile] = useState<Profile>('all')
 
-  const { data: rawSignals = [], isLoading } = useTopSignals('WATCH', 60)
+  const { data: rawSignals = [], isLoading, isFetching } = useTopSignals('WATCH', 60)
+  // isLoading = no data at all (true first-ever load with no cache)
+  // isFetching = network request in flight (includes background refresh with cached data)
 
   // Map raw confluence results → funnel entries with stage gate logic
   const entries = useMemo<FunnelEntry[]>(() => {
@@ -167,15 +206,20 @@ export function ConfluenceFunnel() {
     { key: 'watching',   label: 'Watching',            color: '#6b7280', desc: 'Early stage — monitor only' },
   ]
 
+  // Hard-loading state (no cache): show minimal skeleton + bar
   if (isLoading) return (
-    <div className="flex items-center gap-3 py-16">
-      <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-      <span className="text-gray-400 text-sm">Loading confluence data…</span>
+    <div className="space-y-3">
+      <RefreshBar active />
+      {[...Array(4)].map((_, i) => (
+        <div key={i} className="h-10 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" />
+      ))}
     </div>
   )
 
   return (
     <div className="space-y-4">
+      {/* Thin refresh bar — only shows during background refresh when cache is displayed */}
+      <RefreshBar active={isFetching} />
       {/* Profile selector */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs text-gray-600 uppercase tracking-widest">Trader profile:</span>

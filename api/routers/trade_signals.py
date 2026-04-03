@@ -21,26 +21,32 @@ logger = logging.getLogger(__name__)
 def trade_scan(
     profile: str = Query("SWING", description="SCALP | SWING | POSITION"),
     account: float = Query(10000, description="Account size in dollars"),
-    max_symbols: int = Query(50, description="Max symbols to deep-scan"),
+    max_symbols: int = Query(30, description="Max symbols to deep-scan"),
+    symbols: str = Query("", description="Comma-separated symbols to scan (empty = use defaults)"),
 ):
-    """Scan top universe candidates and return ranked trade recommendations."""
+    """Scan symbols and return ranked trade recommendations."""
     try:
-        from trade_signal_engine.universe import get_full_universe, get_options_universe
+        from trade_signal_engine.universe import get_options_universe, OPTIONS_FOCUS, _BROAD_UNIVERSE
         from trade_signal_engine.scanner import scan_universe
 
-        # Get universe candidates
-        candidates = get_full_universe(max_candidates=max_symbols)
-        symbols = [c.symbol for c in candidates]
-        options_syms = get_options_universe()
+        # If user provided symbols, use those
+        if symbols.strip():
+            sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+        else:
+            # Fast path: use a curated list instead of the slow full-universe download
+            # Start with options-focused + popular tickers, capped at max_symbols
+            sym_list = list(dict.fromkeys(OPTIONS_FOCUS + _BROAD_UNIVERSE[:80]))[:max_symbols]
 
-        if not symbols:
-            return {"error": "No symbols in universe", "recommendations": []}
+        if not sym_list:
+            return {"error": "No symbols to scan", "recommendations": [], "top_trades": [], "watchlist": [], "no_trade": [], "errors": []}
 
+        # Don't fetch options in scan mode (too slow) — only in lookup mode
         result = scan_universe(
-            symbols=symbols,
+            symbols=sym_list,
             profile=profile.upper(),
             account_size=account,
-            options_symbols=options_syms,
+            options_symbols=[],
+            max_workers=2,
         )
         return result
 
@@ -77,29 +83,43 @@ def trade_lookup(
 
 
 @router.get("/universe")
-def trade_universe():
+def trade_universe(
+    full_scan: bool = Query(False, description="If true, run full market scan (slow). Default uses curated list."),
+):
     """Return current universe of stock candidates with flags."""
     try:
-        from trade_signal_engine.universe import get_full_universe
-
-        candidates = get_full_universe(max_candidates=100)
-        return {
-            "count": len(candidates),
-            "candidates": [
-                {
-                    "symbol": c.symbol,
-                    "source": c.source,
-                    "price": c.price,
-                    "change_pct": c.change_pct,
-                    "volume_ratio": c.volume_ratio,
-                    "flags": c.flags,
-                    "market_cap": c.market_cap,
-                    "short_pct": c.short_pct,
-                    "float_shares": c.float_shares,
-                }
-                for c in candidates
-            ],
-        }
+        if full_scan:
+            from trade_signal_engine.universe import get_full_universe
+            candidates = get_full_universe(max_candidates=100)
+            return {
+                "count": len(candidates),
+                "candidates": [
+                    {
+                        "symbol": c.symbol,
+                        "source": c.source,
+                        "price": c.price,
+                        "change_pct": c.change_pct,
+                        "volume_ratio": c.volume_ratio,
+                        "flags": c.flags,
+                        "market_cap": c.market_cap,
+                        "short_pct": c.short_pct,
+                        "float_shares": c.float_shares,
+                    }
+                    for c in candidates
+                ],
+            }
+        else:
+            # Fast path: return curated list without downloading
+            from trade_signal_engine.universe import OPTIONS_FOCUS, _BROAD_UNIVERSE
+            all_syms = list(dict.fromkeys(OPTIONS_FOCUS + _BROAD_UNIVERSE))
+            return {
+                "count": len(all_syms),
+                "candidates": [
+                    {"symbol": s, "source": "curated", "price": 0, "change_pct": 0,
+                     "volume_ratio": 0, "flags": [], "market_cap": 0, "short_pct": 0, "float_shares": 0}
+                    for s in all_syms
+                ],
+            }
     except Exception as e:
         logger.error("Universe fetch failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

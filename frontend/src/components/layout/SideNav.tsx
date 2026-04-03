@@ -114,6 +114,7 @@ const NAV_ITEMS = [
   { path: '/chart',   label: 'CHART',   icon: '↗' },
   { path: '/signals', label: 'SIGNALS', icon: '◎' },
   { path: '/paper',   label: 'PAPER',   icon: '□' },
+  { path: '/trades',  label: 'TRADES',  icon: '⚡' },
 ] as const
 
 // ── Props ─────────────────────────────────────────────────────────────────────

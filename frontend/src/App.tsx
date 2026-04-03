@@ -8,6 +8,7 @@ import PaperTradingPage    from './pages/PaperTradingPage'
 import OpportunityMatrixPage from './pages/OpportunityMatrixPage'
 import EdgePage              from './pages/EdgePage'
 import TickerIntelPage       from './pages/TickerIntelPage'
+import TradesPage            from './pages/TradesPage'
 import SettingsPage          from './pages/SettingsPage'
 import LoginPage             from './pages/LoginPage'
 import { AlertProvider }     from './components/alerts/AlertManager'
@@ -40,6 +41,7 @@ function ProtectedLayout() {
           <Route path="/chart"  element={<ChartPage />} />
           <Route path="/signals" element={<SignalsPage />} />
           <Route path="/paper"  element={<PaperTradingPage />} />
+          <Route path="/trades" element={<TradesPage />} />
           <Route path="/command" element={<CommandCenterPage />} />
 
           {/* ── Consolidated redirects — Signals hub ── */}

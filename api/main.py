@@ -20,6 +20,7 @@ from api.routers import (
     options_data,
     rocket_scanner, gamma_tracker, sniper_entry, sniper_gamma, penny_sniper,
     quant_scanner,
+    trade_signals,
     settings,
 )
 
@@ -81,6 +82,7 @@ app.include_router(sniper_entry.router,      prefix="/api/sniper-entry",      ta
 app.include_router(sniper_gamma.router,      prefix="/api/sniper-gamma",      tags=["sniper_gamma"])
 app.include_router(penny_sniper.router,      prefix="/api/penny-sniper",      tags=["penny_sniper"])
 app.include_router(quant_scanner.router,     prefix="/api/quant",             tags=["quant_scanner"])
+app.include_router(trade_signals.router,     prefix="/api/trade-signals",     tags=["trade_signals"])
 app.include_router(settings.router,          prefix="/api/settings",          tags=["settings"])
 
 
@@ -88,3 +90,60 @@ app.include_router(settings.router,          prefix="/api/settings",          ta
 def health_check():
     from database.connection import check_connection
     return {"status": "ok", "db_connected": check_connection()}
+
+
+# ── Automatic Pipeline Scheduler ─────────────────────────────────────────────
+# Run the data pipeline every 5 minutes in the background to keep market_state
+# and other derived data consistently fresh, without blocking the API.
+
+import logging
+import threading
+import time
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+_scheduler_thread = None
+_scheduler_running = False
+
+
+def _pipeline_scheduler():
+    """Background thread that runs the full pipeline every 5 minutes."""
+    global _scheduler_running
+    import requests
+
+    # Wait 30 seconds before first run to let the server fully start
+    time.sleep(30)
+
+    while _scheduler_running:
+        try:
+            logger.info("Pipeline: automatic scheduled run started")
+            # Hit the pipeline endpoint to trigger the run
+            response = requests.post("http://localhost:8000/api/pipeline/run", timeout=10)
+            if response.status_code == 200:
+                logger.info("Pipeline: scheduled run accepted")
+            else:
+                logger.warning(f"Pipeline: scheduled run failed with status {response.status_code}")
+        except Exception as e:
+            logger.error(f"Pipeline: scheduled run error: {e}")
+
+        # Sleep for 5 minutes before next run
+        time.sleep(300)
+
+
+@app.on_event("startup")
+async def startup_scheduler():
+    """Start the background pipeline scheduler on server startup."""
+    global _scheduler_thread, _scheduler_running
+
+    _scheduler_running = True
+    _scheduler_thread = threading.Thread(target=_pipeline_scheduler, daemon=True)
+    _scheduler_thread.start()
+    logger.info("Pipeline scheduler started - will run every 5 minutes")
+
+
+@app.on_event("shutdown")
+async def shutdown_scheduler():
+    """Stop the background pipeline scheduler on server shutdown."""
+    global _scheduler_running
+    _scheduler_running = False
+    logger.info("Pipeline scheduler stopped")

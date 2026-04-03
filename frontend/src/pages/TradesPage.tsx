@@ -1,5 +1,5 @@
 // frontend/src/pages/TradesPage.tsx
-import { useState } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import api from '../api/client'
 
@@ -44,16 +44,91 @@ interface LookupResult extends TradeRec {
   component_details: Record<string, any>
 }
 
+// ── Progress types ──────────────────────────────────────────────────────────
+
+interface ScanProgress {
+  completed: number
+  total: number
+  symbol: string
+  verdict: string
+  score: number
+}
+
 // ── Hooks ────────────────────────────────────────────────────────────────────
 
-function useTradeScan(profile: string, account: number, enabled: boolean) {
-  return useQuery<ScanResult>({
-    queryKey: ['trade-signals', 'scan', profile, account],
-    queryFn: () => api.get(`/trade-signals/scan?profile=${profile}&account=${account}&max_symbols=30`).then(r => r.data),
-    enabled,
-    staleTime: 120_000,
-    retry: false,
-  })
+function useStreamingScan() {
+  const [progress, setProgress] = useState<ScanProgress | null>(null)
+  const [results, setResults] = useState<ScanResult | null>(null)
+  const [isScanning, setIsScanning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [recentSymbols, setRecentSymbols] = useState<ScanProgress[]>([])
+  const abortRef = useRef<AbortController | null>(null)
+
+  const startScan = useCallback((profile: string, account: number, symbols?: string) => {
+    // Abort previous scan if running
+    if (abortRef.current) abortRef.current.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    setIsScanning(true)
+    setError(null)
+    setProgress(null)
+    setResults(null)
+    setRecentSymbols([])
+
+    const params = new URLSearchParams({
+      profile, account: String(account), max_symbols: '30',
+    })
+    if (symbols) params.set('symbols', symbols)
+
+    const baseUrl = (api.defaults.baseURL || '/api').replace(/\/$/, '')
+    const url = `${baseUrl}/trade-signals/scan/stream?${params}`
+
+    fetch(url, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const reader = response.body?.getReader()
+        if (!reader) throw new Error('No response body')
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+
+          // Parse SSE lines
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            try {
+              const event = JSON.parse(line.slice(6))
+              if (event.type === 'progress') {
+                setProgress(event)
+                setRecentSymbols(prev => [...prev.slice(-29), event])
+              } else if (event.type === 'result') {
+                setResults(event)
+              }
+            } catch {}
+          }
+        }
+        setIsScanning(false)
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          setError(err.message || 'Scan failed')
+          setIsScanning(false)
+        }
+      })
+  }, [])
+
+  const abort = useCallback(() => {
+    abortRef.current?.abort()
+    setIsScanning(false)
+  }, [])
+
+  return { progress, results, isScanning, error, recentSymbols, startScan, abort }
 }
 
 function useTradeLookup(symbol: string, profile: string, account: number) {
@@ -309,13 +384,77 @@ function LookupPanel({ profile, account }: { profile: string; account: number })
 type Mode = 'scanner' | 'lookup'
 type Profile = 'SCALP' | 'SWING' | 'POSITION'
 
+// ── Scan Progress Bar ───────────────────────────────────────────────────────
+
+function ScanProgressBar({ progress, recentSymbols }: { progress: ScanProgress; recentSymbols: ScanProgress[] }) {
+  const pct = Math.round((progress.completed / progress.total) * 100)
+  const elapsed = recentSymbols.length > 0 ? recentSymbols.length : 1
+  const avgPerSymbol = elapsed > 1 ? 1 : 1.5 // rough estimate in seconds
+  const remaining = Math.max(0, progress.total - progress.completed)
+  const eta = Math.ceil(remaining * avgPerSymbol)
+
+  // Count results so far
+  const buys = recentSymbols.filter(s => s.verdict === 'BUY' || s.verdict === 'SELL').length
+  const holds = recentSymbols.filter(s => s.verdict === 'HOLD').length
+
+  return (
+    <div className="space-y-3">
+      {/* Main progress bar */}
+      <div className="relative">
+        <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-emerald-500 rounded-full transition-all duration-300 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Stats row */}
+      <div className="flex items-center justify-between text-xs font-mono">
+        <div className="flex items-center gap-3">
+          <span className="text-white">{progress.completed}/{progress.total}</span>
+          <span className="text-gray-600">|</span>
+          <span className="text-emerald-400">{buys} trades</span>
+          {holds > 0 && <span className="text-amber-400">{holds} watchlist</span>}
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-gray-400">Scanning <span className="text-white">{progress.symbol}</span></span>
+          {remaining > 0 && <span className="text-gray-600">~{eta}s left</span>}
+        </div>
+      </div>
+
+      {/* Recent symbol ticker */}
+      <div className="flex flex-wrap gap-1.5">
+        {recentSymbols.slice(-15).map((s, i) => {
+          const color = s.verdict === 'BUY' || s.verdict === 'SELL'
+            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+            : s.verdict === 'HOLD'
+            ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+            : s.verdict === 'ERROR'
+            ? 'bg-red-500/20 text-red-400 border-red-500/30'
+            : 'bg-gray-800/50 text-gray-500 border-gray-700/30'
+          return (
+            <span key={`${s.symbol}-${i}`} className={`px-2 py-0.5 rounded border text-[10px] font-mono ${color}`}>
+              {s.symbol} {s.score > 0 ? s.score.toFixed(0) : ''}
+            </span>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function TradesPage() {
   const [mode, setMode] = useState<Mode>('lookup')
   const [profile, setProfile] = useState<Profile>('SWING')
   const [account, setAccount] = useState(10000)
-  const [scanEnabled, setScanEnabled] = useState(false)
 
-  const { data: scanData, isLoading: scanLoading, error: scanError } = useTradeScan(profile, account, scanEnabled)
+  const { progress, results: scanData, isScanning, error: scanError, recentSymbols, startScan, abort } = useStreamingScan()
+
+  const handleScanStart = () => {
+    setMode('scanner')
+    startScan(profile, account)
+  }
 
   return (
     <div className="space-y-6">
@@ -352,7 +491,7 @@ export default function TradesPage() {
         {(['lookup', 'scanner'] as Mode[]).map((m) => (
           <button
             key={m}
-            onClick={() => { setMode(m); if (m === 'scanner') setScanEnabled(true) }}
+            onClick={() => { if (m === 'scanner') handleScanStart(); else setMode(m) }}
             className={`px-4 py-1.5 rounded text-xs font-bold uppercase transition-colors ${
               mode === m ? 'bg-emerald-600 text-white' : 'text-gray-500 hover:text-gray-300'
             }`}
@@ -367,17 +506,35 @@ export default function TradesPage() {
         <LookupPanel profile={profile} account={account} />
       ) : (
         <div className="space-y-4">
-          {scanLoading && (
-            <div className="text-center py-12">
-              <div className="text-emerald-400 text-sm font-mono animate-pulse">
-                Scanning market... this may take a minute
-              </div>
-            </div>
+          {/* Scan controls */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => startScan(profile, account)}
+              disabled={isScanning}
+              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white
+                         rounded text-xs font-bold transition-colors"
+            >
+              {isScanning ? 'SCANNING...' : 'RUN SCAN'}
+            </button>
+            {isScanning && (
+              <button
+                onClick={abort}
+                className="px-4 py-1.5 bg-red-600/20 hover:bg-red-600/40 text-red-400
+                           border border-red-500/30 rounded text-xs font-bold transition-colors"
+              >
+                ABORT
+              </button>
+            )}
+          </div>
+
+          {/* Progress bar */}
+          {isScanning && progress && (
+            <ScanProgressBar progress={progress} recentSymbols={recentSymbols} />
           )}
 
           {scanError && (
             <div className="text-red-400 text-sm p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-              Scan failed: {(scanError as any)?.response?.data?.detail || 'Unknown error'}
+              Scan failed: {scanError}
             </div>
           )}
 
@@ -408,6 +565,15 @@ export default function TradesPage() {
                   </h3>
                   <div className="space-y-2">
                     {scanData.watchlist.map((rec) => <TradeCard key={rec.symbol} rec={rec} />)}
+                  </div>
+                </div>
+              )}
+
+              {scanData.top_trades.length === 0 && scanData.watchlist.length === 0 && (
+                <div className="text-center py-8">
+                  <div className="text-gray-500 text-sm">No actionable trades found in this scan</div>
+                  <div className="text-gray-600 text-xs mt-1">
+                    {scanData.no_trade.length} symbols rejected by hard gates (MTF alignment, exhaustion, etc.)
                   </div>
                 </div>
               )}

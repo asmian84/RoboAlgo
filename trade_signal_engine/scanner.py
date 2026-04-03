@@ -3,13 +3,14 @@
 Batch scanner — orchestrates Universe → Collector → Scorer → Recommender pipeline.
 
 Scans multiple symbols and returns ranked trade recommendations.
+Supports streaming mode (yield progress per symbol) for SSE endpoints.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, Generator
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,99 @@ def scan_universe(
     return {
         "scan_time": elapsed,
         "symbols_scanned": len(symbols),
+        "profile": profile,
+        "account_size": account_size,
+        "recommendations": recommendations,
+        "top_trades": top_trades,
+        "watchlist": watchlist,
+        "no_trade": no_trade,
+        "errors": errors,
+    }
+
+
+def scan_universe_streaming(
+    symbols: list[str],
+    profile: str = "SWING",
+    account_size: float = 10000.0,
+) -> Generator[dict[str, Any], None, None]:
+    """
+    Scan symbols one-by-one, yielding progress events for SSE streaming.
+
+    Yields dicts with:
+      {"type": "progress", "completed": int, "total": int, "symbol": str, "verdict": str, "score": float}
+      {"type": "result", ...full scan result...}
+    """
+    from trade_signal_engine.collector import collect
+    from trade_signal_engine.scorer import UnifiedScorer
+    from trade_signal_engine.recommender import TradeRecommender
+    import numpy as np
+
+    start = time.time()
+    scorer = UnifiedScorer()
+    recommender = TradeRecommender()
+    total = len(symbols)
+
+    recommendations: list[dict] = []
+    errors: list[dict] = []
+
+    for i, sym in enumerate(symbols):
+        try:
+            sd = collect(sym, profile=profile, fetch_options=False)
+            if sd.error:
+                errors.append({"symbol": sym, "error": sd.error})
+                yield {"type": "progress", "completed": i + 1, "total": total,
+                       "symbol": sym, "verdict": "ERROR", "score": 0}
+                continue
+
+            signal = scorer.score(sd)
+
+            atr = 0.0
+            for tf in ["5m", "1h", "4h", "1d"]:
+                if tf in sd.bars and len(sd.bars[tf]) >= 14:
+                    h = sd.bars[tf]["high"].values
+                    l = sd.bars[tf]["low"].values
+                    c = sd.bars[tf]["close"].values
+                    tr = np.maximum(h[1:]-l[1:], np.maximum(np.abs(h[1:]-c[:-1]), np.abs(l[1:]-c[:-1])))
+                    atr = float(np.mean(tr[-14:]))
+                    break
+
+            rec = recommender.recommend(signal, atr=atr, current_price=sd.current_price, account_size=account_size)
+
+            rec_dict = {
+                "symbol": rec.symbol, "profile": rec.profile, "verdict": rec.verdict,
+                "direction": rec.direction, "score": rec.score, "confidence": rec.confidence,
+                "entry": rec.entry, "stop": rec.stop, "target": rec.target,
+                "risk_reward": rec.risk_reward, "level_source": rec.level_source,
+                "position_size": rec.position_size, "position_value": rec.position_value,
+                "risk_amount": rec.risk_amount, "projected_profit": rec.projected_profit,
+                "projected_profit_pct": rec.projected_profit_pct, "entry_notes": rec.entry_notes,
+                "rejection_reason": rec.rejection_reason,
+                "component_summary": rec.component_summary,
+                "bonuses": signal.bonuses if hasattr(signal, 'bonuses') else [],
+                "components": signal.components,
+            }
+            recommendations.append(rec_dict)
+
+            yield {"type": "progress", "completed": i + 1, "total": total,
+                   "symbol": sym, "verdict": rec.verdict, "score": rec.score}
+
+        except Exception as e:
+            logger.warning("Scoring failed for %s: %s", sym, e)
+            errors.append({"symbol": sym, "error": str(e)})
+            yield {"type": "progress", "completed": i + 1, "total": total,
+                   "symbol": sym, "verdict": "ERROR", "score": 0}
+
+    # Final result
+    recommendations.sort(key=lambda r: r["score"], reverse=True)
+    top_trades = [r for r in recommendations if r["verdict"] in ("BUY", "SELL")]
+    watchlist = [r for r in recommendations if r["verdict"] == "HOLD"]
+    no_trade = [r for r in recommendations if r["verdict"] == "NO_TRADE"]
+    elapsed = round(time.time() - start, 2)
+
+    yield {
+        "type": "result",
+        "scan_time": elapsed,
+        "symbols_scanned": total,
         "profile": profile,
         "account_size": account_size,
         "recommendations": recommendations,

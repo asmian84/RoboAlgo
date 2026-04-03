@@ -4,14 +4,17 @@ Trade Signal Engine API — scan, lookup, universe endpoints.
 
 Endpoints:
   GET  /scan?profile=SWING&account=10000    — scan top candidates
+  GET  /scan/stream?profile=SWING&account=10000 — SSE streaming scan with progress
   GET  /lookup/{symbol}?profile=SWING       — deep single-symbol analysis
   GET  /universe                            — list current universe candidates
 """
 
+import json
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -53,6 +56,30 @@ def trade_scan(
     except Exception as e:
         logger.error("Trade scan failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/scan/stream")
+def trade_scan_stream(
+    profile: str = Query("SWING", description="SCALP | SWING | POSITION"),
+    account: float = Query(10000, description="Account size in dollars"),
+    max_symbols: int = Query(30, description="Max symbols to deep-scan"),
+    symbols: str = Query("", description="Comma-separated symbols to scan (empty = use defaults)"),
+):
+    """SSE streaming scan — sends progress events per symbol, then final result."""
+    from trade_signal_engine.universe import OPTIONS_FOCUS, _BROAD_UNIVERSE
+    from trade_signal_engine.scanner import scan_universe_streaming
+
+    if symbols.strip():
+        sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    else:
+        sym_list = list(dict.fromkeys(OPTIONS_FOCUS + _BROAD_UNIVERSE[:80]))[:max_symbols]
+
+    def event_stream():
+        for event in scan_universe_streaming(sym_list, profile=profile.upper(), account_size=account):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.get("/lookup/{symbol}")

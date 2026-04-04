@@ -62,6 +62,7 @@ function useStreamingScan() {
   const [isScanning, setIsScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [recentSymbols, setRecentSymbols] = useState<ScanProgress[]>([])
+  const [liveTrades, setLiveTrades] = useState<TradeRec[]>([])
   const abortRef = useRef<AbortController | null>(null)
 
   const startScan = useCallback((profile: string, account: number, symbols?: string) => {
@@ -75,10 +76,9 @@ function useStreamingScan() {
     setProgress(null)
     setResults(null)
     setRecentSymbols([])
+    setLiveTrades([])
 
-    const params = new URLSearchParams({
-      profile, account: String(account), max_symbols: '30',
-    })
+    const params = new URLSearchParams({ profile, account: String(account) })
     if (symbols) params.set('symbols', symbols)
 
     const baseUrl = (api.defaults.baseURL || '/api').replace(/\/$/, '')
@@ -106,7 +106,13 @@ function useStreamingScan() {
               const event = JSON.parse(line.slice(6))
               if (event.type === 'progress') {
                 setProgress(event)
-                setRecentSymbols(prev => [...prev.slice(-29), event])
+                setRecentSymbols(prev => [...prev.slice(-49), event])
+              } else if (event.type === 'trade') {
+                // Live trade result — add to list immediately
+                setLiveTrades(prev => {
+                  const updated = [...prev, event.trade]
+                  return updated.sort((a: TradeRec, b: TradeRec) => b.score - a.score)
+                })
               } else if (event.type === 'result') {
                 setResults(event)
               }
@@ -128,7 +134,7 @@ function useStreamingScan() {
     setIsScanning(false)
   }, [])
 
-  return { progress, results, isScanning, error, recentSymbols, startScan, abort }
+  return { progress, results, isScanning, error, recentSymbols, liveTrades, startScan, abort }
 }
 
 function useTradeLookup(symbol: string, profile: string, account: number) {
@@ -449,7 +455,7 @@ export default function TradesPage() {
   const [profile, setProfile] = useState<Profile>('SWING')
   const [account, setAccount] = useState(10000)
 
-  const { progress, results: scanData, isScanning, error: scanError, recentSymbols, startScan, abort } = useStreamingScan()
+  const { progress, results: scanData, isScanning, error: scanError, recentSymbols, liveTrades, startScan, abort } = useStreamingScan()
 
   const handleScanStart = () => {
     setMode('scanner')
@@ -538,47 +544,64 @@ export default function TradesPage() {
             </div>
           )}
 
-          {scanData && (
-            <>
-              <div className="flex items-center gap-4 text-xs text-gray-500 font-mono">
-                <span>{scanData.symbols_scanned} symbols scanned</span>
-                <span>{scanData.scan_time}s</span>
-                <span>{scanData.top_trades.length} actionable trades</span>
-                <span>{scanData.watchlist.length} watchlist</span>
-              </div>
+          {/* Show live trades as they arrive during scan */}
+          {(() => {
+            const trades = scanData ? scanData.recommendations : liveTrades
+            const buys = trades.filter((r: TradeRec) => r.verdict === 'BUY' || r.verdict === 'SELL')
+            const holds = trades.filter((r: TradeRec) => r.verdict === 'HOLD')
+            const noTrade = scanData ? scanData.no_trade : []
 
-              {scanData.top_trades.length > 0 && (
-                <div>
-                  <h3 className="text-emerald-400 text-sm font-bold mb-2 uppercase tracking-wider">
-                    Actionable Trades ({scanData.top_trades.length})
-                  </h3>
-                  <div className="space-y-2">
-                    {scanData.top_trades.map((rec) => <TradeCard key={rec.symbol} rec={rec} />)}
+            return (
+              <>
+                {scanData && (
+                  <div className="flex items-center gap-4 text-xs text-gray-500 font-mono">
+                    <span>{scanData.symbols_scanned} symbols scanned</span>
+                    <span>{scanData.scan_time}s</span>
+                    <span className="text-emerald-400">{buys.length} actionable</span>
+                    <span className="text-amber-400">{holds.length} watchlist</span>
+                    <span>{noTrade.length} no-trade</span>
                   </div>
-                </div>
-              )}
+                )}
 
-              {scanData.watchlist.length > 0 && (
-                <div>
-                  <h3 className="text-amber-400 text-sm font-bold mb-2 uppercase tracking-wider">
-                    Watchlist ({scanData.watchlist.length})
-                  </h3>
-                  <div className="space-y-2">
-                    {scanData.watchlist.map((rec) => <TradeCard key={rec.symbol} rec={rec} />)}
+                {buys.length > 0 && (
+                  <div>
+                    <h3 className="text-emerald-400 text-sm font-bold mb-2 uppercase tracking-wider">
+                      {isScanning ? '🔴 LIVE — ' : ''}Actionable Trades ({buys.length})
+                    </h3>
+                    <div className="space-y-2">
+                      {buys.map((rec: TradeRec) => <TradeCard key={rec.symbol} rec={rec} />)}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {scanData.top_trades.length === 0 && scanData.watchlist.length === 0 && (
-                <div className="text-center py-8">
-                  <div className="text-gray-500 text-sm">No actionable trades found in this scan</div>
-                  <div className="text-gray-600 text-xs mt-1">
-                    {scanData.no_trade.length} symbols rejected by hard gates (MTF alignment, exhaustion, etc.)
+                {holds.length > 0 && (
+                  <div>
+                    <h3 className="text-amber-400 text-sm font-bold mb-2 uppercase tracking-wider">
+                      Watchlist ({holds.length})
+                    </h3>
+                    <div className="space-y-2">
+                      {holds.map((rec: TradeRec) => <TradeCard key={rec.symbol} rec={rec} />)}
+                    </div>
                   </div>
-                </div>
-              )}
-            </>
-          )}
+                )}
+
+                {!isScanning && trades.length === 0 && !scanData && (
+                  <div className="text-center py-8">
+                    <div className="text-gray-500 text-sm">Click RUN SCAN to find trades across 200+ stocks, ETFs, and penny stocks</div>
+                  </div>
+                )}
+
+                {scanData && buys.length === 0 && holds.length === 0 && (
+                  <div className="text-center py-8">
+                    <div className="text-gray-500 text-sm">No actionable trades found in this scan</div>
+                    <div className="text-gray-600 text-xs mt-1">
+                      {noTrade.length} symbols scored below threshold
+                    </div>
+                  </div>
+                )}
+              </>
+            )
+          })()}
         </div>
       )}
     </div>

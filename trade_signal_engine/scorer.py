@@ -156,24 +156,22 @@ class UnifiedScorer:
             logger.debug("MTF engine unavailable: %s", e)
         components["mtf_alignment"] = mtf_score
 
-        # ── HARD GATE: MTF alignment < 0.40 ────────────────────────
-        if mtf_score < 0.40:
-            return ScoredSignal(
-                symbol=sd.symbol,
-                profile=sd.profile,
-                score=int(mtf_score * 100),
-                direction="NO_TRADE",
-                confidence="NONE",
-                components=components,
-                component_details=details,
-                rejection_reason=(
-                    f"MTF alignment too low ({mtf_score:.2f} < 0.40)"
-                    " — timeframes disagree"
-                ),
-            )
+        # ── MTF PENALTY (soft — no longer a hard kill) ─────────────
+        # If MTF is 0 (RANGE/NEUTRAL), fall back to trend direction
+        # and apply a penalty later instead of rejecting outright.
+        mtf_penalty = 0.0
+        if mtf_score < 0.20:
+            mtf_penalty = 8.0   # moderate penalty, not a kill
+        elif mtf_score < 0.40:
+            mtf_penalty = 4.0   # slight penalty
 
-        # Determine target direction from MTF bias
-        target_dir = "long" if mtf_bias in ("LONG", "NEUTRAL") else "short"
+        # Determine target direction: MTF bias → trend fallback
+        if mtf_bias in ("LONG", "SHORT"):
+            target_dir = "long" if mtf_bias == "LONG" else "short"
+        else:
+            # Fallback: use simple trend from price vs MA20/MA50
+            trend_score = self._score_trend(primary_df)
+            target_dir = "long" if trend_score >= 0.50 else "short"
 
         # ── 2. Trend Alignment (10%) ────────────────────────────────
         components["trend_alignment"] = self._score_trend(primary_df)
@@ -199,22 +197,11 @@ class UnifiedScorer:
             logger.debug("Wave phase unavailable: %s", e)
         components["wave_phase"] = wave_score
 
-        # ── HARD GATE: Correction + Long + High Confidence ─────────
-        if (
-            wave_phase == "CORRECTION"
-            and target_dir == "long"
-            and wave_confidence > 0.6
-        ):
-            return ScoredSignal(
-                symbol=sd.symbol,
-                profile=sd.profile,
-                score=35,
-                direction="NO_TRADE",
-                confidence="NONE",
-                components=components,
-                component_details=details,
-                rejection_reason="CORRECTION phase active — wait for impulse",
-            )
+        # ── PENALTY: Correction + Long + High Confidence ────────────
+        correction_penalty = 0.0
+        if wave_phase == "CORRECTION" and target_dir == "long" and wave_confidence > 0.6:
+            correction_penalty = 12.0
+            bonuses.append("penalty: correction phase active (-12)")
 
         # ── 4. SMC Components ──────────────────────────────────────
         smc_result = None
@@ -281,34 +268,15 @@ class UnifiedScorer:
         components.setdefault("order_block", 0.50)
         components.setdefault("premium_discount", 0.50)
 
-        # ── HARD GATE: Premium zone for longs / Discount for shorts ─
+        # ── PENALTY: Premium zone for longs / Discount for shorts ──
+        zone_penalty = 0.0
         if smc_result:
             if smc_result.zone == "PREMIUM" and target_dir == "long":
-                return ScoredSignal(
-                    symbol=sd.symbol,
-                    profile=sd.profile,
-                    score=35,
-                    direction="NO_TRADE",
-                    confidence="LOW",
-                    components=components,
-                    component_details=details,
-                    rejection_reason=(
-                        "Price in PREMIUM zone — wait for pullback to DISCOUNT"
-                    ),
-                )
+                zone_penalty = 8.0
+                bonuses.append("penalty: PREMIUM zone for longs (-8)")
             if smc_result.zone == "DISCOUNT" and target_dir == "short":
-                return ScoredSignal(
-                    symbol=sd.symbol,
-                    profile=sd.profile,
-                    score=35,
-                    direction="NO_TRADE",
-                    confidence="LOW",
-                    components=components,
-                    component_details=details,
-                    rejection_reason=(
-                        "Price in DISCOUNT zone — wrong side for shorts"
-                    ),
-                )
+                zone_penalty = 8.0
+                bonuses.append("penalty: DISCOUNT zone for shorts (-8)")
 
         # ── 5. Liquidity Sweep (4%) ────────────────────────────────
         components["liquidity_sweep"] = self._score_liquidity(primary_df, atr)
@@ -333,24 +301,14 @@ class UnifiedScorer:
             logger.debug("Exhaustion engine unavailable: %s", e)
             components["exhaustion_check"] = 0.5
 
-        # ── HARD GATE: Exhaustion in trade direction ───────────────
+        # ── PENALTY: Exhaustion in trade direction ──────────────────
+        exhaustion_penalty = 0.0
         if exhaustion_detected:
             if (exhaustion_dir == "UP" and target_dir == "long") or (
                 exhaustion_dir == "DOWN" and target_dir == "short"
             ):
-                return ScoredSignal(
-                    symbol=sd.symbol,
-                    profile=sd.profile,
-                    score=30,
-                    direction="NO_TRADE",
-                    confidence="NONE",
-                    components=components,
-                    component_details=details,
-                    rejection_reason=(
-                        f"Exhaustion detected in {exhaustion_dir} direction"
-                        " — overextended"
-                    ),
-                )
+                exhaustion_penalty = 10.0
+                bonuses.append(f"penalty: exhaustion in {exhaustion_dir} (-10)")
 
         # ── 7. GEX Signal (8%) ─────────────────────────────────────
         gex_profile = None
@@ -462,11 +420,11 @@ class UnifiedScorer:
         )
         raw_score = weighted_sum * 100  # 0-100 scale
 
-        # ── PENALTY: No structure confirmation ─────────────────────
+        # ── PENALTY: No structure confirmation (very soft) ─────────
         structure_val = components.get("structure_shift", 0.50)
         if abs(structure_val - 0.50) < 0.05:  # neutral = no CHoCH/BOS
-            raw_score *= 0.70  # reduce by 30%
-            bonuses.append("penalty: no structure confirmation (-30%)")
+            raw_score *= 0.92  # reduce by 8% (was 30%)
+            bonuses.append("penalty: no structure confirmation (-8%)")
 
         # ── SCORE BOOSTERS ─────────────────────────────────────────
         bonus = 0
@@ -484,13 +442,16 @@ class UnifiedScorer:
                 bonus += 8
                 bonuses.append("in OTE zone (+8)")
 
-        final_score = min(100, max(0, raw_score + bonus))
+        # ── Apply soft penalties (replaces hard gates) ─────────────
+        total_penalty = mtf_penalty + correction_penalty + zone_penalty + exhaustion_penalty
+        final_score = min(100, max(0, raw_score + bonus - total_penalty))
 
         # ── Determine direction and confidence ─────────────────────
-        if final_score >= 70:
+        # Aggressive thresholds: surface every trade the market offers
+        if final_score >= 55:
             direction = "LONG" if target_dir == "long" else "SHORT"
-            confidence = "HIGH" if final_score >= 85 else "MEDIUM"
-        elif final_score >= 55:
+            confidence = "HIGH" if final_score >= 80 else "MEDIUM" if final_score >= 65 else "LOW"
+        elif final_score >= 35:
             direction = "LONG" if target_dir == "long" else "SHORT"
             confidence = "LOW"
         else:

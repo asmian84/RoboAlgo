@@ -204,8 +204,13 @@ def scan_universe_streaming(
             }
             recommendations.append(rec_dict)
 
+            # Emit progress
             yield {"type": "progress", "completed": i + 1, "total": total,
                    "symbol": sym, "verdict": rec.verdict, "score": rec.score}
+
+            # Emit trade immediately if actionable (BUY/SELL/HOLD)
+            if rec.verdict in ("BUY", "SELL", "HOLD"):
+                yield {"type": "trade", "trade": rec_dict}
 
         except Exception as e:
             logger.warning("Scoring failed for %s: %s", sym, e)

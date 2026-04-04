@@ -62,8 +62,8 @@ def trade_scan(
 def trade_scan_stream(
     profile: str = Query("SWING", description="SCALP | SWING | POSITION"),
     account: float = Query(10000, description="Account size in dollars"),
-    max_symbols: int = Query(30, description="Max symbols to deep-scan"),
-    symbols: str = Query("", description="Comma-separated symbols to scan (empty = use defaults)"),
+    max_symbols: int = Query(200, description="Max symbols to deep-scan"),
+    symbols: str = Query("", description="Comma-separated symbols to scan (empty = use full universe)"),
 ):
     """SSE streaming scan — sends progress events per symbol, then final result."""
     from trade_signal_engine.universe import OPTIONS_FOCUS, _BROAD_UNIVERSE
@@ -72,7 +72,8 @@ def trade_scan_stream(
     if symbols.strip():
         sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     else:
-        sym_list = list(dict.fromkeys(OPTIONS_FOCUS + _BROAD_UNIVERSE[:80]))[:max_symbols]
+        # Full universe: every stock, ETF, penny stock we track
+        sym_list = list(dict.fromkeys(OPTIONS_FOCUS + _BROAD_UNIVERSE))[:max_symbols]
 
     def event_stream():
         for event in scan_universe_streaming(sym_list, profile=profile.upper(), account_size=account):

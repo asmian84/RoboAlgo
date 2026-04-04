@@ -189,10 +189,11 @@ class TradeRecommender:
             rec.projected_profit_pct = round(rec.projected_profit / account_size * 100, 2)
 
         # ── Verdict ──────────────────────────────────────────────
-        if signal.confidence in ("HIGH", "MEDIUM"):
+        # Surface every trade — HIGH/MEDIUM = strong signal, LOW = speculative
+        if signal.direction in ("LONG", "SHORT") and signal.score >= 55:
             rec.verdict = "BUY" if signal.direction == "LONG" else "SELL"
-        elif signal.confidence == "LOW":
-            rec.verdict = "HOLD"  # watchlist, not yet actionable
+        elif signal.direction in ("LONG", "SHORT") and signal.score >= 35:
+            rec.verdict = "HOLD"  # watchlist — has potential
         else:
             rec.verdict = "NO_TRADE"
 

@@ -62,21 +62,36 @@ def trade_scan(
 def trade_scan_stream(
     profile: str = Query("SWING", description="SCALP | SWING | POSITION"),
     account: float = Query(10000, description="Account size in dollars"),
-    max_symbols: int = Query(200, description="Max symbols to deep-scan"),
-    symbols: str = Query("", description="Comma-separated symbols to scan (empty = use full universe)"),
+    max_symbols: int = Query(500, description="Max symbols to deep-scan"),
+    symbols: str = Query("", description="Comma-separated symbols (empty = full universe + discovery)"),
+    discover: bool = Query(True, description="Pre-screen 6400+ stocks for hidden movers"),
 ):
-    """SSE streaming scan — sends progress events per symbol, then final result."""
+    """
+    SSE streaming scan with full-market discovery.
+
+    When discover=True (default):
+      1. Detects market regime (bull/bear) from SPY
+      2. Pre-screens ALL 6,400+ US stocks for unusual movers (volume spikes, big moves)
+      3. Merges discovered movers with curated universe
+      4. Auto-adds inverse ETFs / hedges if market is bearish
+      5. Deep-scans everything with 18-component scoring, streaming results live
+    """
     from trade_signal_engine.universe import OPTIONS_FOCUS, _BROAD_UNIVERSE
     from trade_signal_engine.scanner import scan_universe_streaming
 
     if symbols.strip():
         sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+        do_discover = False  # user specified symbols, don't auto-discover
     else:
-        # Full universe: every stock, ETF, penny stock we track
+        # Full curated universe as baseline
         sym_list = list(dict.fromkeys(OPTIONS_FOCUS + _BROAD_UNIVERSE))[:max_symbols]
+        do_discover = discover
 
     def event_stream():
-        for event in scan_universe_streaming(sym_list, profile=profile.upper(), account_size=account):
+        for event in scan_universe_streaming(
+            sym_list, profile=profile.upper(), account_size=account,
+            discover_movers=do_discover,
+        ):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream",

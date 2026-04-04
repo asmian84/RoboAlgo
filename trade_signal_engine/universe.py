@@ -63,9 +63,9 @@ class SymbolCandidate:
 
 def _get_all_exchange_tickers() -> list[str]:
     """
-    Fetch complete list of US-listed stock symbols from Finnhub.
+    Fetch complete list of US-listed stock symbols.
+    Priority: AlphaVantage LISTING_STATUS → DB → Finnhub fallback → static list.
     Returns ~6,400 tickers across NYSE, NASDAQ, AMEX.
-    Falls back to a broad yfinance approach if Finnhub unavailable.
     """
     cache_key = "exchange_tickers"
     now = time.time()
@@ -76,29 +76,23 @@ def _get_all_exchange_tickers() -> list[str]:
 
     tickers: list[str] = []
 
-    # Method 1: Finnhub (preferred — returns ALL listed symbols)
-    api_key = os.environ.get("FINNHUB_API_KEY")
-    if api_key:
-        try:
-            import requests
-            resp = requests.get(
-                "https://finnhub.io/api/v1/stock/symbol",
-                params={"exchange": "US", "token": api_key},
-                timeout=15,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                tickers = [
-                    item["symbol"] for item in data
-                    if item.get("type") in ("Common Stock", "ETP", "ADR")
-                    and "." not in item.get("symbol", ".")
-                    and len(item.get("symbol", "")) <= 5
-                ]
-                logger.info("Finnhub returned %d US tickers", len(tickers))
-        except Exception as e:
-            logger.warning("Finnhub ticker fetch failed: %s", e)
+    # Method 1: AlphaVantage LISTING_STATUS (preferred — complete US listing)
+    try:
+        from data_engine.alphavantage_fetcher import fetch_active_listing
+        listing = fetch_active_listing()
+        if listing:
+            tickers = [
+                item.get("symbol", "") for item in listing
+                if item.get("assetType") in ("Stock", "ETF")
+                and "." not in item.get("symbol", ".")
+                and len(item.get("symbol", "")) <= 5
+                and item.get("symbol", "")
+            ]
+            logger.info("AlphaVantage listing returned %d US tickers", len(tickers))
+    except Exception as e:
+        logger.warning("AV listing fetch failed: %s", e)
 
-    # Method 2: Fallback — use DB + static broad universe
+    # Method 2: DB symbols
     if not tickers:
         try:
             from data_engine.loader import DataLoader
@@ -108,7 +102,31 @@ def _get_all_exchange_tickers() -> list[str]:
         except Exception:
             pass
 
-        tickers = list(set(tickers + _BROAD_UNIVERSE))
+    # Method 3: Finnhub fallback
+    if not tickers:
+        api_key = os.environ.get("FINNHUB_API_KEY")
+        if api_key:
+            try:
+                import requests
+                resp = requests.get(
+                    "https://finnhub.io/api/v1/stock/symbol",
+                    params={"exchange": "US", "token": api_key},
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    tickers = [
+                        item["symbol"] for item in data
+                        if item.get("type") in ("Common Stock", "ETP", "ADR")
+                        and "." not in item.get("symbol", ".")
+                        and len(item.get("symbol", "")) <= 5
+                    ]
+                    logger.info("Finnhub returned %d US tickers", len(tickers))
+            except Exception as e:
+                logger.warning("Finnhub ticker fetch failed: %s", e)
+
+    # Always merge with broad static universe as safety net
+    tickers = list(set(tickers + _BROAD_UNIVERSE))
 
     _TICKER_CACHE[cache_key] = (now, tickers)
     return tickers
@@ -133,73 +151,115 @@ def get_full_universe(
 
     candidates: dict[str, SymbolCandidate] = {}
 
-    batch_size = 500
-    for i in range(0, len(all_tickers), batch_size):
-        batch = all_tickers[i:i + batch_size]
-        try:
-            df = yf.download(
-                " ".join(batch), period="5d", interval="1d",
-                progress=False, timeout=30, group_by="ticker",
-                threads=True,
-            )
-            if df is None or df.empty:
-                continue
-
-            for sym in batch:
+    # ── Try AlphaVantage batch quotes first (fastest, no rate issues) ────
+    av_done = False
+    try:
+        from data_engine.alphavantage_fetcher import _fetch_quote_batch
+        # AV batch does 100 at a time with rate limiting built in
+        for i in range(0, min(len(all_tickers), 2000), 100):
+            batch = all_tickers[i:i + 100]
+            quotes = _fetch_quote_batch(batch)
+            for sym, q in quotes.items():
+                price = q.get("price", 0)
+                if price <= 0:
+                    continue
+                change_str = str(q.get("change_pct", "0%")).replace("%", "")
                 try:
-                    if len(batch) == 1:
-                        sym_df = df
-                    else:
-                        if sym not in df.columns.get_level_values(0):
-                            continue
-                        sym_df = df[sym].dropna()
+                    change_pct = float(change_str)
+                except (ValueError, TypeError):
+                    change_pct = 0.0
 
-                    if sym_df.empty or len(sym_df) < 2:
-                        continue
+                flags = []
+                if price < 5:
+                    flags.append("penny")
+                if price < 1:
+                    flags.append("sub_dollar")
+                if abs(change_pct) >= min_change_pct:
+                    flags.append("big_mover")
+                if abs(change_pct) >= 15:
+                    flags.append("explosive_move")
 
-                    if isinstance(sym_df.columns, pd.MultiIndex):
-                        sym_df.columns = sym_df.columns.get_level_values(0)
-                    sym_df.columns = [c.lower() for c in sym_df.columns]
+                if flags or include_all_tracked:
+                    candidates[sym] = SymbolCandidate(
+                        symbol=sym, source="alphavantage",
+                        price=price, change_pct=round(change_pct, 2),
+                        flags=flags,
+                    )
+        if candidates:
+            av_done = True
+            logger.info("AV batch quotes: %d candidates from %d tickers", len(candidates), len(all_tickers))
+    except Exception as e:
+        logger.warning("AV batch quote failed, falling back to yfinance: %s", e)
 
-                    close_today = float(sym_df["close"].iloc[-1])
-                    close_prev = float(sym_df["close"].iloc[-2])
-                    vol_today = float(sym_df["volume"].iloc[-1]) if "volume" in sym_df else 0
-                    avg_vol = float(sym_df["volume"].iloc[:-1].mean()) if "volume" in sym_df and len(sym_df) > 2 else 1
-
-                    if close_prev <= 0 or close_today <= 0:
-                        continue
-
-                    change_pct = (close_today - close_prev) / close_prev * 100
-                    vol_ratio = vol_today / avg_vol if avg_vol > 0 else 1.0
-
-                    flags = []
-                    if close_today < 5:
-                        flags.append("penny")
-                    if close_today < 1:
-                        flags.append("sub_dollar")
-                    if vol_ratio >= min_volume_ratio:
-                        flags.append("volume_spike")
-                    if abs(change_pct) >= min_change_pct:
-                        flags.append("big_mover")
-                    if vol_ratio >= 5:
-                        flags.append("extreme_volume")
-                    if abs(change_pct) >= 15:
-                        flags.append("explosive_move")
-
-                    if flags or include_all_tracked:
-                        candidates[sym] = SymbolCandidate(
-                            symbol=sym, source="exchange",
-                            price=close_today, change_pct=round(change_pct, 2),
-                            volume=vol_today, avg_volume=avg_vol,
-                            volume_ratio=round(vol_ratio, 2),
-                            flags=flags,
-                        )
-                except Exception:
+    # ── Fallback: yfinance bulk download ────────────────────────────────
+    if not av_done:
+        batch_size = 500
+        for i in range(0, len(all_tickers), batch_size):
+            batch = all_tickers[i:i + batch_size]
+            try:
+                df = yf.download(
+                    " ".join(batch), period="5d", interval="1d",
+                    progress=False, timeout=30, group_by="ticker",
+                    threads=True,
+                )
+                if df is None or df.empty:
                     continue
 
-        except Exception as e:
-            logger.warning("Batch download failed for chunk %d: %s", i, e)
-            continue
+                for sym in batch:
+                    try:
+                        if len(batch) == 1:
+                            sym_df = df
+                        else:
+                            if sym not in df.columns.get_level_values(0):
+                                continue
+                            sym_df = df[sym].dropna()
+
+                        if sym_df.empty or len(sym_df) < 2:
+                            continue
+
+                        if isinstance(sym_df.columns, pd.MultiIndex):
+                            sym_df.columns = sym_df.columns.get_level_values(0)
+                        sym_df.columns = [c.lower() for c in sym_df.columns]
+
+                        close_today = float(sym_df["close"].iloc[-1])
+                        close_prev = float(sym_df["close"].iloc[-2])
+                        vol_today = float(sym_df["volume"].iloc[-1]) if "volume" in sym_df else 0
+                        avg_vol = float(sym_df["volume"].iloc[:-1].mean()) if "volume" in sym_df and len(sym_df) > 2 else 1
+
+                        if close_prev <= 0 or close_today <= 0:
+                            continue
+
+                        change_pct = (close_today - close_prev) / close_prev * 100
+                        vol_ratio = vol_today / avg_vol if avg_vol > 0 else 1.0
+
+                        flags = []
+                        if close_today < 5:
+                            flags.append("penny")
+                        if close_today < 1:
+                            flags.append("sub_dollar")
+                        if vol_ratio >= min_volume_ratio:
+                            flags.append("volume_spike")
+                        if abs(change_pct) >= min_change_pct:
+                            flags.append("big_mover")
+                        if vol_ratio >= 5:
+                            flags.append("extreme_volume")
+                        if abs(change_pct) >= 15:
+                            flags.append("explosive_move")
+
+                        if flags or include_all_tracked:
+                            candidates[sym] = SymbolCandidate(
+                                symbol=sym, source="exchange",
+                                price=close_today, change_pct=round(change_pct, 2),
+                                volume=vol_today, avg_volume=avg_vol,
+                                volume_ratio=round(vol_ratio, 2),
+                                flags=flags,
+                            )
+                    except Exception:
+                        continue
+
+            except Exception as e:
+                logger.warning("Batch download failed for chunk %d: %s", i, e)
+                continue
 
     # Always include tracked DB symbols
     try:

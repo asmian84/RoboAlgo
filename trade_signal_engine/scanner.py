@@ -141,75 +141,225 @@ def scan_universe(
     }
 
 
+def _detect_market_regime() -> dict[str, Any]:
+    """
+    Detect macro market regime from SPY to determine bull/bear bias.
+    Returns {"regime": str, "bias": str, "hedges": list[str]}
+    """
+    result = {"regime": "UNKNOWN", "bias": "NEUTRAL", "hedges": [], "spy_trend": "NEUTRAL"}
+    try:
+        from trade_signal_engine.collector import _fetch_daily_bars
+        spy = _fetch_daily_bars("SPY", bars=60)
+        if spy is not None and len(spy) >= 20:
+            import numpy as np
+            closes = spy["close"].values
+            ma20 = float(np.mean(closes[-20:])) if len(closes) >= 20 else float(np.mean(closes))
+            ma50 = float(np.mean(closes[-50:])) if len(closes) >= 50 else float(np.mean(closes))
+            price = float(closes[-1])
+
+            # Trend direction
+            if price > ma20 > ma50:
+                result["regime"] = "BULL"
+                result["bias"] = "LONG"
+                result["spy_trend"] = "UP"
+            elif price < ma20 < ma50:
+                result["regime"] = "BEAR"
+                result["bias"] = "SHORT"
+                result["spy_trend"] = "DOWN"
+                # Auto-include inverse/hedge ETFs
+                result["hedges"] = [
+                    "SQQQ", "SPXS", "SDOW", "TZA", "SOXS", "LABD",
+                    "FAZ", "TECS", "DUST", "UVXY", "VIXY", "VXX",
+                    "SH", "PSQ", "DOG", "RWM",  # 1x inverse
+                    "TLT", "GLD", "SLV",          # safe havens
+                ]
+            elif price < ma50:
+                result["regime"] = "CORRECTION"
+                result["bias"] = "SHORT"
+                result["spy_trend"] = "DOWN"
+                result["hedges"] = [
+                    "SQQQ", "SPXS", "UVXY", "VXX", "SH", "TLT", "GLD",
+                ]
+            else:
+                result["regime"] = "RANGE"
+                result["bias"] = "NEUTRAL"
+                result["spy_trend"] = "NEUTRAL"
+
+            # Check for recent volatility expansion (VIX proxy via ATR)
+            highs = spy["high"].values
+            lows = spy["low"].values
+            tr = highs[-14:] - lows[-14:]
+            atr_recent = float(np.mean(tr[-5:]))
+            atr_avg = float(np.mean(tr))
+            if atr_recent > atr_avg * 1.5:
+                result["regime"] += "_VOLATILE"
+                if "UVXY" not in result["hedges"]:
+                    result["hedges"].extend(["UVXY", "VXX", "VIXY"])
+
+            logger.info("Market regime: %s, bias: %s, SPY=%.2f MA20=%.2f MA50=%.2f",
+                        result["regime"], result["bias"], price, ma20, ma50)
+    except Exception as e:
+        logger.warning("Market regime detection failed: %s", e)
+    return result
+
+
+def _prescreen_movers() -> list[dict]:
+    """
+    Quick pre-screen: batch download ALL exchange tickers to find unusual movers.
+    Returns list of {"symbol": str, "change_pct": float, "volume_ratio": float, "flags": list}.
+    """
+    try:
+        from trade_signal_engine.universe import get_full_universe
+        candidates = get_full_universe(
+            min_volume_ratio=1.5,
+            min_change_pct=2.0,
+            max_candidates=200,
+            include_all_tracked=False,
+        )
+        return [
+            {
+                "symbol": c.symbol,
+                "change_pct": c.change_pct,
+                "volume_ratio": c.volume_ratio,
+                "price": c.price,
+                "flags": c.flags,
+            }
+            for c in candidates
+            if c.flags  # only stocks with unusual activity
+        ]
+    except Exception as e:
+        logger.warning("Pre-screen failed: %s", e)
+        return []
+
+
+def _score_one(sym, profile, scorer, recommender, account_size):
+    """Score a single symbol. Returns (rec_dict, error_dict) or raises."""
+    import numpy as np
+    from trade_signal_engine.collector import collect
+
+    sd = collect(sym, profile=profile, fetch_options=False)
+    if sd.error:
+        return None, {"symbol": sym, "error": sd.error}
+
+    signal = scorer.score(sd)
+
+    atr = 0.0
+    for tf in ["5m", "1h", "4h", "1d"]:
+        if tf in sd.bars and len(sd.bars[tf]) >= 14:
+            h = sd.bars[tf]["high"].values
+            l = sd.bars[tf]["low"].values
+            c = sd.bars[tf]["close"].values
+            tr = np.maximum(h[1:]-l[1:], np.maximum(np.abs(h[1:]-c[:-1]), np.abs(l[1:]-c[:-1])))
+            atr = float(np.mean(tr[-14:]))
+            break
+
+    rec = recommender.recommend(signal, atr=atr, current_price=sd.current_price, account_size=account_size)
+
+    rec_dict = {
+        "symbol": rec.symbol, "profile": rec.profile, "verdict": rec.verdict,
+        "direction": rec.direction, "score": rec.score, "confidence": rec.confidence,
+        "entry": rec.entry, "stop": rec.stop, "target": rec.target,
+        "risk_reward": rec.risk_reward, "level_source": rec.level_source,
+        "position_size": rec.position_size, "position_value": rec.position_value,
+        "risk_amount": rec.risk_amount, "projected_profit": rec.projected_profit,
+        "projected_profit_pct": rec.projected_profit_pct, "entry_notes": rec.entry_notes,
+        "rejection_reason": rec.rejection_reason,
+        "component_summary": rec.component_summary,
+        "bonuses": signal.bonuses if hasattr(signal, 'bonuses') else [],
+        "components": signal.components,
+    }
+    return rec_dict, None
+
+
 def scan_universe_streaming(
     symbols: list[str],
     profile: str = "SWING",
     account_size: float = 10000.0,
+    discover_movers: bool = False,
 ) -> Generator[dict[str, Any], None, None]:
     """
     Scan symbols one-by-one, yielding progress events for SSE streaming.
 
-    Yields dicts with:
+    If discover_movers=True, first pre-screens the FULL market (~6400 tickers)
+    for unusual movers, merges them into the scan list, and detects market regime
+    to auto-include hedges when bearish.
+
+    Yields:
+      {"type": "regime", ...market regime info...}
+      {"type": "discovery", "movers_found": int, "hedges_added": int, "total_symbols": int}
       {"type": "progress", "completed": int, "total": int, "symbol": str, "verdict": str, "score": float}
-      {"type": "result", ...full scan result...}
+      {"type": "trade", "trade": {...}}  -- emitted live for actionable symbols
+      {"type": "result", ...final scan result...}
     """
-    from trade_signal_engine.collector import collect
     from trade_signal_engine.scorer import UnifiedScorer
     from trade_signal_engine.recommender import TradeRecommender
-    import numpy as np
 
     start = time.time()
     scorer = UnifiedScorer()
     recommender = TradeRecommender()
-    total = len(symbols)
 
+    # ── Phase 0: Market regime detection ───────────────────────────
+    regime = _detect_market_regime()
+    yield {"type": "regime", **regime}
+
+    # ── Phase 1: Discover hidden gems from full market ─────────────
+    final_symbols = list(dict.fromkeys(symbols))  # deduplicate
+    movers_found = 0
+    hedges_added = 0
+
+    if discover_movers:
+        yield {"type": "status", "message": "Pre-screening 6,400+ stocks for unusual activity..."}
+        movers = _prescreen_movers()
+        movers_found = len(movers)
+
+        # Add movers that aren't already in the list
+        existing = set(s.upper() for s in final_symbols)
+        for m in movers:
+            sym = m["symbol"].upper()
+            if sym not in existing:
+                final_symbols.append(sym)
+                existing.add(sym)
+
+    # Add hedges if market is bearish
+    if regime["bias"] == "SHORT" and regime["hedges"]:
+        existing = set(s.upper() for s in final_symbols)
+        for h in regime["hedges"]:
+            if h not in existing:
+                final_symbols.append(h)
+                existing.add(h)
+                hedges_added += 1
+
+    yield {
+        "type": "discovery",
+        "movers_found": movers_found,
+        "hedges_added": hedges_added,
+        "total_symbols": len(final_symbols),
+        "regime": regime["regime"],
+        "bias": regime["bias"],
+    }
+
+    # ── Phase 2: Deep scan each symbol ─────────────────────────────
+    total = len(final_symbols)
     recommendations: list[dict] = []
     errors: list[dict] = []
 
-    for i, sym in enumerate(symbols):
+    for i, sym in enumerate(final_symbols):
         try:
-            sd = collect(sym, profile=profile, fetch_options=False)
-            if sd.error:
-                errors.append({"symbol": sym, "error": sd.error})
+            rec_dict, err = _score_one(sym, profile, scorer, recommender, account_size)
+            if err:
+                errors.append(err)
                 yield {"type": "progress", "completed": i + 1, "total": total,
                        "symbol": sym, "verdict": "ERROR", "score": 0}
                 continue
 
-            signal = scorer.score(sd)
-
-            atr = 0.0
-            for tf in ["5m", "1h", "4h", "1d"]:
-                if tf in sd.bars and len(sd.bars[tf]) >= 14:
-                    h = sd.bars[tf]["high"].values
-                    l = sd.bars[tf]["low"].values
-                    c = sd.bars[tf]["close"].values
-                    tr = np.maximum(h[1:]-l[1:], np.maximum(np.abs(h[1:]-c[:-1]), np.abs(l[1:]-c[:-1])))
-                    atr = float(np.mean(tr[-14:]))
-                    break
-
-            rec = recommender.recommend(signal, atr=atr, current_price=sd.current_price, account_size=account_size)
-
-            rec_dict = {
-                "symbol": rec.symbol, "profile": rec.profile, "verdict": rec.verdict,
-                "direction": rec.direction, "score": rec.score, "confidence": rec.confidence,
-                "entry": rec.entry, "stop": rec.stop, "target": rec.target,
-                "risk_reward": rec.risk_reward, "level_source": rec.level_source,
-                "position_size": rec.position_size, "position_value": rec.position_value,
-                "risk_amount": rec.risk_amount, "projected_profit": rec.projected_profit,
-                "projected_profit_pct": rec.projected_profit_pct, "entry_notes": rec.entry_notes,
-                "rejection_reason": rec.rejection_reason,
-                "component_summary": rec.component_summary,
-                "bonuses": signal.bonuses if hasattr(signal, 'bonuses') else [],
-                "components": signal.components,
-            }
             recommendations.append(rec_dict)
 
             # Emit progress
             yield {"type": "progress", "completed": i + 1, "total": total,
-                   "symbol": sym, "verdict": rec.verdict, "score": rec.score}
+                   "symbol": sym, "verdict": rec_dict["verdict"], "score": rec_dict["score"]}
 
             # Emit trade immediately if actionable (BUY/SELL/HOLD)
-            if rec.verdict in ("BUY", "SELL", "HOLD"):
+            if rec_dict["verdict"] in ("BUY", "SELL", "HOLD"):
                 yield {"type": "trade", "trade": rec_dict}
 
         except Exception as e:
@@ -231,6 +381,7 @@ def scan_universe_streaming(
         "symbols_scanned": total,
         "profile": profile,
         "account_size": account_size,
+        "regime": regime,
         "recommendations": recommendations,
         "top_trades": top_trades,
         "watchlist": watchlist,

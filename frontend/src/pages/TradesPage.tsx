@@ -33,10 +33,12 @@ interface ScanResult {
   symbols_scanned: number
   profile: string
   account_size: number
+  recommendations: TradeRec[]
   top_trades: TradeRec[]
   watchlist: TradeRec[]
   no_trade: TradeRec[]
   errors: { symbol: string; error: string }[]
+  regime?: { regime: string; bias: string }
 }
 
 interface LookupResult extends TradeRec {
@@ -56,6 +58,21 @@ interface ScanProgress {
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
 
+interface RegimeInfo {
+  regime: string
+  bias: string
+  hedges: string[]
+  spy_trend: string
+}
+
+interface DiscoveryInfo {
+  movers_found: number
+  hedges_added: number
+  total_symbols: number
+  regime: string
+  bias: string
+}
+
 function useStreamingScan() {
   const [progress, setProgress] = useState<ScanProgress | null>(null)
   const [results, setResults] = useState<ScanResult | null>(null)
@@ -63,6 +80,9 @@ function useStreamingScan() {
   const [error, setError] = useState<string | null>(null)
   const [recentSymbols, setRecentSymbols] = useState<ScanProgress[]>([])
   const [liveTrades, setLiveTrades] = useState<TradeRec[]>([])
+  const [regime, setRegime] = useState<RegimeInfo | null>(null)
+  const [discovery, setDiscovery] = useState<DiscoveryInfo | null>(null)
+  const [statusMsg, setStatusMsg] = useState<string>('')
   const abortRef = useRef<AbortController | null>(null)
 
   const startScan = useCallback((profile: string, account: number, symbols?: string) => {
@@ -77,6 +97,9 @@ function useStreamingScan() {
     setResults(null)
     setRecentSymbols([])
     setLiveTrades([])
+    setRegime(null)
+    setDiscovery(null)
+    setStatusMsg('Detecting market regime...')
 
     const params = new URLSearchParams({ profile, account: String(account) })
     if (symbols) params.set('symbols', symbols)
@@ -104,9 +127,18 @@ function useStreamingScan() {
             if (!line.startsWith('data: ')) continue
             try {
               const event = JSON.parse(line.slice(6))
-              if (event.type === 'progress') {
+              if (event.type === 'regime') {
+                setRegime(event)
+                setStatusMsg(`Market: ${event.regime} (${event.bias})`)
+              } else if (event.type === 'status') {
+                setStatusMsg(event.message)
+              } else if (event.type === 'discovery') {
+                setDiscovery(event)
+                setStatusMsg(`Found ${event.movers_found} unusual movers + ${event.hedges_added} hedges → scanning ${event.total_symbols} total`)
+              } else if (event.type === 'progress') {
                 setProgress(event)
                 setRecentSymbols(prev => [...prev.slice(-49), event])
+                setStatusMsg('')
               } else if (event.type === 'trade') {
                 // Live trade result — add to list immediately
                 setLiveTrades(prev => {
@@ -134,7 +166,7 @@ function useStreamingScan() {
     setIsScanning(false)
   }, [])
 
-  return { progress, results, isScanning, error, recentSymbols, liveTrades, startScan, abort }
+  return { progress, results, isScanning, error, recentSymbols, liveTrades, regime, discovery, statusMsg, startScan, abort }
 }
 
 function useTradeLookup(symbol: string, profile: string, account: number) {
@@ -455,7 +487,7 @@ export default function TradesPage() {
   const [profile, setProfile] = useState<Profile>('SWING')
   const [account, setAccount] = useState(10000)
 
-  const { progress, results: scanData, isScanning, error: scanError, recentSymbols, liveTrades, startScan, abort } = useStreamingScan()
+  const { progress, results: scanData, isScanning, error: scanError, recentSymbols, liveTrades, regime, discovery, statusMsg, startScan, abort } = useStreamingScan()
 
   const handleScanStart = () => {
     setMode('scanner')
@@ -533,6 +565,39 @@ export default function TradesPage() {
             )}
           </div>
 
+          {/* Regime + Discovery banner */}
+          {(regime || discovery || statusMsg) && (
+            <div className="space-y-2">
+              {regime && (
+                <div className={`flex items-center gap-3 px-4 py-2 rounded-lg border text-xs font-mono ${
+                  regime.bias === 'LONG' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+                  regime.bias === 'SHORT' ? 'bg-red-500/10 border-red-500/30 text-red-400' :
+                  'bg-gray-800/50 border-gray-700/30 text-gray-400'
+                }`}>
+                  <span className="font-bold">{regime.regime}</span>
+                  <span className="text-gray-500">|</span>
+                  <span>Bias: {regime.bias}</span>
+                  {regime.bias === 'SHORT' && (
+                    <span className="text-red-300 ml-2">⚠ Hedges auto-included: {regime.hedges?.slice(0,5).join(', ')}...</span>
+                  )}
+                </div>
+              )}
+              {discovery && (
+                <div className="flex items-center gap-3 px-4 py-2 bg-gray-800/30 rounded-lg text-xs font-mono text-gray-400">
+                  <span>📡 Discovered <span className="text-white">{discovery.movers_found}</span> unusual movers from full market</span>
+                  {discovery.hedges_added > 0 && (
+                    <span>+ <span className="text-red-400">{discovery.hedges_added}</span> hedges</span>
+                  )}
+                  <span className="text-gray-500">→</span>
+                  <span>Scanning <span className="text-white">{discovery.total_symbols}</span> symbols total</span>
+                </div>
+              )}
+              {statusMsg && !progress && (
+                <div className="text-gray-400 text-xs font-mono animate-pulse px-4">{statusMsg}</div>
+              )}
+            </div>
+          )}
+
           {/* Progress bar */}
           {isScanning && progress && (
             <ScanProgressBar progress={progress} recentSymbols={recentSymbols} />
@@ -587,7 +652,8 @@ export default function TradesPage() {
 
                 {!isScanning && trades.length === 0 && !scanData && (
                   <div className="text-center py-8">
-                    <div className="text-gray-500 text-sm">Click RUN SCAN to find trades across 200+ stocks, ETFs, and penny stocks</div>
+                    <div className="text-gray-500 text-sm">Click RUN SCAN to discover trades from 6,400+ stocks</div>
+                    <div className="text-gray-600 text-xs mt-1">Pre-screens full market for unusual movers, auto-adds hedges if bearish</div>
                   </div>
                 )}
 

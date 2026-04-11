@@ -919,6 +919,118 @@ def _get_impulse_wave_type(ext_wave: Optional[int]) -> WaveType:
     }[ext_wave]
 
 
+def find_zigzag_candidates(monowaves: list[MonoWave]) -> list[dict]:
+    """
+    Scan for zigzag (5-3-5) corrective patterns: A-B-C where
+    - A has impulsive internal structure
+    - B is corrective and does NOT retrace all of A (B end ≠ A start)
+    - C has impulsive internal structure
+    """
+    candidates = []
+    n = len(monowaves)
+
+    for i in range(n - 2):
+        a, b, c = monowaves[i], monowaves[i + 1], monowaves[i + 2]
+
+        # Direction check: A and C in same direction, B opposite
+        if a.direction == b.direction or b.direction == c.direction:
+            continue
+        if a.direction != c.direction:
+            continue
+
+        # Internal structure: A and C must be impulsive (or indeterminate)
+        if a.internal_structure == "corrective":
+            continue
+        if c.internal_structure == "corrective":
+            continue
+        # B must be corrective (or indeterminate)
+        if b.internal_structure == "impulsive":
+            continue
+
+        # B must NOT retrace all of A (key zigzag rule)
+        if a.direction == WaveDirection.UP:
+            if b.end.price <= a.start.price:
+                continue  # B went past A's origin
+        else:
+            if b.end.price >= a.start.price:
+                continue
+
+        candidates.append({
+            "waves":        [a, b, c],
+            "start_idx":    i,
+            "wave_type":    WaveType.ZIGZAG,
+            "extension_wave": None,
+            "direction":    a.direction,
+        })
+
+    return candidates
+
+
+def find_flat_candidates(monowaves: list[MonoWave]) -> list[dict]:
+    """
+    Scan for flat corrective patterns (3-3-5): A-B-C where
+    - A has corrective internal structure (3-wave)
+    - B is corrective
+    - C has impulsive internal structure (5-wave)
+
+    Subtypes:
+    - FLAT_REGULAR:  B retraces 90-105% of A
+    - FLAT_EXPANDED: B exceeds the origin of A (B > A start in a downmove)
+    - FLAT_RUNNING:  B exceeds origin of A AND C fails to reach end of A
+    """
+    candidates = []
+    n = len(monowaves)
+
+    for i in range(n - 2):
+        a, b, c = monowaves[i], monowaves[i + 1], monowaves[i + 2]
+
+        # Direction: A and C same direction, B opposite
+        if a.direction == b.direction or b.direction == c.direction:
+            continue
+        if a.direction != c.direction:
+            continue
+
+        # A must be corrective (3-wave) — this is what distinguishes flat from zigzag
+        if a.internal_structure == "impulsive":
+            continue
+        # B must be corrective
+        if b.internal_structure == "impulsive":
+            continue
+        # C must be impulsive
+        if c.internal_structure == "corrective":
+            continue
+
+        # Determine flat subtype based on where B ends relative to A's origin
+        b_retrace_ratio = b.price_change / a.price_change if a.price_change > 0 else 0
+
+        if a.direction == WaveDirection.DOWN:
+            b_exceeds_origin = b.end.price > a.start.price  # strict: B must go BEYOND A origin
+            c_fails_a       = c.end.price > a.end.price     # C doesn't reach A's end
+        else:
+            b_exceeds_origin = b.end.price < a.start.price
+            c_fails_a       = c.end.price < a.end.price
+
+        if b_exceeds_origin and c_fails_a:
+            wave_type = WaveType.FLAT_RUNNING
+        elif b_exceeds_origin:
+            wave_type = WaveType.FLAT_EXPANDED
+        elif 0.90 <= b_retrace_ratio <= 1.05:
+            wave_type = WaveType.FLAT_REGULAR
+        else:
+            # B doesn't retrace enough — not a recognized flat
+            continue
+
+        candidates.append({
+            "waves":        [a, b, c],
+            "start_idx":    i,
+            "wave_type":    wave_type,
+            "extension_wave": None,
+            "direction":    a.direction,
+        })
+
+    return candidates
+
+
 def _validate_impulse_rules(waves: list[MonoWave], direction: WaveDirection) -> list[str]:
     """
     Validate the three absolute Elliott Wave rules for a 5-wave impulse.

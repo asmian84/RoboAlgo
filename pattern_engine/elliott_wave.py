@@ -1149,6 +1149,244 @@ def find_diagonal_candidates(
     return candidates
 
 
+# ── Layer 4: Validation & Scoring ────────────────────────────────────────────
+
+# Scoring weights (sum to 1.0)
+_SCORE_WEIGHTS = {
+    "rule_compliance":    0.30,
+    "internal_structure": 0.25,
+    "fibonacci":          0.15,
+    "alternation":        0.10,
+    "proportionality":    0.10,
+    "channel_fit":        0.05,
+    "position":           0.05,
+}
+
+# Position bonuses/penalties
+_POSITION_SCORES = {
+    (WaveType.CONTRACTING_TRIANGLE, "w4"):  +0.20,
+    (WaveType.CONTRACTING_TRIANGLE, "b"):   +0.20,
+    (WaveType.CONTRACTING_TRIANGLE, "w2"):  -0.30,
+    (WaveType.ENDING_DIAGONAL,      "w5"):  +0.20,
+    (WaveType.ENDING_DIAGONAL,      "c"):   +0.20,
+    (WaveType.ENDING_DIAGONAL,      "w1"):  -0.40,
+    (WaveType.LEADING_DIAGONAL,     "w1"):  +0.20,
+    (WaveType.LEADING_DIAGONAL,     "a"):   +0.20,
+    (WaveType.LEADING_DIAGONAL,     "w5"):  -0.40,
+}
+
+
+def validate_and_score(candidates: list[dict]) -> list[dict]:
+    """
+    Score each candidate dict on all guideline dimensions.
+    Adds "confidence" float (0.0–1.0) to each candidate.
+    Candidates that fail the hard gate (rule violations) are removed.
+    """
+    scored = []
+    for cand in candidates:
+        waves     = cand["waves"]
+        wave_type = cand["wave_type"]
+        direction = cand.get("direction", waves[0].direction)
+
+        # ── Rule compliance (hard gate for impulse) ─────────────────────
+        if wave_type in (WaveType.IMPULSE, WaveType.IMPULSE_EXT_W1,
+                         WaveType.IMPULSE_EXT_W3, WaveType.IMPULSE_EXT_W5,
+                         WaveType.TRUNCATED_5TH):
+            violations = _validate_impulse_rules(waves, direction)
+            if violations:
+                continue  # hard gate
+            rule_score = 1.0
+        else:
+            rule_score = 1.0  # corrective patterns validated by structure
+
+        # ── Internal structure match ─────────────────────────────────────
+        internal_score = _score_internal_structures(waves, wave_type)
+
+        # ── Fibonacci alignment ──────────────────────────────────────────
+        fib_score = _score_fibonacci(waves, wave_type)
+
+        # ── Alternation (impulse only) ───────────────────────────────────
+        alt_score = _score_alternation(waves) if len(waves) == 5 else 0.5
+
+        # ── Proportionality (Brown: time ratios) ────────────────────────
+        prop_score = _score_proportionality(waves)
+
+        # ── Channel fit (impulse only) ───────────────────────────────────
+        channel_score = _score_channel_fit(waves, direction) if len(waves) == 5 else 0.5
+
+        # ── Position bonus/penalty ───────────────────────────────────────
+        pos_hint  = cand.get("position_hint", "")
+        raw_pos   = _POSITION_SCORES.get((wave_type, pos_hint), 0.0)
+        pos_score = max(0.0, min(1.0, 0.5 + raw_pos))
+
+        confidence = (
+            rule_score     * _SCORE_WEIGHTS["rule_compliance"]   +
+            internal_score * _SCORE_WEIGHTS["internal_structure"] +
+            fib_score      * _SCORE_WEIGHTS["fibonacci"]          +
+            alt_score      * _SCORE_WEIGHTS["alternation"]        +
+            prop_score     * _SCORE_WEIGHTS["proportionality"]    +
+            channel_score  * _SCORE_WEIGHTS["channel_fit"]        +
+            pos_score      * _SCORE_WEIGHTS["position"]
+        )
+
+        result = dict(cand)
+        result["confidence"]          = round(min(1.0, max(0.0, confidence)), 4)
+        result["alternation_quality"] = _alternation_label(alt_score)
+        scored.append(result)
+
+    return scored
+
+
+def _score_internal_structures(waves: list[MonoWave], wave_type: WaveType) -> float:
+    """Score how well wave internal structures match the expected pattern. 0.0–1.0."""
+    if wave_type in (WaveType.IMPULSE, WaveType.IMPULSE_EXT_W1,
+                     WaveType.IMPULSE_EXT_W3, WaveType.IMPULSE_EXT_W5,
+                     WaveType.TRUNCATED_5TH):
+        expected = ["impulsive", "corrective", "impulsive", "corrective", "impulsive"]
+    elif wave_type == WaveType.ZIGZAG:
+        expected = ["impulsive", "corrective", "impulsive"]
+    elif wave_type in (WaveType.FLAT_REGULAR, WaveType.FLAT_EXPANDED, WaveType.FLAT_RUNNING):
+        expected = ["corrective", "corrective", "impulsive"]
+    elif wave_type in (WaveType.CONTRACTING_TRIANGLE, WaveType.EXPANDING_TRIANGLE):
+        expected = ["corrective"] * 5
+    elif wave_type == WaveType.ENDING_DIAGONAL:
+        expected = ["corrective"] * 5
+    elif wave_type == WaveType.LEADING_DIAGONAL:
+        expected = ["impulsive", "corrective", "impulsive", "corrective", "impulsive"]
+    else:
+        return 0.5
+
+    score = 0.0
+    for wave, exp in zip(waves, expected):
+        s = wave.internal_structure
+        if s == exp:
+            score += 1.0
+        elif s == "indeterminate":
+            score += 0.5  # partial credit
+        else:
+            score += 0.0
+    return score / len(expected)
+
+
+def _score_fibonacci(waves: list[MonoWave], wave_type: WaveType) -> float:
+    """Score Fibonacci relationships. Uses tight tolerance (±5%). 0.0–1.0."""
+    if len(waves) < 3:
+        return 0.5
+
+    if wave_type in (WaveType.IMPULSE, WaveType.IMPULSE_EXT_W1,
+                     WaveType.IMPULSE_EXT_W3, WaveType.IMPULSE_EXT_W5,
+                     WaveType.TRUNCATED_5TH):
+        w1, w2, w3, w4, w5 = waves
+        checks = [
+            _near_ratio(w2.price_change, w1.price_change, [0.382, 0.500, 0.618]),
+            _near_ratio(w3.price_change, w1.price_change, [1.000, 1.618, 2.618]),
+            _near_ratio(w4.price_change, w3.price_change, [0.236, 0.382]),
+            _near_ratio(w5.price_change, w1.price_change, [0.618, 1.000, 1.618]),
+        ]
+    elif wave_type == WaveType.ZIGZAG:
+        a, b, c = waves[0], waves[1], waves[2]
+        checks = [
+            _near_ratio(b.price_change, a.price_change, [0.382, 0.500, 0.618]),
+            _near_ratio(c.price_change, a.price_change, [1.000, 1.618]),
+        ]
+    else:
+        return 0.5
+
+    return sum(checks) / len(checks) if checks else 0.5
+
+
+def _near_ratio(a: float, b: float, targets: list[float], tol: float = 0.05) -> float:
+    """Return 1.0 if a/b is within tol of any target, else 0.0."""
+    if b == 0:
+        return 0.0
+    ratio = a / b
+    return 1.0 if any(abs(ratio - t) / t <= tol for t in targets if t > 0) else 0.0
+
+
+def _score_alternation(waves: list[MonoWave]) -> float:
+    """Score W2/W4 alternation for a 5-wave impulse. 0.0–1.0."""
+    if len(waves) != 5:
+        return 0.5
+    w2, w4 = waves[1], waves[3]
+    # Good alternation: different structure types
+    if w2.internal_structure != w4.internal_structure:
+        return 1.0
+    # Same structure but one indeterminate
+    if "indeterminate" in (w2.internal_structure, w4.internal_structure):
+        return 0.5
+    return 0.3
+
+
+def _score_proportionality(waves: list[MonoWave]) -> float:
+    """
+    Brown's box method: corrective waves should have similar time proportions.
+    Score 1.0 if W4/W2 time ratio is within [0.382, 2.618].
+    """
+    if len(waves) < 5:
+        return 0.5
+    w2_bars = waves[1].bar_count
+    w4_bars = waves[3].bar_count
+    if w2_bars == 0:
+        return 0.5
+    ratio = w4_bars / w2_bars
+    if 0.382 <= ratio <= 2.618:
+        return 1.0
+    return 0.2  # outside range — probably different degree
+
+
+def _score_channel_fit(waves: list[MonoWave], direction: WaveDirection) -> float:
+    """
+    Check if W4 ends near the base channel (W1-start → W2-end line).
+    Returns 1.0 if W4 end is within 15% of the channel band, else scales down.
+    """
+    if len(waves) < 4:
+        return 0.5
+    w1, w2, _, w4 = waves[0], waves[1], waves[2], waves[3]
+
+    # Base channel: line from w1.start to w2.end
+    dx = w2.end.idx - w1.start.idx
+    if dx == 0:
+        return 0.5
+    slope = (w2.end.price - w1.start.price) / dx
+
+    # Parallel through w1.end (upper channel for uptrend)
+    offset = w1.end.price - (w1.start.price + slope * (w1.end.idx - w1.start.idx))
+
+    # Where is the channel at w4.end.idx?
+    channel_at_w4 = w1.start.price + slope * (w4.end.idx - w1.start.idx)
+
+    # W4 should end near the base channel (lower line for uptrend)
+    band_width = abs(offset) if abs(offset) > 0 else abs(w1.price_change)
+    if band_width == 0:
+        return 0.5
+    deviation = abs(w4.end.price - channel_at_w4)
+
+    return 1.0 if deviation <= 0.15 * band_width else max(0.0, 1.0 - deviation / band_width)
+
+
+def _alternation_label(score: float) -> str:
+    if score >= 0.8:
+        return "good"
+    elif score >= 0.5:
+        return "fair"
+    return "poor"
+
+
+# ── Layer 5: Multi-Count Ranking ─────────────────────────────────────────────
+
+def rank_counts(scored_candidates: list[dict], top_n: int = 3) -> list[dict]:
+    """
+    Sort candidates by confidence descending and return top_n.
+    Adds "rank" and "label" fields.
+    """
+    labels = ["Preferred", "Alternate", "Alternate 2"]
+    ranked = sorted(scored_candidates, key=lambda c: c["confidence"], reverse=True)[:top_n]
+    for i, cand in enumerate(ranked):
+        cand["rank"]  = i + 1
+        cand["label"] = labels[i] if i < len(labels) else f"Alternate {i}"
+    return ranked
+
+
 def _validate_impulse_rules(waves: list[MonoWave], direction: WaveDirection) -> list[str]:
     """
     Validate the three absolute Elliott Wave rules for a 5-wave impulse.

@@ -471,8 +471,334 @@ def classify_internal_structure(
     end_idx: int,
     min_bars_for_recursion: int = 8,
 ) -> tuple[str, str, int]:
-    """Stub — implemented in Task 5."""
-    return "indeterminate", "unknown", 0
+    """
+    Determine whether the price move from start_idx to end_idx is:
+      - "impulsive"    : internally structured as 5 waves
+      - "corrective"   : internally structured as 3 waves / overlapping
+      - "indeterminate": too few bars or ambiguous
+
+    Returns (structure, method, sub_pivot_count) where:
+      method = "recursive" | "heuristic" | "unknown"
+
+    Hybrid approach (Brown):
+      - If (end_idx - start_idx) >= min_bars_for_recursion: recursive sub-pivot detection
+      - Otherwise: proportion heuristic (max counter-move ratio)
+    """
+    bar_count = end_idx - start_idx
+
+    if bar_count < 4:
+        return "indeterminate", "unknown", 0
+
+    if bar_count < min_bars_for_recursion:
+        return _classify_by_heuristic(df, start_idx, end_idx)
+
+    return _classify_by_recursion(df, start_idx, end_idx)
+
+
+def _classify_by_heuristic(
+    df: pd.DataFrame,
+    start_idx: int,
+    end_idx: int,
+) -> tuple[str, str, int]:
+    """
+    Brown's box method: if max counter-move > 38.2% of total move → corrective.
+    If max counter-move < 10% → impulsive. Between 10–38.2% → indeterminate.
+    """
+    sl = slice(start_idx, end_idx + 1)
+    closes = df["close"].iloc[sl].values.astype(float)
+
+    if len(closes) < 3:
+        return "indeterminate", "unknown", 0
+
+    total_move = abs(closes[-1] - closes[0])
+    if total_move < 1e-9:
+        return "indeterminate", "heuristic", 0
+
+    direction = 1 if closes[-1] > closes[0] else -1
+    peak = closes[0]
+    max_retrace_ratio = 0.0
+
+    for price in closes[1:]:
+        if direction == 1:
+            if price > peak:
+                peak = price
+            retrace = (peak - price) / total_move
+        else:
+            if price < peak:
+                peak = price
+            retrace = (price - peak) / total_move
+        if retrace > max_retrace_ratio:
+            max_retrace_ratio = retrace
+
+    if max_retrace_ratio > 0.382:
+        return "corrective", "heuristic", 0
+    elif max_retrace_ratio < 0.10:
+        return "impulsive", "heuristic", 0
+    return "indeterminate", "heuristic", 0
+
+
+def _classify_by_recursion(
+    df: pd.DataFrame,
+    start_idx: int,
+    end_idx: int,
+) -> tuple[str, str, int]:
+    """
+    Detect sub-pivots within the bar range using a tighter ATR multiplier.
+    If ≥4 sub-pivots satisfy 5-wave rules → impulsive.
+    If structure is overlapping / 3-wave → corrective.
+    """
+    # Slice the DataFrame to the monowave range
+    sub_df = df.iloc[start_idx: end_idx + 1].reset_index(drop=True)
+
+    if len(sub_df) < 8:
+        return _classify_by_heuristic(df, start_idx, end_idx)
+
+    # Use a tighter ATR multiplier to find sub-pivots within this wave
+    # Also use smaller lookback for finer granularity
+    sub_pivots = _detect_sub_pivots(sub_df)
+
+    # Add boundary pivots: the start and end of the move are implicit pivots
+    # that detect_pivots doesn't include (it only finds internal extremes)
+    sub_pivots = _add_boundary_pivots(sub_df, sub_pivots)
+
+    if len(sub_pivots) < 2:
+        # Fall back to heuristic if we can't find structure
+        return _classify_by_heuristic(df, start_idx, end_idx)
+
+    if len(sub_pivots) < 4:
+        # 2–3 sub-pivots: check if structure is 3-wave corrective
+        if _is_three_wave(sub_pivots, sub_df):
+            return "corrective", "recursive", len(sub_pivots)
+        return "indeterminate", "recursive", len(sub_pivots)
+
+    # 4+ sub-pivots: check for 5-wave impulse structure
+    if _is_five_wave_impulse(sub_pivots, sub_df):
+        return "impulsive", "recursive", len(sub_pivots)
+
+    if _has_heavy_overlap(sub_pivots):
+        return "corrective", "recursive", len(sub_pivots)
+
+    # Ambiguous — use heuristic as tiebreaker on the raw price data
+    heuristic_result, _, _ = _classify_by_heuristic(df, start_idx, end_idx)
+    if heuristic_result != "indeterminate":
+        return heuristic_result, "recursive", len(sub_pivots)
+
+    return "indeterminate", "recursive", len(sub_pivots)
+
+
+def _add_boundary_pivots(sub_df: pd.DataFrame, sub_pivots: list[Pivot]) -> list[Pivot]:
+    """
+    Add the start and end of the sub-DataFrame as boundary pivots if they
+    complement the alternation pattern. The start/end of a monowave are
+    always pivots at the parent level — detect_pivots only finds internal ones.
+    """
+    n = len(sub_df)
+    if n < 2:
+        return sub_pivots
+
+    close = sub_df["close"].values
+    high = sub_df["high"].values
+    low = sub_df["low"].values
+
+    result = list(sub_pivots)
+
+    # Determine overall direction of this monowave
+    overall_up = close[-1] > close[0]
+
+    # Start boundary: if moving up, start is a LOW; if down, start is a HIGH
+    if overall_up:
+        start_pivot = Pivot(idx=0, price=float(low[0]), is_high=False, strength=0)
+    else:
+        start_pivot = Pivot(idx=0, price=float(high[0]), is_high=True, strength=0)
+
+    # End boundary: if moving up, end is a HIGH; if down, end is a LOW
+    if overall_up:
+        end_pivot = Pivot(idx=n - 1, price=float(high[n - 1]), is_high=True, strength=0)
+    else:
+        end_pivot = Pivot(idx=n - 1, price=float(low[n - 1]), is_high=False, strength=0)
+
+    # Only add start if it doesn't conflict with the first found pivot
+    if not result or result[0].is_high != start_pivot.is_high:
+        if not result or abs(result[0].idx - start_pivot.idx) > 1:
+            result.insert(0, start_pivot)
+
+    # Only add end if it doesn't conflict with the last found pivot
+    if not result or result[-1].is_high != end_pivot.is_high:
+        if not result or abs(result[-1].idx - end_pivot.idx) > 1:
+            result.append(end_pivot)
+
+    return result
+
+
+def _detect_sub_pivots(sub_df: pd.DataFrame) -> list[Pivot]:
+    """
+    Find sub-pivots within a monowave's bar range.
+    Uses progressively looser settings until we get at least 4 pivots,
+    or gives up and returns whatever we found.
+    """
+    n = len(sub_df)
+
+    # For shorter sub-DataFrames, detect_pivots returns [] (needs ≥20 bars).
+    # Use a simplified local pivot detector instead.
+    if n < 20:
+        return _simple_pivot_detect(sub_df)
+
+    # Try tighter settings first, then loosen
+    for atr_mult in (0.2, 0.3, 0.5):
+        try:
+            pivots = detect_pivots(sub_df, atr_multiplier=atr_mult, min_lookback=2, max_lookback=4)
+            if len(pivots) >= 4:
+                return pivots
+        except Exception:
+            continue
+
+    # Final attempt with smallest multiplier
+    try:
+        return detect_pivots(sub_df, atr_multiplier=0.15, min_lookback=1, max_lookback=3)
+    except Exception:
+        return _simple_pivot_detect(sub_df)
+
+
+def _simple_pivot_detect(sub_df: pd.DataFrame) -> list[Pivot]:
+    """
+    Ultra-simple pivot detection for short windows (<20 bars).
+    Finds local highs/lows with lookback=1, enforces alternation.
+    """
+    high = sub_df["high"].astype(float).values
+    low = sub_df["low"].astype(float).values
+    n = len(sub_df)
+
+    if n < 3:
+        return []
+
+    pivots: list[Pivot] = []
+    for i in range(1, n - 1):
+        if high[i] >= high[i - 1] and high[i] >= high[i + 1]:
+            pivots.append(Pivot(idx=i, price=float(high[i]), is_high=True, strength=1))
+        if low[i] <= low[i - 1] and low[i] <= low[i + 1]:
+            pivots.append(Pivot(idx=i, price=float(low[i]), is_high=False, strength=1))
+
+    if not pivots:
+        return []
+
+    # Sort by index
+    pivots.sort(key=lambda p: (p.idx, not p.is_high))
+
+    # Enforce alternation: no consecutive highs or lows
+    alternating: list[Pivot] = [pivots[0]]
+    for p in pivots[1:]:
+        if p.is_high != alternating[-1].is_high:
+            alternating.append(p)
+        else:
+            # Keep the more extreme one
+            if p.is_high and p.price > alternating[-1].price:
+                alternating[-1] = p
+            elif not p.is_high and p.price < alternating[-1].price:
+                alternating[-1] = p
+
+    return alternating
+
+
+def _is_five_wave_impulse(sub_pivots: list[Pivot], sub_df: pd.DataFrame) -> bool:
+    """
+    Check if sub_pivots contain a valid 5-wave structure.
+    Uses a sliding window of 6 pivots (5 waves).
+    """
+    n = len(sub_pivots)
+    # Try every 6-pivot window
+    for i in range(n - 5):
+        window = sub_pivots[i: i + 6]
+        # Build MonoWaves from the 6 pivots (5 waves)
+        mws = build_monowaves(window)
+        if len(mws) != 5:
+            continue
+        # Check alternating direction
+        if not all(mws[j].direction != mws[j + 1].direction for j in range(4)):
+            continue
+        # Determine direction from first wave
+        direction = mws[0].direction
+        # Apply 3 inviolable rules
+        violations = _validate_impulse_rules(mws, direction)
+        if not violations:
+            return True
+    return False
+
+
+def _is_three_wave(sub_pivots: list[Pivot], sub_df: pd.DataFrame) -> bool:
+    """
+    Check if sub_pivots look like a 3-wave (A-B-C) corrective structure.
+    B must not retrace all of A, and structure should be alternating.
+    """
+    if len(sub_pivots) < 4:
+        # Need at least 4 pivots for 3 waves (start, A-end, B-end, C-end)
+        # With fewer, try using what we have
+        if len(sub_pivots) == 3:
+            mws = build_monowaves(sub_pivots)
+            if len(mws) < 2:
+                return False
+            # 2 waves: check if they alternate direction (A-B pattern at minimum)
+            return mws[0].direction != mws[1].direction
+        return False
+
+    # Use first 4 pivots: start, A-end, B-end, C-end
+    mws = build_monowaves(sub_pivots[:4])
+    if len(mws) < 3:
+        return False
+    a, b, c = mws[0], mws[1], mws[2]
+    # Must alternate direction
+    if a.direction == b.direction or b.direction == c.direction:
+        return False
+    # B must be counter-trend but not retrace all of A
+    if a.direction == WaveDirection.UP:
+        b_retraces_all = b.end.price <= a.start.price
+    else:
+        b_retraces_all = b.end.price >= a.start.price
+    return not b_retraces_all
+
+
+def _has_heavy_overlap(sub_pivots: list[Pivot]) -> bool:
+    """
+    Check for overlapping wave structure (hallmark of corrective pattern).
+    If waves frequently revisit the same price territory, it's corrective.
+
+    Method: For each pair of same-direction waves (i, i+2), check if the
+    later wave's range overlaps significantly with the earlier wave's range.
+    """
+    if len(sub_pivots) < 5:
+        return False
+
+    mws = build_monowaves(sub_pivots)
+    if len(mws) < 4:
+        return False
+
+    overlap_count = 0
+    total_checks = 0
+
+    for i in range(len(mws) - 2):
+        w_a = mws[i]
+        w_b = mws[i + 2]  # Same direction wave (2 positions later)
+
+        if w_a.direction != w_b.direction:
+            continue
+
+        total_checks += 1
+
+        # Check price range overlap
+        a_lo = min(w_a.start.price, w_a.end.price)
+        a_hi = max(w_a.start.price, w_a.end.price)
+        b_lo = min(w_b.start.price, w_b.end.price)
+        b_hi = max(w_b.start.price, w_b.end.price)
+
+        overlap = max(0, min(a_hi, b_hi) - max(a_lo, b_lo))
+        a_range = a_hi - a_lo
+
+        if a_range > 0 and overlap / a_range > 0.30:
+            overlap_count += 1
+
+    if total_checks == 0:
+        return False
+
+    return overlap_count / total_checks > 0.50
 
 
 

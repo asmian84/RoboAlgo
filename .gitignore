@@ -46,3 +46,6 @@ dist/
 *.db
 *.sqlite
 *.sqlite3
+
+# git worktrees
+.worktrees/

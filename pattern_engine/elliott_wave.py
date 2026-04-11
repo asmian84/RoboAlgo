@@ -814,6 +814,110 @@ def _has_heavy_overlap(sub_pivots: list[Pivot]) -> bool:
 # ────────────────────────────────────────────────────────────────────────────
 
 
+# ── Layer 3: Pattern Candidate Finders ───────────────────────────────────────
+
+def find_impulse_candidates(
+    monowaves: list[MonoWave],
+    is_commodity: bool = False,
+) -> list[dict]:
+    """
+    Scan MonoWave sequences for valid impulse wave candidates.
+
+    For each window of 5 consecutive MonoWaves:
+    1. Check alternating direction
+    2. Check internal structures (actionary=impulsive, corrective=corrective)
+       — "indeterminate" is treated permissively
+    3. Apply 3 inviolable rules (hard gate)
+    4. Detect which wave is extended (W3 bias for stocks, W5 bias for commodities)
+
+    Returns list of candidate dicts (not yet scored by Layer 4).
+    """
+    candidates = []
+    n = len(monowaves)
+
+    for i in range(n - 4):
+        seq = monowaves[i: i + 5]
+        w1, w2, w3, w4, w5 = seq
+
+        # Must alternate direction
+        if not (w1.direction != w2.direction and
+                w2.direction != w3.direction and
+                w3.direction != w4.direction and
+                w4.direction != w5.direction):
+            continue
+
+        # Actionary (1,3,5) must be impulsive or indeterminate
+        # Corrective (2,4) must be corrective or indeterminate
+        if w1.internal_structure == "corrective":
+            continue
+        if w3.internal_structure == "corrective":
+            continue
+        if w5.internal_structure == "corrective":
+            continue
+        if w2.internal_structure == "impulsive":
+            continue
+        if w4.internal_structure == "impulsive":
+            continue
+
+        # Hard gate: 3 inviolable rules
+        direction = w1.direction
+        violations = _validate_impulse_rules([w1, w2, w3, w4, w5], direction)
+        if violations:
+            continue
+
+        # Detect extension
+        sizes = [w1.price_change, w3.price_change, w5.price_change]
+        max_size = max(sizes)
+        ext_idx = sizes.index(max_size)  # 0=w1, 1=w3, 2=w5
+        ext_wave = [1, 3, 5][ext_idx]
+
+        # Only label as extended if dominant wave > 1.618× the smaller of the other two
+        other_sizes = [s for j, s in enumerate(sizes) if j != ext_idx]
+        min_other = min(other_sizes)
+        is_extended = max_size > 1.618 * min_other if min_other > 0 else False
+
+        # Commodity bias: if W5 > W3, favor W5 extension
+        if is_commodity and w5.price_change > w3.price_change:
+            ext_wave = 5
+            is_extended = True
+
+        wave_type = _get_impulse_wave_type(ext_wave if is_extended else None)
+
+        # Truncation check: W5 fails to exceed W3 end, but only valid if W3 > 2.618×W1
+        is_truncated = False
+        if direction == WaveDirection.UP and w5.end.price < w3.end.price:
+            if w3.price_change > 2.618 * w1.price_change:
+                is_truncated = True
+                wave_type = WaveType.TRUNCATED_5TH
+            else:
+                continue  # invalid: W5 below W3 without the extension condition
+        elif direction == WaveDirection.DOWN and w5.end.price > w3.end.price:
+            if w3.price_change > 2.618 * w1.price_change:
+                is_truncated = True
+                wave_type = WaveType.TRUNCATED_5TH
+            else:
+                continue
+
+        candidates.append({
+            "waves":        seq,
+            "start_idx":    i,
+            "wave_type":    wave_type,
+            "extension_wave": ext_wave if is_extended else None,
+            "is_truncated": is_truncated,
+            "direction":    direction,
+        })
+
+    return candidates
+
+
+def _get_impulse_wave_type(ext_wave: Optional[int]) -> WaveType:
+    return {
+        1:    WaveType.IMPULSE_EXT_W1,
+        3:    WaveType.IMPULSE_EXT_W3,
+        5:    WaveType.IMPULSE_EXT_W5,
+        None: WaveType.IMPULSE,
+    }[ext_wave]
+
 
 def _validate_impulse_rules(waves: list[MonoWave], direction: WaveDirection) -> list[str]:
     """

@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EW Pattern Interpretations — v2 Engine</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0e17;
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1.6;
+    padding: 24px;
+  }
+  h1 { color: #f1f5f9; font-size: 26px; margin-bottom: 4px; }
+  h2 { color: #94a3b8; font-size: 16px; font-weight: 400; margin-bottom: 32px; }
+
+  .pattern-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 24px;
+  }
+
+  .pattern-card {
+    background: #111827;
+    border-radius: 12px;
+    border: 1px solid #1e293b;
+    overflow: hidden;
+  }
+  .pattern-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid #1e293b;
+  }
+  .pattern-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: #f8fafc;
+  }
+  .pattern-tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .tag-motive { background: #1e3a5f; color: #7dd3fc; }
+  .tag-corrective { background: #4a1d6d; color: #d8b4fe; }
+  .tag-diagonal { background: #7f1d1d; color: #fca5a5; }
+  .tag-combo { background: #713f12; color: #fde047; }
+  .tag-position { background: #14532d; color: #86efac; font-size: 9px; margin-left: 6px; }
+
+  .pattern-chart {
+    background: #0a0f1e;
+    padding: 12px 16px 8px;
+    position: relative;
+  }
+  .pattern-chart svg { width: 100%; display: block; }
+
+  .pattern-info {
+    padding: 14px 18px;
+  }
+  .pattern-structure {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    color: #7dd3fc;
+    background: #0a0f1e;
+    padding: 4px 10px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-bottom: 8px;
+  }
+  .pattern-rules {
+    font-size: 12px;
+    color: #94a3b8;
+  }
+  .pattern-rules li {
+    margin-bottom: 3px;
+    list-style: none;
+    padding-left: 14px;
+    position: relative;
+  }
+  .pattern-rules li::before {
+    content: '>';
+    position: absolute;
+    left: 0;
+    color: #475569;
+    font-weight: bold;
+  }
+  .pattern-rules .rule { color: #fca5a5; font-weight: 600; }
+  .pattern-rules .guide { color: #86efac; }
+  .pattern-rules .key { color: #fde047; }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #475569;
+    margin: 32px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #1e293b;
+  }
+
+  /* SVG text defaults */
+  .lbl { font-family: -apple-system, sans-serif; font-weight: 700; }
+  .sublbl { font-family: -apple-system, sans-serif; font-size: 9px; }
+  .annot { font-family: -apple-system, sans-serif; font-size: 8px; fill: #64748b; }
+</style>
+</head>
+<body>
+
+<h1>Pattern Interpretation Guide — v2 Engine</h1>
+<h2>How the redesigned engine reads each pattern, with internal structure + key rules</h2>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!--  MOTIVE PATTERNS                                                -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div class="section-label">Motive Patterns</div>
+
+<div class="pattern-grid">
+
+  <!-- ──────────────── IMPULSE W3 EXTENDED (STOCKS) ──────────────── -->
+  <div class="pattern-card">
+    <div class="pattern-header">
+      <div>
+        <span class="pattern-name">Impulse — W3 Extended</span>
+        <span class="pattern-tag tag-position">STOCKS / CRYPTO</span>
+      </div>
+      <span class="pattern-tag tag-motive">MOTIVE</span>
+    </div>
+    <div class="pattern-chart">
+      <svg viewBox="0 0 440 210">
+        <!-- Grid -->
+        <line x1="30" y1="195" x2="430" y2="195" stroke="#1e293b" stroke-width="0.5"/>
+
+        <!-- Price path (subtle) -->
+        <polyline points="40,175 70,150 85,162 100,140 110,148 130,110 140,122 155,85 162,94
+          175,60 185,70 195,35 200,42 210,28 220,48 235,40 250,55 270,48 285,62
+          300,55 320,72 340,68 360,80 380,95 400,108 420,100"
+          fill="none" stroke="#334155" stroke-width="1.2"/>
+
+        <!-- W1: small impulse up -->
+        <polyline points="40,175 100,140" fill="none" stroke="#38bdf8" stroke-width="2"/>
+        <!-- W1 sub-waves -->
+        <polyline points="40,175 70,150 85,162 100,140" fill="none" stroke="#38bdf8" stroke-width="1" stroke-dasharray="3,2" opacity="0.5"/>
+        <text x="42" y="185" class="sublbl" fill="#38bdf8">i</text>
+        <text x="68" y="145" class="sublbl" fill="#38bdf8">ii</text>
+        <text x="83" y="172" class="sublbl" fill="#38bdf8">iii</text>
+        <text x="96" y="135" class="sublbl" fill="#38bdf8">iv-v</text>
+
+        <!-- W2: zigzag down -->
+        <polyline points="100,140 130,110" fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <polyline points="100,140 110,148 130,110" fill="none" stroke="#a78bfa" stroke-width="1" stroke-dasharray="3,2" opacity="0.5"/>
+
+        <!-- W3: EXTENDED impulse up (the big one) -->
+        <polyline points="130,110 210,28" fill="none" stroke="#22c55e" stroke-width="3"/>
+        <!-- W3 sub-waves -->
+        <polyline points="130,110 155,85 162,94 195,35 200,42 210,28"
+          fill="none" stroke="#22c55e" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.6"/>
+        <text x="133" y="105" class="sublbl" fill="#22c55e">i</text>
+        <text x="152" y="80" class="sublbl" fill="#22c55e">ii</text>
+        <text x="160" y="102" class="sublbl" fill="#22c55e">iii</text>
+        <text x="192" y="30" class="sublbl" fill="#22c55e">iv</text>
+        <text x="198" y="50" class="sublbl" fill="#22c55e">v</text>
+
+        <!-- Extension marker -->
+        <rect x="200" y="14" width="52" height="14" rx="3" fill="#14532d" opacity="0.9"/>
+        <text x="206" y="24" fill="#86efac" font-size="9" font-weight="700" font-family="sans-serif">EXT 2.618</text>
+
+        <!-- W4: flat (sideways, alternation with W2 zigzag) -->
+        <polyline points="210,28 270,48" fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <polyline points="210,28 235,40 250,55 270,48" fill="none" stroke="#a78bfa" stroke-width="1" stroke-dasharray="3,2" opacity="0.5"/>
+        <!-- Triangle/flat indicator -->
+        <rect x="238" y="56" width="30" height="12" rx="2" fill="#4a1d6d" opacity="0.8"/>
+        <text x="243" y="65" fill="#d8b4fe" font-size="8" font-weight="600" font-family="sans-serif">FLAT</text>
+
+        <!-- W5: equals W1 (equality guideline) -->
+        <polyline points="270,48 320,72" fill="none" stroke="#38bdf8" stroke-width="2"/>
+        <polyline points="270,48 285,62 300,55 320,72" fill="none" stroke="#38bdf8" stroke-width="1" stroke-dasharray="3,2" opacity="0.5"/>
+
+        <!-- Equality bracket -->
+        <line x1="40" y1="190" x2="100" y2="190" stroke="#fde047" stroke-width="1" opacity="0.5"/>
+        <line x1="270" y1="190" x2="320" y2="190" stroke="#fde047" stroke-width="1" opacity="0.5"/>
+        <text x="150" y="193" fill="#fde047" font-size="8" font-family="sans-serif" opacity="0.7">W5 = W1</text>
+
+        <!-- Channel lines -->
+        <line x1="130" y1="110" x2="320" y2="60" stroke="#22c55e" stroke-width="0.7" stroke-dasharray="4,3" opacity="0.25"/>
+        <line x1="100" y1="140" x2="320" y2="90" stroke="#22c55e" stroke-width="0.7" stroke-dasharray="4,3" opacity="0.25"/>
+
+        <!-- Primary labels -->
+        <text x="34" y="178" class="lbl" fill="#f8fafc" font-size="13">1</text>
+        <text x="95" y="137" class="lbl" fill="#f8fafc" font-size="13">1</text>
+        <text x="123" y="118" class="lbl" fill="#f8fafc" font-size="13">2</text>
+        <text x="205" y="22" class="lbl" fill="#22c55e" font-size="14">3</text>
+        <text x="266" y="56" class="lbl" fill="#f8fafc" font-size="13">4</text>
+        <text x="316" y="80" class="lbl" fill="#f8fafc" font-size="13">5</text>
+
+        <!-- Alternation annotation -->
+        <text x="105" y="156" class="annot">zigzag (sharp)</text>
+        <text x="245" y="76" class="annot">flat (sideways)</text>
+        <line x1="118" y1="148" x2="240" y2="73" stroke="#475569" stroke-width="0.5" stroke-dasharray="2,2"/>
+        <text x="165" y="108" fill="#64748b" font-size="7" font-family="sans-serif">ALTERNATION ✓</text>
+      </svg>
+    </div>
+    <div class="pattern-info">
+      <div class="pattern-structure">5(5-3-5-3-5) · W3 = 1.618-2.618x of W1</div>
+      <ul class="pattern-rules">
+        <li><span class="rule">Rule:</span> W2 < 100% W1 · W3 not shortest · W4 no W1 overlap</li>
+        <li><span class="guide">Guideline:</span> W2 zigzag → W4 flat/triangle (alternation)</li>
+        <li><span class="key">Key:</span> W5 tends to equal W1 when W3 is extended</li>
+        <li><span class="key">Key:</span> W3 sub-waves must show valid 5-wave structure</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ──────────────── IMPULSE W5 EXTENDED (COMMODITIES) ──────────── -->
+  <div class="pattern-card">
+    <div class="pattern-header">
+      <div>
+        <span class="pattern-name">Impulse — W5 Extended</span>
+        <span class="pattern-tag tag-position">COMMODITIES (ZC, CL, GC)</span>
+      </div>
+      <span class="pattern-tag tag-motive">MOTIVE</span>
+    </div>
+    <div class="pattern-chart">
+      <svg viewBox="0 0 440 210">
+        <line x1="30" y1="195" x2="430" y2="195" stroke="#1e293b" stroke-width="0.5"/>
+
+        <!-- W1: modest up -->
+        <polyline points="40,170 90,130" fill="none" stroke="#38bdf8" stroke-width="2"/>
+        <!-- W2: deep retrace -->
+        <polyline points="90,130 120,160" fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <!-- W3: normal (not extended) -->
+        <polyline points="120,160 175,105" fill="none" stroke="#38bdf8" stroke-width="2"/>
+        <polyline points="120,160 140,135 148,145 165,112 170,118 175,105"
+          fill="none" stroke="#38bdf8" stroke-width="1" stroke-dasharray="3,2" opacity="0.5"/>
+        <!-- W4: shallow -->
+        <polyline points="175,105 200,125" fill="none" stroke="#a78bfa" stroke-width="2"/>
+
+        <!-- W5: EXTENDED — the big wave for commodities -->
+        <polyline points="200,125 220,100 230,110 250,75 258,84 275,50 282,58
+          295,35 300,42 320,20 330,30 345,15"
+          fill="none" stroke="#22c55e" stroke-width="2.5"/>
+        <!-- W5 sub-waves -->
+        <text x="203" y="120" class="sublbl" fill="#22c55e">i</text>
+        <text x="222" y="96" class="sublbl" fill="#22c55e">ii</text>
+        <text x="228" y="118" class="sublbl" fill="#22c55e">iii</text>
+        <text x="253" y="72" class="sublbl" fill="#22c55e">iv</text>
+        <text x="256" y="92" class="sublbl" fill="#22c55e">v</text>
+        <text x="278" y="46" class="sublbl" fill="#22c55e">vi</text>
+        <text x="280" y="66" class="sublbl" fill="#22c55e">vii</text>
+        <text x="298" y="31" class="sublbl" fill="#22c55e">viii</text>
+        <text x="340" y="11" class="sublbl" fill="#22c55e">ix</text>
+
+        <!-- 9-wave annotation -->
+        <rect x="350" y="6" width="78" height="14" rx="3" fill="#14532d" opacity="0.9"/>
+        <text x="356" y="16" fill="#86efac" font-size="9" font-weight="700" font-family="sans-serif">EXT 9-WAVE</text>
+
+        <!-- Sharp retrace arrow after -->
+        <polyline points="345,15 400,95" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <text x="370" y="55" fill="#ef4444" font-size="8" font-family="sans-serif" font-weight="600">Sharp retrace</text>
+        <text x="370" y="65" fill="#ef4444" font-size="8" font-family="sans-serif">to W2 area</text>
+
+        <!-- Primary labels -->
+        <text x="34" y="180" class="lbl" fill="#f8fafc" font-size="13">(1)</text>
+        <text x="84" y="126" class="lbl" fill="#f8fafc" font-size="13">(1)</text>
+        <text x="113" y="168" class="lbl" fill="#f8fafc" font-size="13">(2)</text>
+        <text x="170" y="100" class="lbl" fill="#f8fafc" font-size="13">(3)</text>
+        <text x="194" y="133" class="lbl" fill="#f8fafc" font-size="13">(4)</text>
+        <text x="338" y="28" class="lbl" fill="#22c55e" font-size="14">(5)</text>
+
+        <!-- W1 ≈ W3 bracket -->
+        <line x1="40" y1="190" x2="90" y2="190" stroke="#fde047" stroke-width="1" opacity="0.5"/>
+        <line x1="120" y1="190" x2="175" y2="190" stroke="#fde047" stroke-width="1" opacity="0.5"/>
+        <text x="95" y="193" fill="#fde047" font-size="7" font-family="sans-serif" opacity="0.7">≈</text>
+      </svg>
+    </div>
+    <div class="pattern-info">
+      <div class="pattern-structure">5(5-3-5-3-5) · W5 extended → 9-wave sequence visible</div>
+      <ul class="pattern-rules">
+        <li><span class="key">Key:</span> W1 ≈ W3 (equality) when W5 is extended</li>
+        <li><span class="key">Key:</span> Extended W5 often shows 9 visible sub-waves</li>
+        <li><span class="rule">After:</span> Sharp retrace back to W2 price area</li>
+        <li><span class="guide">Commodity bias:</span> v2 engine checks asset class for W5 ext</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ──────────────── LEADING DIAGONAL ──────────────── -->
+  <div class="pattern-card">
+    <div class="pattern-header">
+      <div>
+        <span class="pattern-name">Leading Diagonal</span>
+        <span class="pattern-tag tag-position">WAVE 1 or A ONLY</span>
+      </div>
+      <span class="pattern-tag tag-diagonal">DIAGONAL</span>
+    </div>
+    <div class="pattern-chart">
+      <svg viewBox="0 0 440 180">
+        <!-- Converging trendlines -->
+        <line x1="40" y1="160" x2="300" y2="30" stroke="#fca5a5" stroke-width="0.7" stroke-dasharray="4,3" opacity="0.4"/>
+        <line x1="40" y1="160" x2="300" y2="55" stroke="#fca5a5" stroke-width="0.7" stroke-dasharray="4,3" opacity="0.4"/>
+
+        <!-- Wedge shape — overlapping waves -->
+        <!-- W1 up -->
+        <polyline points="50,155 110,90" fill="none" stroke="#38bdf8" stroke-width="2"/>
+        <!-- W2 down (overlaps W1 territory — OK for diagonal) -->
+        <polyline points="110,90 140,130" fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <!-- W3 up -->
+        <polyline points="140,130 200,65" fill="none" stroke="#38bdf8" stroke-width="2"/>
+        <!-- W4 down (overlaps W1 end — KEY difference from impulse) -->
+        <polyline points="200,65 230,100" fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <!-- W5 up -->
+        <polyline points="230,100 280,50" fill="none" stroke="#38bdf8" stroke-width="2"/>
+
+        <!-- Overlap zone shading -->
+        <rect x="105" y="88" width="35" height="7" fill="#fca5a5" opacity="0.15" rx="2"/>
+        <text x="108" y="84" fill="#fca5a5" font-size="7" font-family="sans-serif">W4 overlaps W1 ✓</text>
+
+        <!-- Labels -->
+        <text x="44" y="165" class="lbl" fill="#f8fafc" font-size="12">1</text>
+        <text x="106" y="84" class="lbl" fill="#f8fafc" font-size="12">1</text>
+        <text x="136" y="140" class="lbl" fill="#f8fafc" font-size="12">2</text>
+        <text x="196" y="58" class="lbl" fill="#f8fafc" font-size="12">3</text>
+        <text x="226" y="110" class="lbl" fill="#f8fafc" font-size="12">4</text>
+        <text x="276" y="44" class="lbl" fill="#f8fafc" font-size="12">5</text>
+
+        <!-- What follows -->
+        <polyline points="280,50 310,75 340,30" fill="none" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.5"/>
+        <text x="310" y="22" fill="#22c55e" font-size="9" font-weight="600" font-family="sans-serif">Strong W3 follows</text>
+
+        <!-- Internal structure labels -->
+        <text x="65" y="130" fill="#475569" font-size="7" font-family="sans-serif">5-wave</text>
+        <text x="120" y="118" fill="#475569" font-size="7" font-family="sans-serif">3-wave</text>
+        <text x="160" y="105" fill="#475569" font-size="7" font-family="sans-serif">5-wave</text>
+        <text x="210" y="90" fill="#475569" font-size="7" font-family="sans-serif">3-wave</text>
+        <text x="248" y="82" fill="#475569" font-size="7" font-family="sans-serif">5-wave</text>
+      </svg>
+    </div>
+    <div class="pattern-info">
+      <div class="pattern-structure">5-3-5-3-5 · Converging wedge · W4 overlaps W1</div>
+      <ul class="pattern-rules">
+        <li><span class="rule">Position:</span> ONLY in Wave 1 or Wave A — nowhere else</li>
+        <li><span class="key">Key:</span> Overlap allowed (unlike impulse Rule 3)</li>
+        <li><span class="key">Key:</span> Internal structure = 5-3-5-3-5 (not 3-3-3-3-3)</li>
+        <li><span class="guide">After:</span> Strong Wave 3 follows (confirms the diagonal was W1)</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ──────────────── ENDING DIAGONAL ──────────────── -->
+  <div class="pattern-card">
+    <div class="pattern-header">
+      <div>
+        <span class="pattern-name">Ending Diagonal</span>
+        <span class="pattern-tag tag-position">WAVE 5 or C ONLY</span>
+      </div>
+      <span class="pattern-tag tag-diagonal">DIAGONAL</span>
+    </div>
+    <div class="pattern-chart">
+      <svg viewBox="0 0 440 180">
+        <!-- Prior impulse waves 1-4 (faded) -->
+        <polyline points="20,160 50,120 65,140 120,50 145,80"
+          fill="none" stroke="#334155" stroke-width="1.5" stroke-dasharray="3,2"/>
+        <text x="20" y="170" fill="#334155" font-size="9" font-family="sans-serif">1</text>
+        <text x="47" y="115" fill="#334155" font-size="9" font-family="sans-serif">1</text>
+        <text x="62" y="150" fill="#334155" font-size="9" font-family="sans-serif">2</text>
+        <text x="117" y="45" fill="#334155" font-size="9" font-family="sans-serif">3</text>
+        <text x="142" y="88" fill="#334155" font-size="9" font-family="sans-serif">4</text>
+
+        <!-- Converging trendlines for the diagonal -->
+        <line x1="145" y1="80" x2="340" y2="20" stroke="#fca5a5" stroke-width="0.7" stroke-dasharray="4,3" opacity="0.35"/>
+        <line x1="145" y1="80" x2="340" y2="40" stroke="#fca5a5" stroke-width="0.7" stroke-dasharray="4,3" opacity="0.35"/>
+
+        <!-- W5 as ending diagonal -->
+        <polyline points="145,80 195,45" fill="none" stroke="#fca5a5" stroke-width="2"/>
+        <polyline points="195,45 220,65" fill="none" stroke="#fca5a5" stroke-width="2"/>
+        <polyline points="220,65 260,35" fill="none" stroke="#fca5a5" stroke-width="2"/>
+        <polyline points="260,35 280,50" fill="none" stroke="#fca5a5" stroke-width="2"/>
+        <polyline points="280,50 310,28" fill="none" stroke="#fca5a5" stroke-width="2"/>
+
+        <!-- Diagonal sub-labels -->
+        <text x="145" y="90" class="lbl" fill="#fca5a5" font-size="11">i</text>
+        <text x="192" y="40" class="lbl" fill="#fca5a5" font-size="11">i</text>
+        <text x="217" y="74" class="lbl" fill="#fca5a5" font-size="11">ii</text>
+        <text x="257" y="29" class="lbl" fill="#fca5a5" font-size="11">iii</text>
+        <text x="277" y="59" class="lbl" fill="#fca5a5" font-size="11">iv</text>
+        <text x="307" y="22" class="lbl" fill="#fca5a5" font-size="11">v</text>
+
+        <!-- Internal structure note -->
+        <text x="170" y="100" fill="#475569" font-size="7" font-family="sans-serif">each sub-wave = 3-wave (abc)</text>
+
+        <!-- Overlap zone -->
+        <rect x="190" y="43" width="34" height="5" fill="#fca5a5" opacity="0.15" rx="2"/>
+
+        <!-- Sharp reversal after -->
+        <polyline points="310,28 340,50 370,95 400,150" fill="none" stroke="#ef4444" stroke-width="2" stroke-dasharray="5,3"/>
+        <text x="350" y="90" fill="#ef4444" font-size="9" font-weight="700" font-family="sans-serif">SHARP</text>
+        <text x="348" y="100" fill="#ef4444" font-size="9" font-weight="700" font-family="sans-serif">REVERSAL</text>
+
+        <!-- Throw-over possibility -->
+        <text x="295" y="16" fill="#fde047" font-size="7" font-family="sans-serif">throw-over?</text>
+      </svg>
+    </div>
+    <div class="pattern-info">
+      <div class="pattern-structure">3-3-3-3-3 · Converging wedge · Exhaustion signal</div>
+      <ul class="pattern-rules">
+        <li><span class="rule">Position:</span> ONLY in Wave 5 or Wave C — nowhere else</li>
+        <li><span class="key">Key:</span> Internal structure = 3-3-3-3-3 (all corrective!)</li>
+        <li><span class="key">Key:</span> W5 may throw over the 1-3 trendline</li>
+        <li><span class="rule">After:</span> Sharp reversal back below diagonal origin</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!--  CORRECTIVE PATTERNS                                            -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div class="section-label">Corrective Patterns</div>
+
+<div class="pattern-grid">
+
+  <!-- ──────────────── ZIGZAG (5-3-5) ──────────────── -->
+  <div class="pattern-card">
+    <div class="pattern-header">
+      <div>
+        <span class="pattern-name">Zigzag (Sharp Correction)</span>
+        <span class="pattern-tag tag-position">WAVE 2 / A / W / Y</span>
+      </div>
+      <span class="pattern-tag tag-corrective">CORRECTIVE</span>
+    </div>
+    <div class="pattern-chart">
+      <svg viewBox="0 0 440 170">
+        <!-- Prior high -->
+        <text x="30" y="25" fill="#334155" font-size="9" font-family="sans-serif">End of impulse ↑</text>
+        <circle cx="50" cy="30" r="3" fill="#334155"/>
+
+        <!-- Wave A: 5-wave impulse down -->
+        <polyline points="50,30 70,55 78,48 100,85 108,78 125,110"
+          fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <text x="52" y="48" class="sublbl" fill="#a78bfa">i</text>
+        <text x="68" y="62" class="sublbl" fill="#a78bfa">ii</text>
+        <text x="76" y="44" class="sublbl" fill="#a78bfa">iii</text>
+        <text x="98" y="92" class="sublbl" fill="#a78bfa">iv</text>
+        <text x="106" y="73" class="sublbl" fill="#a78bfa">v</text>
+
+        <!-- Wave B: 3-wave retrace up -->
+        <polyline points="125,110 155,70 170,85 190,60"
+          fill="none" stroke="#38bdf8" stroke-width="2"/>
+        <text x="143" y="68" class="sublbl" fill="#38bdf8">a</text>
+        <text x="163" y="92" class="sublbl" fill="#38bdf8">b</text>
+        <text x="183" y="55" class="sublbl" fill="#38bdf8">c</text>
+
+        <!-- B limit line -->
+        <line x1="45" y1="30" x2="200" y2="30" stroke="#fca5a5" stroke-width="0.5" stroke-dasharray="3,2" opacity="0.5"/>
+        <text x="195" y="27" fill="#fca5a5" font-size="7" font-family="sans-serif">B < 100% of A</text>
+
+        <!-- Wave C: 5-wave impulse down, beyond A -->
+        <polyline points="190,60 210,85 218,78 240,115 248,108 270,145"
+          fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <text x="195" y="78" class="sublbl" fill="#a78bfa">i</text>
+        <text x="208" y="92" class="sublbl" fill="#a78bfa">ii</text>
+        <text x="216" y="73" class="sublbl" fill="#a78bfa">iii</text>
+        <text x="238" y="122" class="sublbl" fill="#a78bfa">iv</text>
+        <text x="246" y="103" class="sublbl" fill="#a78bfa">v</text>
+
+        <!-- C extends beyond A end -->
+        <line x1="120" y1="110" x2="280" y2="110" stroke="#fde047" stroke-width="0.5" stroke-dasharray="3,2" opacity="0.5"/>
+        <text x="282" y="113" fill="#fde047" font-size="7" font-family="sans-serif">C exceeds A</text>
+
+        <!-- Primary labels -->
+        <text x="120" y="125" class="lbl" fill="#d8b4fe" font-size="14">A</text>
+        <text x="186" y="53" class="lbl" fill="#d8b4fe" font-size="14">B</text>
+        <text x="266" y="155" class="lbl" fill="#d8b4fe" font-size="14">C</text>
+
+        <!-- Structure annotation -->
+        <text x="70" y="118" fill="#475569" font-size="8" font-family="sans-serif">5-wave ↓</text>
+        <text x="140" y="98" fill="#475569" font-size="8" font-family="sans-serif">3-wave ↑</text>
+        <text x="210" y="150" fill="#475569" font-size="8" font-family="sans-serif">5-wave ↓</text>
+
+        <!-- Fib targets -->
+        <text x="300" y="60" fill="#86efac" font-size="8" font-family="sans-serif">C = 1.0x or</text>
+        <text x="300" y="70" fill="#86efac" font-size="8" font-family="sans-serif">1.618x of A</text>
+      </svg>
+    </div>
+    <div class="pattern-info">
+      <div class="pattern-structure">A(5) - B(3) - C(5) · B never reaches A origin · C beyond A end</div>
+      <ul class="pattern-rules">
+        <li><span class="rule">Rule:</span> A subdivides into 5 waves (motive structure)</li>
+        <li><span class="rule">Rule:</span> B retraces < 100% of A</li>
+        <li><span class="rule">Rule:</span> C subdivides into 5 waves and exceeds end of A</li>
+        <li><span class="guide">Fib:</span> B = 50-78.6% of A · C = 100% or 161.8% of A</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ──────────────── EXPANDED FLAT ──────────────── -->
+  <div class="pattern-card">
+    <div class="pattern-header">
+      <div>
+        <span class="pattern-name">Expanded Flat (Most Common)</span>
+        <span class="pattern-tag tag-position">WAVE 4 / B / 2</span>
+      </div>
+      <span class="pattern-tag tag-corrective">CORRECTIVE</span>
+    </div>
+    <div class="pattern-chart">
+      <svg viewBox="0 0 440 170">
+        <!-- Origin line -->
+        <line x1="40" y1="50" x2="60" y2="50" stroke="#334155" stroke-width="2"/>
+        <text x="30" y="42" fill="#334155" font-size="8" font-family="sans-serif">Origin</text>
+
+        <!-- Wave A: 3-wave down (corrective, NOT motive) -->
+        <polyline points="50,50 80,75 95,65 120,95"
+          fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <text x="72" y="82" class="sublbl" fill="#a78bfa">a</text>
+        <text x="90" y="60" class="sublbl" fill="#a78bfa">b</text>
+        <text x="115" y="103" class="sublbl" fill="#a78bfa">c</text>
+
+        <!-- Wave B: 3-wave up, EXCEEDS origin (key!) -->
+        <polyline points="120,95 160,55 175,68 200,35"
+          fill="none" stroke="#38bdf8" stroke-width="2.5"/>
+        <text x="152" y="52" class="sublbl" fill="#38bdf8">a</text>
+        <text x="170" y="75" class="sublbl" fill="#38bdf8">b</text>
+        <text x="194" y="30" class="sublbl" fill="#38bdf8">c</text>
+
+        <!-- B exceeds origin marker -->
+        <line x1="40" y1="50" x2="210" y2="50" stroke="#fca5a5" stroke-width="0.5" stroke-dasharray="3,2" opacity="0.5"/>
+        <rect x="202" y="22" width="60" height="14" rx="3" fill="#7f1d1d" opacity="0.8"/>
+        <text x="207" y="32" fill="#fca5a5" font-size="8" font-weight="700" font-family="sans-serif">B > ORIGIN</text>
+
+        <!-- Wave C: 5-wave down, EXCEEDS A end -->
+        <polyline points="200,35 220,65 228,58 255,105 262,98 285,135"
+          fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <text x="215" y="72" class="sublbl" fill="#a78bfa">i</text>
+        <text x="224" y="53" class="sublbl" fill="#a78bfa">ii</text>
+        <text x="250" y="112" class="sublbl" fill="#a78bfa">iii</text>
+        <text x="258" y="93" class="sublbl" fill="#a78bfa">iv</text>
+        <text x="280" y="143" class="sublbl" fill="#a78bfa">v</text>
+
+        <!-- C exceeds A -->
+        <line x1="115" y1="95" x2="295" y2="95" stroke="#fde047" stroke-width="0.5" stroke-dasharray="3,2" opacity="0.5"/>
+        <text x="295" y="98" fill="#fde047" font-size="7" font-family="sans-serif">C beyond A</text>
+
+        <!-- Primary labels -->
+        <text x="115" y="108" class="lbl" fill="#d8b4fe" font-size="14">A</text>
+        <text x="196" y="30" class="lbl" fill="#d8b4fe" font-size="14">B</text>
+        <text x="281" y="150" class="lbl" fill="#d8b4fe" font-size="14">C</text>
+
+        <!-- Structure -->
+        <text x="65" y="110" fill="#475569" font-size="8" font-family="sans-serif">3-wave</text>
+        <text x="145" y="42" fill="#475569" font-size="8" font-family="sans-serif">3-wave</text>
+        <text x="230" y="148" fill="#475569" font-size="8" font-family="sans-serif">5-wave</text>
+
+        <!-- Sideways annotation -->
+        <rect x="310" y="60" width="110" height="36" rx="4" fill="#111827" stroke="#334155" stroke-width="0.5"/>
+        <text x="318" y="74" fill="#94a3b8" font-size="8" font-family="sans-serif">Looks like reversal but</text>
+        <text x="318" y="86" fill="#fde047" font-size="8" font-weight="600" font-family="sans-serif">it's just a correction!</text>
+      </svg>
+    </div>
+    <div class="pattern-info">
+      <div class="pattern-structure">A(3) - B(3) - C(5) · B exceeds origin · C exceeds A end</div>
+      <ul class="pattern-rules">
+        <li><span class="rule">Rule:</span> A = 3-wave (corrective) · C = 5-wave (motive)</li>
+        <li><span class="key">Key:</span> B exceeds the start of A (fakes breakout!)</li>
+        <li><span class="key">Key:</span> C goes beyond end of A (fakes breakdown!)</li>
+        <li><span class="guide">Trap:</span> Most common flat type — traps traders both ways</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ──────────────── CONTRACTING TRIANGLE ──────────────── -->
+  <div class="pattern-card">
+    <div class="pattern-header">
+      <div>
+        <span class="pattern-name">Contracting Triangle</span>
+        <span class="pattern-tag tag-position">WAVE 4 / B / X ONLY</span>
+      </div>
+      <span class="pattern-tag tag-corrective">CORRECTIVE</span>
+    </div>
+    <div class="pattern-chart">
+      <svg viewBox="0 0 440 170">
+        <!-- Converging trendlines -->
+        <line x1="40" y1="30" x2="340" y2="62" stroke="#86efac" stroke-width="0.7" stroke-dasharray="5,3" opacity="0.4"/>
+        <line x1="40" y1="140" x2="340" y2="78" stroke="#86efac" stroke-width="0.7" stroke-dasharray="5,3" opacity="0.4"/>
+
+        <!-- Wave A -->
+        <polyline points="50,35 110,125" fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <!-- Wave B -->
+        <polyline points="110,125 170,45" fill="none" stroke="#38bdf8" stroke-width="2"/>
+        <!-- Wave C -->
+        <polyline points="170,45 220,110" fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <!-- Wave D -->
+        <polyline points="220,110 265,55" fill="none" stroke="#38bdf8" stroke-width="2"/>
+        <!-- Wave E -->
+        <polyline points="265,55 300,90" fill="none" stroke="#a78bfa" stroke-width="2"/>
+
+        <!-- Internal structure note -->
+        <text x="60" y="90" fill="#475569" font-size="7" font-family="sans-serif">3-wave</text>
+        <text x="125" y="85" fill="#475569" font-size="7" font-family="sans-serif">3-wave</text>
+        <text x="185" y="85" fill="#475569" font-size="7" font-family="sans-serif">3-wave</text>
+        <text x="235" y="85" fill="#475569" font-size="7" font-family="sans-serif">3-wave</text>
+        <text x="275" y="80" fill="#475569" font-size="7" font-family="sans-serif">3-wave</text>
+
+        <!-- Labels -->
+        <text x="44" y="28" class="lbl" fill="#86efac" font-size="13">A</text>
+        <text x="106" y="138" class="lbl" fill="#86efac" font-size="13">B</text>
+        <text x="166" y="38" class="lbl" fill="#86efac" font-size="13">C</text>
+        <text x="216" y="123" class="lbl" fill="#86efac" font-size="13">D</text>
+        <text x="261" y="48" class="lbl" fill="#86efac" font-size="13">E</text>
+        <text x="296" y="103" class="lbl" fill="#86efac" font-size="13">E end</text>
+
+        <!-- Thrust after triangle -->
+        <polyline points="300,90 310,85 340,55 380,20"
+          fill="none" stroke="#22c55e" stroke-width="2.5" stroke-dasharray="5,3"/>
+        <rect x="340" y="8" width="90" height="28" rx="4" fill="#14532d" opacity="0.9"/>
+        <text x="348" y="22" fill="#86efac" font-size="9" font-weight="700" font-family="sans-serif">THRUST</text>
+        <text x="348" y="32" fill="#86efac" font-size="8" font-family="sans-serif">= widest wave (A)</text>
+
+        <!-- Fibonacci relationships -->
+        <text x="130" y="148" fill="#fde047" font-size="7" font-family="sans-serif">Each wave ≈ 0.618 of prior wave</text>
+      </svg>
+    </div>
+    <div class="pattern-info">
+      <div class="pattern-structure">3-3-3-3-3 · Converging lines · Thrust = widest part</div>
+      <ul class="pattern-rules">
+        <li><span class="rule">Position:</span> ONLY in Wave 4, Wave B, or Wave X</li>
+        <li><span class="key">Key:</span> All 5 sub-waves are 3-wave structures</li>
+        <li><span class="guide">Fib:</span> Each wave ≈ 0.618x of the prior wave</li>
+        <li><span class="rule">After:</span> Thrust in trend direction = widest part of triangle</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ──────────────── DOUBLE COMBINATION (WXY) ──────────────── -->
+  <div class="pattern-card">
+    <div class="pattern-header">
+      <div>
+        <span class="pattern-name">Double Combination (WXY)</span>
+        <span class="pattern-tag tag-position">COMPLEX CORRECTIONS</span>
+      </div>
+      <span class="pattern-tag tag-combo">COMBINATION</span>
+    </div>
+    <div class="pattern-chart">
+      <svg viewBox="0 0 440 170">
+        <!-- W = Zigzag -->
+        <rect x="35" y="5" width="100" height="14" rx="3" fill="#4a1d6d" opacity="0.6"/>
+        <text x="60" y="15" fill="#d8b4fe" font-size="8" font-weight="700" font-family="sans-serif">W (Zigzag)</text>
+
+        <polyline points="50,30 80,80 95,65 120,110"
+          fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <text x="44" y="25" class="lbl" fill="#d8b4fe" font-size="12">A</text>
+        <text x="90" y="60" class="lbl" fill="#d8b4fe" font-size="10">B</text>
+        <text x="115" y="120" class="lbl" fill="#d8b4fe" font-size="12">C</text>
+
+        <!-- X = connector up -->
+        <rect x="130" y="45" width="55" height="14" rx="3" fill="#713f12" opacity="0.6"/>
+        <text x="137" y="55" fill="#fde047" font-size="8" font-weight="700" font-family="sans-serif">X (38-78%)</text>
+
+        <polyline points="120,110 155,60"
+          fill="none" stroke="#fde047" stroke-width="2"/>
+        <text x="150" y="72" class="lbl" fill="#fde047" font-size="12">X</text>
+
+        <!-- Y = Flat -->
+        <rect x="160" y="5" width="100" height="14" rx="3" fill="#713f12" opacity="0.4"/>
+        <text x="187" y="15" fill="#fde047" font-size="8" font-weight="700" font-family="sans-serif">Y (Flat)</text>
+
+        <polyline points="155,60 180,95 200,55 210,65 240,130"
+          fill="none" stroke="#fbbf24" stroke-width="2"/>
+        <text x="175" y="103" class="lbl" fill="#fbbf24" font-size="10">A</text>
+        <text x="195" y="50" class="lbl" fill="#fbbf24" font-size="10">B</text>
+        <text x="236" y="142" class="lbl" fill="#fbbf24" font-size="12">C</text>
+
+        <!-- Primary WXY labels -->
+        <text x="80" y="155" class="lbl" fill="#f8fafc" font-size="15">(W)</text>
+        <text x="132" y="155" class="lbl" fill="#f8fafc" font-size="15">(X)</text>
+        <text x="195" y="155" class="lbl" fill="#f8fafc" font-size="15">(Y)</text>
+
+        <!-- Sideways drift arrow -->
+        <line x1="50" y1="140" x2="245" y2="140" stroke="#64748b" stroke-width="0.5" stroke-dasharray="2,2"/>
+
+        <!-- Rules box -->
+        <rect x="275" y="30" width="150" height="60" rx="6" fill="#111827" stroke="#334155" stroke-width="0.5"/>
+        <text x="283" y="48" fill="#94a3b8" font-size="8" font-family="sans-serif">W and Y can each be:</text>
+        <text x="290" y="60" fill="#d8b4fe" font-size="8" font-weight="600" font-family="sans-serif">Zigzag, Flat, or Triangle</text>
+        <text x="283" y="76" fill="#94a3b8" font-size="8" font-family="sans-serif">But max ONE triangle</text>
+        <text x="283" y="86" fill="#94a3b8" font-size="8" font-family="sans-serif">and never two of same type</text>
+      </svg>
+    </div>
+    <div class="pattern-info">
+      <div class="pattern-structure">W(zz/flat/tri) - X(connector) - Y(zz/flat/tri)</div>
+      <ul class="pattern-rules">
+        <li><span class="rule">Rule:</span> W and Y must be different corrective types</li>
+        <li><span class="rule">Rule:</span> Maximum one triangle in the combination</li>
+        <li><span class="key">Key:</span> X retraces 38.2-78.6% of W</li>
+        <li><span class="guide">Effect:</span> Sideways drift — time correction more than price</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!--  TRUNCATION + THROW-OVER                                        -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div class="section-label">Special Cases the v1 Engine Cannot Handle</div>
+
+<div class="pattern-grid">
+
+  <!-- ──────────────── TRUNCATION ──────────────── -->
+  <div class="pattern-card">
+    <div class="pattern-header">
+      <div><span class="pattern-name">Truncated 5th Wave</span></div>
+      <span class="pattern-tag tag-motive">SPECIAL</span>
+    </div>
+    <div class="pattern-chart">
+      <svg viewBox="0 0 440 160">
+        <!-- W1 -->
+        <polyline points="40,140 90,100" fill="none" stroke="#38bdf8" stroke-width="2"/>
+        <!-- W2 -->
+        <polyline points="90,100 115,125" fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <!-- W3: VERY strong (justifies truncation) -->
+        <polyline points="115,125 210,20" fill="none" stroke="#22c55e" stroke-width="3"/>
+        <rect x="145" y="50" width="52" height="14" rx="3" fill="#14532d" opacity="0.9"/>
+        <text x="151" y="60" fill="#86efac" font-size="9" font-weight="700" font-family="sans-serif">2.618x W1</text>
+
+        <!-- W4 -->
+        <polyline points="210,20 250,55" fill="none" stroke="#a78bfa" stroke-width="2"/>
+
+        <!-- W5: TRUNCATED — fails to exceed W3 -->
+        <polyline points="250,55 290,30" fill="none" stroke="#fca5a5" stroke-width="2.5"/>
+
+        <!-- W3 end line -->
+        <line x1="205" y1="20" x2="310" y2="20" stroke="#ef4444" stroke-width="0.7" stroke-dasharray="3,2"/>
+        <text x="295" y="17" fill="#ef4444" font-size="8" font-family="sans-serif">W3 end</text>
+
+        <!-- Truncation marker -->
+        <rect x="260" y="22" width="26" height="8" fill="#ef4444" opacity="0.2" rx="2"/>
+        <line x1="290" y1="30" x2="290" y2="20" stroke="#ef4444" stroke-width="1" stroke-dasharray="2,1"/>
+        <text x="295" y="35" fill="#fca5a5" font-size="8" font-weight="700" font-family="sans-serif">TRUNCATED</text>
+        <text x="295" y="45" fill="#fca5a5" font-size="7" font-family="sans-serif">W5 < W3 end</text>
+
+        <!-- v1 blocker -->
+        <rect x="310" y="70" width="120" height="50" rx="6" fill="#7f1d1d" opacity="0.3" stroke="#ef4444" stroke-width="0.5"/>
+        <text x="320" y="86" fill="#fca5a5" font-size="9" font-weight="700" font-family="sans-serif">v1 BLOCKED</text>
+        <text x="318" y="98" fill="#94a3b8" font-size="8" font-family="sans-serif">requires W5 > W3</text>
+        <text x="318" y="110" fill="#86efac" font-size="8" font-weight="600" font-family="sans-serif">v2: allows if W3 > 2.618x</text>
+
+        <!-- Labels -->
+        <text x="34" y="150" class="lbl" fill="#f8fafc" font-size="12">1</text>
+        <text x="86" y="96" class="lbl" fill="#f8fafc" font-size="12">1</text>
+        <text x="110" y="135" class="lbl" fill="#f8fafc" font-size="12">2</text>
+        <text x="206" y="15" class="lbl" fill="#22c55e" font-size="13">3</text>
+        <text x="246" y="65" class="lbl" fill="#f8fafc" font-size="12">4</text>
+        <text x="286" y="28" class="lbl" fill="#fca5a5" font-size="12">5</text>
+      </svg>
+    </div>
+    <div class="pattern-info">
+      <div class="pattern-structure">W5 fails to exceed W3 end — ONLY after W3 > 2.618x</div>
+      <ul class="pattern-rules">
+        <li><span class="rule">Condition:</span> W3 must be exceptionally strong (> 2.618x W1)</li>
+        <li><span class="key">Key:</span> v1 engine hard-blocks this (line 524: W5 > W3 required)</li>
+        <li><span class="guide">Signal:</span> Extremely bearish — market exhausted on W3</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ──────────────── RUNNING FLAT ──────────────── -->
+  <div class="pattern-card">
+    <div class="pattern-header">
+      <div><span class="pattern-name">Running Flat (Trend Strength)</span></div>
+      <span class="pattern-tag tag-corrective">SPECIAL</span>
+    </div>
+    <div class="pattern-chart">
+      <svg viewBox="0 0 440 160">
+        <!-- Context: strong uptrend -->
+        <polyline points="20,140 50,90" fill="none" stroke="#334155" stroke-width="1.5" stroke-dasharray="3,2"/>
+        <text x="22" y="150" fill="#334155" font-size="8" font-family="sans-serif">Strong W1/3</text>
+
+        <!-- Origin line -->
+        <line x1="45" y1="90" x2="320" y2="90" stroke="#475569" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.5"/>
+        <text x="322" y="93" fill="#475569" font-size="7" font-family="sans-serif">origin</text>
+
+        <!-- Wave A: 3-wave down, shallow -->
+        <polyline points="50,90 75,108 88,100 105,118"
+          fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <text x="100" y="130" class="lbl" fill="#d8b4fe" font-size="12">A</text>
+
+        <!-- Wave B: 3-wave up, EXCEEDS origin (like expanded) -->
+        <polyline points="105,118 135,75 150,85 175,55"
+          fill="none" stroke="#38bdf8" stroke-width="2.5"/>
+        <text x="171" y="48" class="lbl" fill="#38bdf8" font-size="12">B</text>
+
+        <!-- B > origin marker -->
+        <rect x="178" y="52" width="45" height="12" rx="3" fill="#1e3a5f" opacity="0.8"/>
+        <text x="183" y="61" fill="#7dd3fc" font-size="7" font-weight="700" font-family="sans-serif">B > origin</text>
+
+        <!-- Wave C: 5-wave down, BUT does NOT reach A end (KEY!) -->
+        <polyline points="175,55 195,80 203,73 225,100 232,94 250,110"
+          fill="none" stroke="#a78bfa" stroke-width="2"/>
+        <text x="246" y="122" class="lbl" fill="#d8b4fe" font-size="12">C</text>
+
+        <!-- C does NOT reach A -->
+        <line x1="100" y1="118" x2="260" y2="118" stroke="#fde047" stroke-width="0.5" stroke-dasharray="3,2" opacity="0.5"/>
+        <rect x="255" y="110" width="55" height="12" rx="3" fill="#713f12" opacity="0.8"/>
+        <text x="260" y="119" fill="#fde047" font-size="7" font-weight="700" font-family="sans-serif">C fails A</text>
+
+        <!-- Strong continuation after -->
+        <polyline points="250,110 260,105 290,60 330,20"
+          fill="none" stroke="#22c55e" stroke-width="2.5" stroke-dasharray="5,3"/>
+        <text x="295" y="15" fill="#22c55e" font-size="9" font-weight="700" font-family="sans-serif">STRONG continuation</text>
+        <text x="295" y="28" fill="#86efac" font-size="8" font-family="sans-serif">Trend very powerful</text>
+
+        <!-- Structure labels -->
+        <text x="65" y="130" fill="#475569" font-size="7" font-family="sans-serif">3-wave</text>
+        <text x="130" y="68" fill="#475569" font-size="7" font-family="sans-serif">3-wave</text>
+        <text x="195" y="118" fill="#475569" font-size="7" font-family="sans-serif">5-wave</text>
+      </svg>
+    </div>
+    <div class="pattern-info">
+      <div class="pattern-structure">A(3) - B(3) - C(5) · B > origin · C fails to reach A end</div>
+      <ul class="pattern-rules">
+        <li><span class="key">Key:</span> B exceeds origin BUT C fails to reach end of A</li>
+        <li><span class="guide">Meaning:</span> Underlying trend is SO strong the correction can't complete</li>
+        <li><span class="rule">v1 engine:</span> Cannot distinguish from expanded flat</li>
+        <li><span class="guide">Signal:</span> Most bullish type of flat — expect powerful continuation</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<!-- Footer -->
+<div style="background:#111827; border:1px solid #334155; border-radius:8px; padding:20px; text-align:center; color:#94a3b8; font-size:14px; margin-top:20px;">
+  <strong style="color:#f8fafc;">8 key patterns</strong> shown with internal structure, position rules, and Fibonacci targets.<br/>
+  Review in browser, then respond in terminal with thoughts or questions.
+</div>
+
+</body>
+</html>

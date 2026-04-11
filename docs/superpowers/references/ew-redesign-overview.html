@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elliott Wave Engine Redesign</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0e17;
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1.6;
+    padding: 24px;
+  }
+  h1 { color: #f1f5f9; font-size: 28px; margin-bottom: 6px; }
+  h2 { color: #94a3b8; font-size: 18px; font-weight: 400; margin-bottom: 32px; }
+  h3 { color: #f8fafc; font-size: 20px; margin-bottom: 16px; }
+
+  /* ── Before/After Split ── */
+  .split-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 40px;
+  }
+  .panel {
+    background: #111827;
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid #1e293b;
+  }
+  .panel.before { border-top: 3px solid #ef4444; }
+  .panel.after { border-top: 3px solid #22c55e; }
+  .panel-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .panel.before .panel-label { color: #ef4444; }
+  .panel.after .panel-label { color: #22c55e; }
+
+  /* ── Chart Mock ── */
+  .chart-mock {
+    background: #0f1729;
+    border-radius: 8px;
+    padding: 16px;
+    height: 260px;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .chart-title {
+    font-size: 12px;
+    color: #64748b;
+    margin-bottom: 8px;
+  }
+  .chart-svg { width: 100%; height: 200px; }
+
+  /* ── Comparison Table ── */
+  .comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 40px;
+    font-size: 14px;
+  }
+  .comparison-table th {
+    background: #1e293b;
+    color: #94a3b8;
+    text-align: left;
+    padding: 12px 16px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    border-bottom: 2px solid #334155;
+  }
+  .comparison-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #1e293b;
+    vertical-align: top;
+  }
+  .comparison-table tr:hover { background: #111827; }
+  .comparison-table .feature { color: #e2e8f0; font-weight: 600; width: 200px; }
+  .comparison-table .current { color: #94a3b8; }
+  .comparison-table .proposed { color: #e2e8f0; }
+  .badge-bad { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; background: #7f1d1d; color: #fca5a5; }
+  .badge-ok { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; background: #713f12; color: #fde047; }
+  .badge-good { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; background: #14532d; color: #86efac; }
+  .badge-new { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; background: #1e3a5f; color: #7dd3fc; }
+
+  /* ── Architecture Diagram ── */
+  .arch-section { margin-bottom: 40px; }
+  .arch-flow {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin-top: 16px;
+  }
+  .arch-layer {
+    flex: 1;
+    background: #111827;
+    border: 1px solid #1e293b;
+    padding: 16px;
+    text-align: center;
+    position: relative;
+  }
+  .arch-layer:first-child { border-radius: 8px 0 0 8px; }
+  .arch-layer:last-child { border-radius: 0 8px 8px 0; }
+  .arch-layer .layer-num {
+    font-size: 10px;
+    color: #64748b;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .arch-layer .layer-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-bottom: 6px;
+  }
+  .arch-layer .layer-desc {
+    font-size: 12px;
+    color: #94a3b8;
+    line-height: 1.4;
+  }
+  .arch-arrow {
+    display: flex;
+    align-items: center;
+    color: #475569;
+    font-size: 20px;
+    padding: 0 2px;
+  }
+
+  /* ── Wave Label Tags ── */
+  .wave-tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: monospace;
+  }
+  .wt-impulse { background: #1e3a5f; color: #7dd3fc; }
+  .wt-zigzag { background: #4a1d6d; color: #d8b4fe; }
+  .wt-flat { background: #713f12; color: #fde047; }
+  .wt-triangle { background: #14532d; color: #86efac; }
+  .wt-diagonal { background: #7f1d1d; color: #fca5a5; }
+  .wt-combo { background: #374151; color: #d1d5db; }
+
+  /* ── Output Mock ── */
+  .output-mock {
+    background: #0f1729;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 16px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-x: auto;
+    margin-bottom: 16px;
+  }
+  .output-mock .key { color: #7dd3fc; }
+  .output-mock .val-str { color: #86efac; }
+  .output-mock .val-num { color: #fde047; }
+  .output-mock .val-bool { color: #fca5a5; }
+  .output-mock .comment { color: #475569; font-style: italic; }
+
+  .section-divider {
+    border: none;
+    border-top: 1px solid #1e293b;
+    margin: 40px 0;
+  }
+  .footnote { font-size: 12px; color: #475569; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<h1>Elliott Wave Engine v2 — Redesign Preview</h1>
+<h2>Theory-grounded rebuild based on official EWI source material</h2>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 1: BEFORE / AFTER CHART COMPARISON                             -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<div class="split-container">
+  <!-- BEFORE -->
+  <div class="panel before">
+    <div class="panel-label">Current Engine (v1)</div>
+    <div class="chart-mock">
+      <div class="chart-title">ZC=F Daily — "BULLISH IMPULSE REVERSE" (wrong)</div>
+      <svg class="chart-svg" viewBox="0 0 500 200">
+        <!-- Price action (simplified corn futures shape) -->
+        <polyline points="20,160 60,140 100,120 130,90 150,110 180,70 210,95 240,50 260,80 290,40 310,65 340,55 370,70 400,90 440,100 480,85"
+          fill="none" stroke="#334155" stroke-width="2"/>
+        <!-- Bad wave overlay — random 5-swing forced fit -->
+        <polyline points="20,160 130,90 150,110 290,40 340,55 480,85"
+          fill="none" stroke="#ef4444" stroke-width="2.5" stroke-dasharray="6,3" opacity="0.8"/>
+        <!-- Bad wave labels -->
+        <text x="15" y="175" fill="#ef4444" font-size="11" font-weight="bold">1</text>
+        <text x="125" y="85" fill="#ef4444" font-size="11" font-weight="bold">2</text>
+        <text x="145" y="125" fill="#ef4444" font-size="11" font-weight="bold">3</text>
+        <text x="285" y="35" fill="#ef4444" font-size="11" font-weight="bold">4</text>
+        <text x="335" y="50" fill="#ef4444" font-size="11" font-weight="bold">5</text>
+        <text x="475" y="80" fill="#ef4444" font-size="11" font-weight="bold">?</text>
+        <!-- X marks for problems -->
+        <text x="120" y="105" fill="#ef4444" font-size="16" font-weight="bold">✗</text>
+        <text x="280" y="55" fill="#ef4444" font-size="16" font-weight="bold">✗</text>
+      </svg>
+    </div>
+    <div style="font-size:13px; color:#94a3b8;">
+      <div style="color:#ef4444; font-weight:700; margin-bottom:8px;">Problems:</div>
+      <div style="margin-bottom:4px;">✗ Forces 5-swing zigzag = "impulse"</div>
+      <div style="margin-bottom:4px;">✗ No internal structure check (W1 not a 5-wave)</div>
+      <div style="margin-bottom:4px;">✗ Ignores W5 extension (commodity pattern)</div>
+      <div style="margin-bottom:4px;">✗ "REVERSE" label = just found a completed count</div>
+      <div>✗ Overlays visually ignore the real swing structure</div>
+    </div>
+  </div>
+
+  <!-- AFTER -->
+  <div class="panel after">
+    <div class="panel-label">Redesigned Engine (v2)</div>
+    <div class="chart-mock">
+      <div class="chart-title">ZC=F Daily — Proper multi-degree count</div>
+      <svg class="chart-svg" viewBox="0 0 500 200">
+        <!-- Same price action -->
+        <polyline points="20,160 60,140 100,120 130,90 150,110 180,70 210,95 240,50 260,80 290,40 310,65 340,55 370,70 400,90 440,100 480,85"
+          fill="none" stroke="#334155" stroke-width="2"/>
+
+        <!-- Primary degree: impulse up with extended W5 (commodity) -->
+        <!-- W1 up, W2 pullback, W3 up, W4 pullback, W5 extended up -->
+        <polyline points="20,160 100,120 130,90 150,110 290,40"
+          fill="none" stroke="#22c55e" stroke-width="2.5" opacity="0.7"/>
+
+        <!-- Sub-waves of W3 (shown smaller) -->
+        <polyline points="150,110 180,70 210,95 240,50 260,80 290,40"
+          fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="4,2" opacity="0.5"/>
+
+        <!-- Corrective ABC after impulse -->
+        <polyline points="290,40 340,55 370,70 400,90"
+          fill="none" stroke="#fbbf24" stroke-width="2" opacity="0.7"/>
+        <!-- Possible new impulse starting -->
+        <polyline points="400,90 480,85"
+          fill="none" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="4,2" opacity="0.4"/>
+
+        <!-- Proper wave labels - primary -->
+        <text x="15" y="175" fill="#22c55e" font-size="11" font-weight="bold">(1)</text>
+        <text x="95" y="115" fill="#22c55e" font-size="11" font-weight="bold">(1)</text>
+        <text x="145" y="125" fill="#22c55e" font-size="11" font-weight="bold">(2)</text>
+        <text x="285" y="32" fill="#22c55e" font-size="11" font-weight="bold">(3)ext</text>
+
+        <!-- Sub-wave labels for W3 -->
+        <text x="175" y="63" fill="#38bdf8" font-size="9">i</text>
+        <text x="205" y="103" fill="#38bdf8" font-size="9">ii</text>
+        <text x="235" y="43" fill="#38bdf8" font-size="9">iii</text>
+        <text x="255" y="88" fill="#38bdf8" font-size="9">iv</text>
+        <text x="285" y="43" fill="#38bdf8" font-size="9">v</text>
+
+        <!-- ABC correction labels -->
+        <text x="335" y="50" fill="#fbbf24" font-size="11" font-weight="bold">(A)</text>
+        <text x="365" y="64" fill="#fbbf24" font-size="11" font-weight="bold">(B)</text>
+        <text x="395" y="105" fill="#fbbf24" font-size="11" font-weight="bold">(C)</text>
+
+        <!-- Channel lines (acceleration) -->
+        <line x1="130" y1="115" x2="480" y2="130" stroke="#22c55e" stroke-width="0.5" stroke-dasharray="3,3" opacity="0.3"/>
+        <line x1="100" y1="85" x2="480" y2="20" stroke="#22c55e" stroke-width="0.5" stroke-dasharray="3,3" opacity="0.3"/>
+
+        <!-- Checkmarks -->
+        <text x="280" y="55" fill="#22c55e" font-size="14" font-weight="bold">✓</text>
+      </svg>
+    </div>
+    <div style="font-size:13px; color:#94a3b8;">
+      <div style="color:#22c55e; font-weight:700; margin-bottom:8px;">Improvements:</div>
+      <div style="margin-bottom:4px;">✓ W3 shows valid 5-wave internal structure (i-ii-iii-iv-v)</div>
+      <div style="margin-bottom:4px;">✓ W3 extension detected (commodity pattern for ZC=F)</div>
+      <div style="margin-bottom:4px;">✓ ABC correction properly identified after impulse</div>
+      <div style="margin-bottom:4px;">✓ Acceleration channel drawn through W2-W4 endpoints</div>
+      <div>✓ Multi-degree labels: (1)(2)(3) primary + i-ii-iii-iv-v minor</div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 2: CAPABILITY COMPARISON TABLE                                 -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<h3>Capability Comparison</h3>
+<table class="comparison-table">
+  <thead>
+    <tr>
+      <th>Capability</th>
+      <th>Current Engine (v1)</th>
+      <th>Redesigned Engine (v2)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <!-- DETECTION -->
+    <tr>
+      <td class="feature">Impulse Detection</td>
+      <td class="current">Finds 5 alternating swings, checks 3 rules <span class="badge-ok">SHALLOW</span></td>
+      <td class="proposed">Validates internal 5-3-5-3-5 sub-wave structure <span class="badge-good">PROPER</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Zigzag (5-3-5)</td>
+      <td class="current">Lumped into generic "corrective" <span class="badge-bad">MISSING</span></td>
+      <td class="proposed">Distinct type: A=5-wave, B<100% of A, C=5-wave beyond A <span class="badge-good">FULL</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Flat Types</td>
+      <td class="current">Not differentiated <span class="badge-bad">MISSING</span></td>
+      <td class="proposed">Regular, Expanded, Running — each with specific B/C rules <span class="badge-good">FULL</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Triangle (3-3-3-3-3)</td>
+      <td class="current">Detected anywhere, crude convergence check <span class="badge-ok">PARTIAL</span></td>
+      <td class="proposed">Contracting/Barrier/Expanding, W4+B+X only <span class="badge-good">FULL</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Leading Diagonal</td>
+      <td class="current"><span class="badge-bad">MISSING</span></td>
+      <td class="proposed">5-3-5-3-5 in W1/A position, overlapping waves <span class="badge-new">NEW</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Ending Diagonal</td>
+      <td class="current">Detected, no internal structure check <span class="badge-ok">PARTIAL</span></td>
+      <td class="proposed">3-3-3-3-3 in W5/C position, converging trendlines <span class="badge-good">FULL</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Combinations (WXY)</td>
+      <td class="current">Basic WXY, no type checking <span class="badge-ok">PARTIAL</span></td>
+      <td class="proposed">Double/Triple threes, W+Y typed (zigzag/flat/triangle) <span class="badge-good">FULL</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Truncation</td>
+      <td class="current">W5 must exceed W3 always <span class="badge-bad">BLOCKED</span></td>
+      <td class="proposed">W5 failure allowed after strong W3 (>2.618x) <span class="badge-new">NEW</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Extensions</td>
+      <td class="current">Not detected or labeled <span class="badge-bad">MISSING</span></td>
+      <td class="proposed">Identify which of W1/W3/W5 is extended, equality guideline <span class="badge-new">NEW</span></td>
+    </tr>
+
+    <!-- GUIDELINES / SCORING -->
+    <tr><td colspan="3" style="background:#1e293b; padding:8px 16px; font-size:11px; font-weight:700; letter-spacing:1px; color:#64748b;">GUIDELINE SCORING</td></tr>
+    <tr>
+      <td class="feature">Alternation</td>
+      <td class="current">Crude depth difference score <span class="badge-ok">PARTIAL</span></td>
+      <td class="proposed">Type alternation (zigzag vs flat) + depth alternation <span class="badge-good">FULL</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Channeling</td>
+      <td class="current">Post-hoc visualization only <span class="badge-ok">PARTIAL</span></td>
+      <td class="proposed">Structural scoring: W4 near base channel, W5 targets acceleration channel <span class="badge-good">FULL</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Fibonacci Ratios</td>
+      <td class="current">Scored but with too many target ratios (noise) <span class="badge-ok">PARTIAL</span></td>
+      <td class="proposed">Per-wave ideal ratios from EWI + extension-aware targets <span class="badge-good">FULL</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Wave Personality</td>
+      <td class="current"><span class="badge-bad">MISSING</span></td>
+      <td class="proposed">W3 strongest momentum, W5 divergence, W4 complex/tedious <span class="badge-new">NEW</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Position Context</td>
+      <td class="current">Patterns detected anywhere <span class="badge-bad">MISSING</span></td>
+      <td class="proposed">Triangles in W4/B/X only, diagonals in W1/A or W5/C only <span class="badge-new">NEW</span></td>
+    </tr>
+
+    <!-- ARCHITECTURE -->
+    <tr><td colspan="3" style="background:#1e293b; padding:8px 16px; font-size:11px; font-weight:700; letter-spacing:1px; color:#64748b;">ARCHITECTURE</td></tr>
+    <tr>
+      <td class="feature">Detection Method</td>
+      <td class="current">Brute-force O(n<sup>5</sup>) nested loops <span class="badge-bad">SLOW</span></td>
+      <td class="proposed">Bottom-up: detect sub-waves first, compose into patterns <span class="badge-good">FAST</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Multi-Count</td>
+      <td class="current">Returns first match near current bar <span class="badge-bad">WRONG</span></td>
+      <td class="proposed">Maintains 2-3 competing counts, ranks by full guideline suite <span class="badge-good">PROPER</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Degree Hierarchy</td>
+      <td class="current">3 parallel ATR-based detections, not linked <span class="badge-ok">PARTIAL</span></td>
+      <td class="proposed">True nesting: minor sub-waves compose into intermediate patterns <span class="badge-good">FULL</span></td>
+    </tr>
+    <tr>
+      <td class="feature">Commodity Awareness</td>
+      <td class="current"><span class="badge-bad">MISSING</span></td>
+      <td class="proposed">W5 extension bias for futures (ZC, CL, GC, etc.) <span class="badge-new">NEW</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 3: NEW ARCHITECTURE FLOW                                       -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<h3>New Architecture: Bottom-Up Hierarchical Detection</h3>
+<p style="color:#94a3b8; font-size:14px; margin-bottom:16px;">
+  Instead of brute-forcing pivot combinations, detect small patterns first and compose them upward.
+</p>
+
+<div class="arch-flow">
+  <div class="arch-layer" style="border-top:2px solid #64748b;">
+    <div class="layer-num">Layer 0</div>
+    <div class="layer-name">Pivots</div>
+    <div class="layer-desc">Zigzag pivot detection (existing, mostly kept)</div>
+  </div>
+  <div class="arch-arrow">&#10132;</div>
+  <div class="arch-layer" style="border-top:2px solid #38bdf8;">
+    <div class="layer-num">Layer 1</div>
+    <div class="layer-name">Sub-Waves</div>
+    <div class="layer-desc">Identify 3-swing and 5-swing sequences in monowaves</div>
+  </div>
+  <div class="arch-arrow">&#10132;</div>
+  <div class="arch-layer" style="border-top:2px solid #a78bfa;">
+    <div class="layer-num">Layer 2</div>
+    <div class="layer-name">Compose</div>
+    <div class="layer-desc">Build impulse (5-3-5-3-5), zigzag (5-3-5), flat (3-3-5) from sub-waves</div>
+  </div>
+  <div class="arch-arrow">&#10132;</div>
+  <div class="arch-layer" style="border-top:2px solid #fbbf24;">
+    <div class="layer-num">Layer 3</div>
+    <div class="layer-name">Validate</div>
+    <div class="layer-desc">Position rules, alternation, channeling, extensions</div>
+  </div>
+  <div class="arch-arrow">&#10132;</div>
+  <div class="arch-layer" style="border-top:2px solid #22c55e;">
+    <div class="layer-num">Layer 4</div>
+    <div class="layer-name">Rank</div>
+    <div class="layer-desc">Score by all EW guidelines, maintain 2-3 best counts</div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 4: SAMPLE OUTPUT COMPARISON                                    -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<h3>API Output: Before vs After</h3>
+
+<div class="split-container">
+  <div class="panel before">
+    <div class="panel-label">Current Output (ZC=F)</div>
+    <div class="output-mock">
+<span class="key">"summary"</span>: <span class="val-str">"BULLISH IMPULSE REVERSE"</span>
+<span class="key">"confidence"</span>: <span class="val-num">62.3</span>
+<span class="key">"phase"</span>: <span class="val-str">"correction"</span>
+<span class="key">"action"</span>: <span class="val-str">"REVERSE"</span>
+<span class="key">"waves"</span>: [
+  <span class="comment">// 5 random zigzag swings</span>
+  <span class="comment">// No sub-wave info</span>
+  <span class="comment">// No correction type</span>
+  <span class="comment">// No extension detection</span>
+]
+<span class="key">"projections"</span>: [
+  <span class="comment">// Generic fib levels</span>
+  <span class="comment">// Not pattern-specific</span>
+]
+    </div>
+    <div class="footnote">No internal structure. No pattern differentiation. Misleading signal.</div>
+  </div>
+
+  <div class="panel after">
+    <div class="panel-label">v2 Output (ZC=F)</div>
+    <div class="output-mock">
+<span class="key">"primary_count"</span>: {
+  <span class="key">"pattern"</span>: <span class="val-str">"impulse_extended_w3"</span>,
+  <span class="key">"confidence"</span>: <span class="val-num">78.5</span>,
+  <span class="key">"phase"</span>: <span class="val-str">"corrective_abc"</span>,
+  <span class="key">"current_wave"</span>: <span class="val-str">"C of (A)(B)(C)"</span>,
+  <span class="key">"extension"</span>: <span class="val-str">"wave_3"</span>,
+  <span class="key">"alternation"</span>: {
+    <span class="key">"w2_type"</span>: <span class="val-str">"zigzag"</span>, <span class="comment">// sharp</span>
+    <span class="key">"w4_type"</span>: <span class="val-str">"triangle"</span> <span class="comment">// sideways ✓</span>
+  },
+  <span class="key">"channel_fit"</span>: <span class="val-num">0.87</span>,
+}
+<span class="key">"alt_count"</span>: {
+  <span class="key">"pattern"</span>: <span class="val-str">"double_zigzag_wxy"</span>,
+  <span class="key">"confidence"</span>: <span class="val-num">65.2</span>,
+  <span class="comment">// Alternative interpretation</span>
+}
+<span class="key">"waves"</span>: [
+  { <span class="key">"label"</span>: <span class="val-str">"(3)"</span>,
+    <span class="key">"sub_waves"</span>: [<span class="val-str">"i"</span>,<span class="val-str">"ii"</span>,<span class="val-str">"iii"</span>,<span class="val-str">"iv"</span>,<span class="val-str">"v"</span>],
+    <span class="key">"internal_valid"</span>: <span class="val-bool">true</span> }
+]
+    </div>
+    <div class="footnote">Named patterns. Sub-wave validation. Alt count. Extension + alternation data.</div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 5: PATTERN CATALOGUE                                           -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+<h3>Pattern Catalogue — What v2 Can Detect</h3>
+<p style="color:#94a3b8; font-size:14px; margin-bottom:16px;">Every pattern from the 16 EWI PDFs, with proper internal structure validation.</p>
+
+<div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; margin-bottom:40px;">
+  <!-- Motive -->
+  <div style="background:#111827; border-radius:8px; padding:16px; border:1px solid #1e293b;">
+    <div style="font-size:11px; color:#38bdf8; font-weight:700; letter-spacing:1px; margin-bottom:8px;">MOTIVE WAVES</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-impulse">IMPULSE</span> 5-3-5-3-5</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-impulse">IMPULSE EXT-W1</span></div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-impulse">IMPULSE EXT-W3</span> most common</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-impulse">IMPULSE EXT-W5</span> commodities</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-impulse">TRUNCATED W5</span></div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-diagonal">LEADING DIAG</span> 5-3-5-3-5 W1/A</div>
+    <div style="font-size:13px;"><span class="wave-tag wt-diagonal">ENDING DIAG</span> 3-3-3-3-3 W5/C</div>
+  </div>
+
+  <!-- Corrective -->
+  <div style="background:#111827; border-radius:8px; padding:16px; border:1px solid #1e293b;">
+    <div style="font-size:11px; color:#a78bfa; font-weight:700; letter-spacing:1px; margin-bottom:8px;">CORRECTIVE WAVES</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-zigzag">ZIGZAG</span> 5-3-5 (sharp)</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-zigzag">DOUBLE ZZ</span> 5-3-5 x 5-3-5</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-flat">REGULAR FLAT</span> 3-3-5</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-flat">EXPANDED FLAT</span> 3-3-5 B>A</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-flat">RUNNING FLAT</span> 3-3-5 C<A</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-triangle">CONTRACTING TRI</span> 3-3-3-3-3</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-triangle">BARRIER TRI</span></div>
+    <div style="font-size:13px;"><span class="wave-tag wt-triangle">EXPANDING TRI</span></div>
+  </div>
+
+  <!-- Combinations -->
+  <div style="background:#111827; border-radius:8px; padding:16px; border:1px solid #1e293b;">
+    <div style="font-size:11px; color:#fbbf24; font-weight:700; letter-spacing:1px; margin-bottom:8px;">COMBINATIONS</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-combo">DOUBLE THREE</span> W-X-Y</div>
+    <div style="font-size:13px; margin-bottom:6px;"><span class="wave-tag wt-combo">TRIPLE THREE</span> W-X-Y-X-Z</div>
+    <div style="font-size:13px; margin-bottom:16px;"><span class="wave-tag wt-combo">DOUBLE ZZ</span> ZZ-X-ZZ</div>
+    <div style="font-size:11px; color:#fbbf24; font-weight:700; letter-spacing:1px; margin-bottom:8px;">GUIDELINES SCORED</div>
+    <div style="font-size:13px; margin-bottom:4px;">Alternation (type + depth)</div>
+    <div style="font-size:13px; margin-bottom:4px;">Channeling (base + accel)</div>
+    <div style="font-size:13px; margin-bottom:4px;">Fibonacci ratios</div>
+    <div style="font-size:13px; margin-bottom:4px;">Extension identification</div>
+    <div style="font-size:13px; margin-bottom:4px;">Equality guideline</div>
+    <div style="font-size:13px;">Wave personality</div>
+  </div>
+</div>
+
+<div style="background:#111827; border:1px solid #334155; border-radius:8px; padding:20px; text-align:center; color:#94a3b8; font-size:14px;">
+  Review in terminal. First question coming up: <strong style="color:#f8fafc;">overall approach for the rebuild</strong>.
+</div>
+
+</body>
+</html>

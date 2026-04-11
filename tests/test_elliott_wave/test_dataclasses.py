@@ -60,3 +60,30 @@ def test_wavecount_has_counts_field():
     assert wc.extension_wave is None
     assert wc.invalidation_level == 0.0
     assert wc.alternation_quality == "unknown"
+
+
+# ── Task 2: MonoWave Builder ──────────────────────────────────────────────────
+
+from pattern_engine.elliott_wave import build_monowaves
+
+
+def test_build_monowaves_from_pivots():
+    pivots = [
+        Pivot(idx=0,  price=100.0, is_high=False),
+        Pivot(idx=10, price=115.0, is_high=True),
+        Pivot(idx=18, price=108.0, is_high=False),
+        Pivot(idx=30, price=130.0, is_high=True),
+        Pivot(idx=38, price=122.0, is_high=False),
+        Pivot(idx=50, price=140.0, is_high=True),
+    ]
+    mws = build_monowaves(pivots)
+    assert len(mws) == 5
+    assert mws[0].direction == WaveDirection.UP
+    assert mws[1].direction == WaveDirection.DOWN
+    assert mws[0].price_change == pytest.approx(15.0)
+    assert mws[0].bar_count == 10
+
+
+def test_build_monowaves_empty_or_single():
+    assert build_monowaves([]) == []
+    assert build_monowaves([Pivot(0, 100.0, False)]) == []

@@ -412,6 +412,19 @@ def detect_macro_pivots(
     return pivots
 
 
+# ── MonoWave Builder ─────────────────────────────────────────────────────────
+
+def build_monowaves(pivots: list[Pivot]) -> list[MonoWave]:
+    """
+    Convert a list of alternating pivots into a list of MonoWaves.
+    Each MonoWave spans from pivot[i] to pivot[i+1].
+    internal_structure defaults to "indeterminate" — Layer 2 fills this in.
+    """
+    if len(pivots) < 2:
+        return []
+    return [MonoWave(start=pivots[i], end=pivots[i + 1]) for i in range(len(pivots) - 1)]
+
+
 # ── Impulse Wave Detection ───────────────────────────────────────────────────
 
 def find_impulse_waves(

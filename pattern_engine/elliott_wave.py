@@ -1387,6 +1387,178 @@ def rank_counts(scored_candidates: list[dict], top_n: int = 3) -> list[dict]:
     return ranked
 
 
+# ── Public API ────────────────────────────────────────────────────────────────
+
+def analyze_multi_degree(
+    df: pd.DataFrame,
+    primary_atr_mult: float = 1.5,
+    minor_atr_mult:   float = 0.3,
+    macro_mode:       bool  = False,
+    is_commodity:     bool  = False,
+) -> dict[str, Any]:
+    """
+    Run Elliott Wave analysis. Returns backward-compatible dict PLUS new counts[].
+
+    Backward-compatible fields (mirror counts[0]):
+      "summary", "confidence", "phase", "action", "waves", "projections"
+
+    New fields:
+      "counts": list of top-3 ranked WaveCount dicts
+      "preferred": alias for counts[0]
+    """
+    if len(df) < 30:
+        return _empty_result()
+
+    # ── Layer 0+1: Pivots → MonoWaves ────────────────────────────────────
+    inter_atr = round(max(0.4, min(0.8, (primary_atr_mult + minor_atr_mult) / 2 + 0.15)), 2)
+    monowaves = get_cached_monowaves(df, atr_multiplier=inter_atr)
+
+    if len(monowaves) < 3:
+        return _empty_result()
+
+    # ── Layer 3: Gather all candidates ───────────────────────────────────
+    all_candidates: list[dict] = []
+    all_candidates.extend(find_impulse_candidates(monowaves, is_commodity=is_commodity))
+    all_candidates.extend(find_zigzag_candidates(monowaves))
+    all_candidates.extend(find_flat_candidates(monowaves))
+    all_candidates.extend(find_triangle_candidates(monowaves))
+    all_candidates.extend(find_diagonal_candidates(monowaves))
+
+    if not all_candidates:
+        return _empty_result()
+
+    # ── Layers 4+5: Score and rank ────────────────────────────────────────
+    scored = validate_and_score(all_candidates)
+    top_counts = rank_counts(scored, top_n=3)
+
+    if not top_counts:
+        return _empty_result()
+
+    preferred = top_counts[0]
+    waves_out = _format_waves(preferred["waves"])
+    position  = _assess_position(preferred)
+    projections = _compute_projections(preferred)
+
+    # ── Build output ──────────────────────────────────────────────────────
+    return {
+        # Backward-compatible fields
+        "summary":    _format_summary(preferred),
+        "confidence": round(preferred["confidence"] * 100, 1),
+        "phase":      position["phase"],
+        "action":     position["action"],
+        "waves":      waves_out,
+        "projections": projections,
+        # New v2 fields
+        "counts":     top_counts,
+        "preferred":  preferred,
+        "degree":     "intermediate",
+        "trend":      "up" if preferred["direction"] == WaveDirection.UP else "down",
+    }
+
+
+def _empty_result() -> dict[str, Any]:
+    return {
+        "summary": "INSUFFICIENT DATA",
+        "confidence": 0.0,
+        "phase": "unknown",
+        "action": "WAIT",
+        "waves": [],
+        "projections": [],
+        "counts": [],
+        "preferred": None,
+        "degree": "unknown",
+        "trend": "unknown",
+    }
+
+
+def _format_summary(preferred: dict) -> str:
+    wt   = preferred["wave_type"].value.upper().replace("_", " ")
+    pos  = _assess_position(preferred)
+    return f"{wt} — {pos['phase'].upper()}"
+
+
+def _assess_position(preferred: dict) -> dict:
+    """Determine current wave position and next expected move."""
+    waves    = preferred["waves"]
+    wtype    = preferred["wave_type"]
+    direction = preferred["direction"]
+
+    # Find the most recent (rightmost) wave
+    n = len(waves)
+    is_up = direction == WaveDirection.UP
+
+    if wtype in (WaveType.IMPULSE, WaveType.IMPULSE_EXT_W1,
+                 WaveType.IMPULSE_EXT_W3, WaveType.IMPULSE_EXT_W5,
+                 WaveType.TRUNCATED_5TH):
+        wave_labels = ["W1", "W2", "W3", "W4", "W5"]
+        current = wave_labels[n - 1] if n <= 5 else "POST-W5"
+        if current in ("W1", "W3"):
+            phase, action = "impulsive", "HOLD" if is_up else "SHORT"
+        elif current in ("W2", "W4"):
+            phase, action = "corrective", "ACCUMULATE" if is_up else "COVER"
+        else:
+            phase, action = "corrective_abc", "WATCH"
+    elif wtype == WaveType.ZIGZAG:
+        wave_labels = ["A", "B", "C"]
+        current = wave_labels[n - 1] if n <= 3 else "POST-C"
+        phase, action = "corrective_zigzag", "WATCH"
+    else:
+        current, phase, action = f"LEG-{n}", "corrective", "WATCH"
+
+    return {
+        "current_wave": current,
+        "phase":        phase,
+        "action":       action,
+        "direction":    "bullish" if is_up else "bearish",
+        "invalidation": preferred.get("invalidation_level", 0.0),
+    }
+
+
+def _format_waves(monowaves: list[MonoWave]) -> list[dict]:
+    labels = ["1", "2", "3", "4", "5", "A", "B", "C", "a", "b", "c", "d", "e"]
+    return [
+        {
+            "label":    labels[i] if i < len(labels) else str(i + 1),
+            "start":    mw.start.price,
+            "end":      mw.end.price,
+            "start_idx": mw.start.idx,
+            "end_idx":  mw.end.idx,
+            "internal": mw.internal_structure,
+            "bars":     mw.bar_count,
+        }
+        for i, mw in enumerate(monowaves)
+    ]
+
+
+def _compute_projections(preferred: dict) -> list[dict]:
+    """Compute Fibonacci price projections for the preferred count."""
+    waves = preferred["waves"]
+    wtype = preferred["wave_type"]
+    if len(waves) < 1:
+        return []
+
+    projections = []
+    last = waves[-1]
+
+    if wtype in (WaveType.IMPULSE, WaveType.IMPULSE_EXT_W3):
+        if len(waves) >= 1:
+            w1 = waves[0]
+            base = last.end.price
+            is_up = last.direction == WaveDirection.UP
+            for ratio in [0.618, 1.0, 1.618]:
+                target = base + (1 if is_up else -1) * w1.price_change * ratio
+                projections.append({"ratio": ratio, "price": round(target, 4), "wave": "5"})
+    elif wtype == WaveType.ZIGZAG:
+        a = waves[0]
+        base = last.end.price
+        is_up = a.direction == WaveDirection.UP
+        for ratio in [1.0, 1.618]:
+            target = base + (1 if is_up else -1) * a.price_change * ratio
+            projections.append({"ratio": ratio, "price": round(target, 4), "wave": "C"})
+
+    return projections
+
+
 def _validate_impulse_rules(waves: list[MonoWave], direction: WaveDirection) -> list[str]:
     """
     Validate the three absolute Elliott Wave rules for a 5-wave impulse.

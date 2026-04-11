@@ -87,3 +87,38 @@ def test_build_monowaves_from_pivots():
 def test_build_monowaves_empty_or_single():
     assert build_monowaves([]) == []
     assert build_monowaves([Pivot(0, 100.0, False)]) == []
+
+
+# ── Task 3: MonoWave Cache ────────────────────────────────────────────────────
+
+import pandas as pd
+import numpy as np
+from pattern_engine.elliott_wave import get_cached_monowaves, clear_monowave_cache
+
+
+def _make_df(n=60) -> pd.DataFrame:
+    np.random.seed(42)
+    close = 100 + np.cumsum(np.random.randn(n) * 0.5)
+    return pd.DataFrame({
+        "open":   close - 0.1,
+        "high":   close + 0.5,
+        "low":    close - 0.5,
+        "close":  close,
+        "volume": np.ones(n) * 1000,
+    })
+
+
+def test_monowave_cache_returns_same_object():
+    df = _make_df()
+    clear_monowave_cache()
+    result1 = get_cached_monowaves(df, atr_multiplier=0.5)
+    result2 = get_cached_monowaves(df, atr_multiplier=0.5)
+    assert result1 is result2  # same object from cache
+
+
+def test_monowave_cache_different_params_different_result():
+    df = _make_df()
+    clear_monowave_cache()
+    r1 = get_cached_monowaves(df, atr_multiplier=0.5)
+    r2 = get_cached_monowaves(df, atr_multiplier=1.5)
+    assert r1 is not r2

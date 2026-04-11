@@ -425,6 +425,56 @@ def build_monowaves(pivots: list[Pivot]) -> list[MonoWave]:
     return [MonoWave(start=pivots[i], end=pivots[i + 1]) for i in range(len(pivots) - 1)]
 
 
+# ── MonoWave Cache ───────────────────────────────────────────────────────────
+# Keyed by (df_id, atr_multiplier) where df_id = id(df).
+# Avoids re-classifying sub-wave structure on repeated analyze() calls.
+
+_monowave_cache: dict[tuple, list[MonoWave]] = {}
+
+
+def clear_monowave_cache() -> None:
+    """Clear the monowave cache. Call when loading new price data."""
+    _monowave_cache.clear()
+
+
+def get_cached_monowaves(
+    df: pd.DataFrame,
+    atr_multiplier: float = 0.5,
+) -> list[MonoWave]:
+    """
+    Return MonoWaves for this DataFrame, using cache when available.
+    internal_structure is populated by classify_internal_structure() inside here.
+    """
+    cache_key = (id(df), atr_multiplier)
+    if cache_key in _monowave_cache:
+        return _monowave_cache[cache_key]
+
+    pivots = detect_pivots(df, atr_multiplier=atr_multiplier)
+    monowaves = build_monowaves(pivots)
+
+    # Classify each monowave's internal structure (Layer 2)
+    for mw in monowaves:
+        structure, method, count = classify_internal_structure(
+            df, mw.start.idx, mw.end.idx
+        )
+        mw.internal_structure    = structure
+        mw.classification_method = method
+        mw.sub_pivot_count       = count
+
+    _monowave_cache[cache_key] = monowaves
+    return monowaves
+
+
+def classify_internal_structure(
+    df: pd.DataFrame,
+    start_idx: int,
+    end_idx: int,
+    min_bars_for_recursion: int = 8,
+) -> tuple[str, str, int]:
+    """Stub — implemented in Task 5."""
+    return "indeterminate", "unknown", 0
+
+
 # ── Impulse Wave Detection ───────────────────────────────────────────────────
 
 def find_impulse_waves(

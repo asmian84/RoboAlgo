@@ -1031,6 +1031,124 @@ def find_flat_candidates(monowaves: list[MonoWave]) -> list[dict]:
     return candidates
 
 
+def find_triangle_candidates(monowaves: list[MonoWave]) -> list[dict]:
+    """
+    Scan for 5-legged triangle patterns (3-3-3-3-3).
+    All 5 legs must have corrective internal structure (Brown's rule: no
+    leg may be a standalone 5-wave pattern).
+    Checks for converging (contracting) or diverging (expanding) trendlines.
+    """
+    candidates = []
+    n = len(monowaves)
+
+    for i in range(n - 4):
+        legs = monowaves[i: i + 5]
+
+        # All 5 legs must be corrective (or indeterminate — not impulsive)
+        if any(leg.internal_structure == "impulsive" for leg in legs):
+            continue
+
+        # Must alternate direction
+        dirs = [leg.direction for leg in legs]
+        if not all(dirs[j] != dirs[j + 1] for j in range(4)):
+            continue
+
+        # Measure leg sizes to distinguish contracting vs expanding
+        sizes = [leg.price_change for leg in legs]
+
+        # Contracting: each leg generally smaller than the one 2 positions before
+        # Compare a-c-e (odd indices) and b-d (even indices) separately
+        odd_sizes  = [sizes[0], sizes[2], sizes[4]]  # a, c, e
+        even_sizes = [sizes[1], sizes[3]]             # b, d
+
+        is_contracting = (odd_sizes[0] > odd_sizes[1] > odd_sizes[2] and
+                          even_sizes[0] > even_sizes[1])
+        is_expanding   = (odd_sizes[0] < odd_sizes[1] < odd_sizes[2] and
+                          even_sizes[0] < even_sizes[1])
+
+        if not (is_contracting or is_expanding):
+            continue
+
+        wave_type = WaveType.CONTRACTING_TRIANGLE if is_contracting else WaveType.EXPANDING_TRIANGLE
+
+        candidates.append({
+            "waves":         legs,
+            "start_idx":     i,
+            "wave_type":     wave_type,
+            "extension_wave": None,
+            "direction":     legs[0].direction,
+        })
+
+    return candidates
+
+
+def find_diagonal_candidates(
+    monowaves: list[MonoWave],
+    position_hint: str = "",
+) -> list[dict]:
+    """
+    Scan for diagonal triangle patterns.
+
+    Ending diagonal (W5/C): all 5 legs corrective (3-3-3-3-3), W4 overlaps W1.
+    Leading diagonal (W1/A): actionary legs impulsive (5-3-5-3-5), W4 overlaps W1.
+    position_hint: "w5" | "w1" | "" — used for position scoring later.
+    """
+    candidates = []
+    n = len(monowaves)
+
+    for i in range(n - 4):
+        seq = monowaves[i: i + 5]
+        w1, w2, w3, w4, w5 = seq
+
+        # Must alternate direction
+        dirs = [m.direction for m in seq]
+        if not all(dirs[j] != dirs[j + 1] for j in range(4)):
+            continue
+
+        direction = w1.direction
+
+        # W4 MUST overlap W1 territory (key diagnostic for both diagonal types)
+        if direction == WaveDirection.UP:
+            w4_overlaps_w1 = w4.end.price < w1.end.price
+        else:
+            w4_overlaps_w1 = w4.end.price > w1.end.price
+
+        if not w4_overlaps_w1:
+            continue
+
+        # Ending diagonal: all legs corrective
+        all_corrective = all(
+            m.internal_structure in ("corrective", "indeterminate") for m in seq
+        )
+
+        # Leading diagonal: actionary legs (1,3,5) impulsive, corrective legs (2,4) corrective
+        actionary_impulsive = (
+            w1.internal_structure in ("impulsive", "indeterminate") and
+            w3.internal_structure in ("impulsive", "indeterminate") and
+            w5.internal_structure in ("impulsive", "indeterminate") and
+            w2.internal_structure in ("corrective", "indeterminate") and
+            w4.internal_structure in ("corrective", "indeterminate")
+        )
+
+        if all_corrective:
+            wave_type = WaveType.ENDING_DIAGONAL
+        elif actionary_impulsive:
+            wave_type = WaveType.LEADING_DIAGONAL
+        else:
+            continue
+
+        candidates.append({
+            "waves":          seq,
+            "start_idx":      i,
+            "wave_type":      wave_type,
+            "extension_wave": None,
+            "direction":      direction,
+            "position_hint":  position_hint,
+        })
+
+    return candidates
+
+
 def _validate_impulse_rules(waves: list[MonoWave], direction: WaveDirection) -> list[str]:
     """
     Validate the three absolute Elliott Wave rules for a 5-wave impulse.

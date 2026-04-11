@@ -135,3 +135,62 @@ def test_a_wave_impulsive_not_flat():
     c = _mw(118, 108, 20, 35, "impulsive")
     candidates = find_flat_candidates([a, b, c])
     assert len(candidates) == 0
+
+
+# ── Task 8: Triangle and Diagonal Candidate Finders ──────────────────────────
+
+from pattern_engine.elliott_wave import find_triangle_candidates, find_diagonal_candidates
+
+
+def test_contracting_triangle_all_corrective_legs():
+    """5 corrective legs with converging trendlines → contracting triangle."""
+    legs = [
+        _mw(120, 108, 0,  10, "corrective"),   # a down 12
+        _mw(108, 117, 10, 20, "corrective"),   # b up 9
+        _mw(117, 109, 20, 30, "corrective"),   # c down 8
+        _mw(109, 115, 30, 40, "corrective"),   # d up 6
+        _mw(115, 110, 40, 50, "corrective"),   # e down 5
+    ]
+    candidates = find_triangle_candidates(legs)
+    assert len(candidates) >= 1
+    assert candidates[0]["wave_type"] == WaveType.CONTRACTING_TRIANGLE
+
+
+def test_triangle_with_impulsive_leg_rejected():
+    """If any leg of a triangle is impulsive → not a triangle (Brown rule)."""
+    legs = [
+        _mw(120, 108, 0,  10, "impulsive"),    # first leg is impulsive → not triangle
+        _mw(108, 117, 10, 20, "corrective"),
+        _mw(117, 109, 20, 30, "corrective"),
+        _mw(109, 115, 30, 40, "corrective"),
+        _mw(115, 110, 40, 50, "corrective"),
+    ]
+    candidates = find_triangle_candidates(legs)
+    assert len(candidates) == 0
+
+
+def test_ending_diagonal_w5_position():
+    """5 overlapping corrective waves in wedge shape → ending diagonal."""
+    legs = [
+        _mw(100, 112, 0,  10, "corrective"),   # W1 up 12
+        _mw(112, 104, 10, 20, "corrective"),   # W2 down 8
+        _mw(104, 115, 20, 30, "corrective"),   # W3 up 11
+        _mw(115, 108, 30, 40, "corrective"),   # W4 down 7 — overlaps W1 (108 < 112)
+        _mw(108, 118, 40, 50, "corrective"),   # W5 up 10
+    ]
+    candidates = find_diagonal_candidates(legs, position_hint="w5")
+    assert len(candidates) >= 1
+    assert candidates[0]["wave_type"] == WaveType.ENDING_DIAGONAL
+
+
+def test_ending_diagonal_requires_w4_overlap_w1():
+    """No W4/W1 overlap → not a diagonal."""
+    legs = [
+        _mw(100, 112, 0,  10, "corrective"),
+        _mw(112, 105, 10, 20, "corrective"),
+        _mw(105, 117, 20, 30, "corrective"),
+        _mw(117, 113, 30, 40, "corrective"),   # W4=113, W1 end=112: no overlap
+        _mw(113, 122, 40, 50, "corrective"),
+    ]
+    candidates = find_diagonal_candidates(legs, position_hint="w5")
+    assert len(candidates) == 0

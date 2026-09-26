@@ -17,6 +17,14 @@ touching that codepath.
 from __future__ import annotations
 
 import logging
+import sys
+from pathlib import Path
+
+# `python scripts/migrate_auto_trader.py` puts scripts/ on sys.path, not the
+# repo root, so the project packages are not importable. Bootstrap the root
+# rather than requiring callers to set PYTHONPATH or remember -m, since the
+# runbook lists this script as the very first step.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from database.connection import get_engine
 from database.models import (

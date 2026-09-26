@@ -37,7 +37,9 @@ liquidity sweeps are consumed from existing engines.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -50,6 +52,31 @@ logger = logging.getLogger(__name__)
 
 # ATR lookback periods for rolling mean comparison
 _ATR_HISTORY_PERIOD = 50
+
+# NYSE regular session in ET — used to decide when crypto is a *leading*
+# indicator (equity market closed) vs. concurrent noise (market open).
+_MARKET_OPEN_MIN  = 9 * 60 + 30   # 09:30 ET
+_MARKET_CLOSE_MIN = 16 * 60       # 16:00 ET
+_ET = ZoneInfo("America/New_York")
+
+
+def _is_equity_market_open(now: datetime | None = None) -> bool:
+    """Regular-session check for NYSE (ignores half-days and holidays).
+
+    Weekends → closed. Weekdays outside 09:30–16:00 ET → closed.
+    Half-days and holidays are intentionally ignored — worst case the crypto
+    lead is treated as concurrent noise instead of leading signal, a harmless
+    downgrade.
+    """
+    now = now or datetime.now(_ET)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=_ET)
+    else:
+        now = now.astimezone(_ET)
+    if now.weekday() >= 5:
+        return False
+    m = now.hour * 60 + now.minute
+    return _MARKET_OPEN_MIN <= m < _MARKET_CLOSE_MIN
 
 
 class MarketRegimeEngine:
@@ -141,14 +168,93 @@ class MarketRegimeEngine:
             "atr_ratio": vol_state.get("atr_ratio", 1.0),
         }
 
+        # ── 6. Crypto lead overlay (BTC as 24/7 risk-sentiment proxy) ─────
+        lead = self._compute_crypto_lead()
+        if lead is not None:
+            result["crypto_lead"] = lead
+            self._apply_crypto_lead(result, lead)
+
         logger.info(
-            "MarketRegimeEngine[%s] → regime=%s confidence=%.2f vol=%s",
+            "MarketRegimeEngine[%s] → regime=%s confidence=%.2f vol=%s%s",
             self.symbol,
             result["regime"],
             result["confidence"],
             result["volatility_state"],
+            f" btc_lead={lead['direction']}({lead['btc_change_pct']:+.2f}%)" if lead else "",
         )
         return result
+
+    def _compute_crypto_lead(self) -> dict[str, Any] | None:
+        """BTC's most recent daily move + whether it counts as a leading signal.
+
+        When the equity market is closed (weekend / overnight), BTC's action
+        is a real-time risk-sentiment proxy that historically front-runs
+        equity opens. When the market is open, we still surface the value for
+        transparency but don't treat it as leading signal.
+
+        Returns None if BTC data is unavailable (never raises).
+        """
+        try:
+            from data_engine.crypto_fetcher import fetch_crypto_daily
+            btc = fetch_crypto_daily("BTC", bars=5)
+            if btc is None or len(btc) < 2:
+                return None
+            latest = float(btc["close"].iloc[-1])
+            prev   = float(btc["close"].iloc[-2])
+            pct    = ((latest - prev) / prev * 100.0) if prev else 0.0
+
+            if abs(pct) >= 3.0:
+                magnitude = "LARGE"
+            elif abs(pct) >= 1.0:
+                magnitude = "MEDIUM"
+            else:
+                magnitude = "SMALL"
+
+            if pct > 0.3:
+                direction = "UP"
+            elif pct < -0.3:
+                direction = "DOWN"
+            else:
+                direction = "NEUTRAL"
+
+            market_open = _is_equity_market_open()
+            return {
+                "btc_change_pct":    round(pct, 2),
+                "direction":         direction,
+                "magnitude":         magnitude,
+                "equity_market_open": market_open,
+                # Leading only when equities are closed and BTC moved enough
+                # to be meaningful (not intraday noise).
+                "leading_indicator": (not market_open) and magnitude in ("MEDIUM", "LARGE"),
+            }
+        except Exception as exc:
+            logger.debug(
+                "MarketRegimeEngine[%s]: crypto lead unavailable: %s",
+                self.symbol, exc,
+            )
+            return None
+
+    def _apply_crypto_lead(self, result: dict[str, Any], lead: dict[str, Any]) -> None:
+        """Nudge confidence by ±0.05 when BTC leads in / against the trend.
+
+        Applied only when `leading_indicator` is True (i.e. equity market
+        is closed AND BTC magnitude is MEDIUM+). Capped so the base signal
+        always dominates — this is a modifier, not an override.
+        """
+        if not lead.get("leading_indicator"):
+            return
+
+        trend     = result.get("trend", "NEUTRAL")
+        direction = lead["direction"]
+        conf      = float(result.get("confidence", 0.0))
+        mods: list[str] = result.setdefault("modifiers", [])
+
+        if trend == direction and trend in ("UP", "DOWN"):
+            result["confidence"] = min(1.0, conf + 0.05)
+            mods.append(f"BTC leading {direction} over closed window (+0.05 conf)")
+        elif (trend == "UP" and direction == "DOWN") or (trend == "DOWN" and direction == "UP"):
+            result["confidence"] = max(0.0, conf - 0.05)
+            mods.append(f"BTC {direction} disagrees with equity {trend} (-0.05 conf)")
 
     # ── Engine Adapters (consume — do not reimplement) ─────────────────────────
 

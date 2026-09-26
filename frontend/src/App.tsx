@@ -9,6 +9,9 @@ import OpportunityMatrixPage from './pages/OpportunityMatrixPage'
 import EdgePage              from './pages/EdgePage'
 import TickerIntelPage       from './pages/TickerIntelPage'
 import TradesPage            from './pages/TradesPage'
+import CryptoTradesPage      from './pages/CryptoTradesPage'
+import LabPage               from './pages/LabPage'
+import AutoTraderPage         from './pages/AutoTraderPage'
 import SettingsPage          from './pages/SettingsPage'
 import LoginPage             from './pages/LoginPage'
 import { AlertProvider }     from './components/alerts/AlertManager'
@@ -42,6 +45,9 @@ function ProtectedLayout() {
           <Route path="/signals" element={<SignalsPage />} />
           <Route path="/paper"  element={<PaperTradingPage />} />
           <Route path="/trades" element={<TradesPage />} />
+          <Route path="/crypto" element={<CryptoTradesPage />} />
+          <Route path="/lab"    element={<LabPage />} />
+          <Route path="/auto"   element={<AutoTraderPage />} />
           <Route path="/command" element={<CommandCenterPage />} />
 
           {/* ── Consolidated redirects — Signals hub ── */}

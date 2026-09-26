@@ -6,7 +6,7 @@ SQLAlchemy ORM models for all core tables.
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Float, Date, DateTime, ForeignKey,
-    UniqueConstraint, Index, Boolean,
+    UniqueConstraint, Index, Boolean, Text,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -1330,4 +1330,84 @@ class SignalConfidence(Base):
     __table_args__ = (
         UniqueConstraint("instrument_id", "date", name="uq_sigconf_inst_date"),
         Index("ix_sigconf_inst_date", "instrument_id", "date"),
+    )
+
+
+# ── Auto Trader Audit Tables ─────────────────────────────────────────────────
+
+class AutoTraderCycle(Base):
+    """One run of the auto trader loop, with summary counters and equity."""
+    __tablename__ = "auto_trader_cycles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cycle_id = Column(String(64), unique=True, index=True, nullable=False)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime)
+    mode = Column(String(20))          # paper / live / dry_run
+    broker = Column(String(30))
+    status = Column(String(20))        # running / completed / failed / halted
+    symbols_scanned = Column(Integer, default=0)
+    candidates = Column(Integer, default=0)
+    orders_placed = Column(Integer, default=0)
+    orders_rejected = Column(Integer, default=0)
+    equity_start = Column(Float)
+    equity_end = Column(Float)
+    day_start_equity = Column(Float)
+    regime = Column(String(40))
+    positions_json = Column(Text)      # JSON-serialized snapshot of open positions
+    halt_reason = Column(String(200))
+    error = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_auto_trader_cycles_started_at", "started_at"),
+    )
+
+
+class AutoTraderDecision(Base):
+    """Per-symbol decision made during an auto trader cycle."""
+    __tablename__ = "auto_trader_decisions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cycle_id = Column(String(64), index=True, nullable=False)
+    ts = Column(DateTime, default=datetime.utcnow)
+    symbol = Column(String(30), index=True)
+    action = Column(String(20), index=True)   # PLACE / REJECT / SKIP / DRY_RUN / EXIT / NO_ACTION / HALT
+    verdict = Column(String(30))
+    direction = Column(String(10))            # long / short
+    score = Column(Float)
+    confidence = Column(Float)
+    entry = Column(Float)
+    stop = Column(Float)
+    target = Column(Float)
+    qty = Column(Integer)
+    risk_amount = Column(Float)
+    realized_pnl = Column(Float)
+    reason = Column(String(300))
+    governor_rule = Column(String(64), index=True)
+    broker_order_id = Column(String(64))
+    client_order_id = Column(String(64), index=True)
+    payload = Column(Text)   # JSON-serialized extra decision context
+
+    __table_args__ = (
+        Index("ix_auto_trader_decisions_ts", "ts"),
+    )
+
+
+class AutoTraderDiscrepancy(Base):
+    """Reconciliation mismatch discovered during an auto trader cycle."""
+    __tablename__ = "auto_trader_discrepancies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cycle_id = Column(String(64), index=True, nullable=False)
+    ts = Column(DateTime, default=datetime.utcnow)
+    kind = Column(String(40))
+    symbol = Column(String(30))
+    expected = Column(String(200))
+    actual = Column(String(200))
+    resolution = Column(String(200))
+    detail = Column(Text)
+
+    __table_args__ = (
+        Index("ix_auto_trader_discrepancies_ts", "ts"),
     )

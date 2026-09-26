@@ -21,6 +21,9 @@ from api.routers import (
     rocket_scanner, gamma_tracker, sniper_entry, sniper_gamma, penny_sniper,
     quant_scanner,
     trade_signals,
+    crypto_signals,
+    lab,
+    trading_control,
     settings,
 )
 
@@ -83,6 +86,9 @@ app.include_router(sniper_gamma.router,      prefix="/api/sniper-gamma",      ta
 app.include_router(penny_sniper.router,      prefix="/api/penny-sniper",      tags=["penny_sniper"])
 app.include_router(quant_scanner.router,     prefix="/api/quant",             tags=["quant_scanner"])
 app.include_router(trade_signals.router,     prefix="/api/trade-signals",     tags=["trade_signals"])
+app.include_router(crypto_signals.router,    prefix="/api/crypto-signals",    tags=["crypto_signals"])
+app.include_router(lab.router,               prefix="/api/lab",               tags=["lab"])
+app.include_router(trading_control.router, prefix="/api/auto-trader", tags=["auto_trader"])
 app.include_router(settings.router,          prefix="/api/settings",          tags=["settings"])
 
 

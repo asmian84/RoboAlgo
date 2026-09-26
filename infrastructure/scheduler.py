@@ -8,6 +8,7 @@ Schedules:
     - Signal confidence (stage 10): weekdays at 19:00 UTC
     - Model monitoring (stage 11): daily at 19:30 UTC
     - Strategy evolution (stage 9): Sundays at 02:00 UTC (weekly)
+    - Auto-trader cycle: every 15 minutes during US regular hours (13:00-20:00 UTC), Mon-Fri
 """
 
 from __future__ import annotations
@@ -92,5 +93,12 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute=0, hour=2, day_of_week=0),
         "args": [9],  # Stage 9: strategy evolution
         "options": {"queue": "pipeline"},
+    },
+
+    # Auto-trader cycle — every 15 minutes during market hours
+    "auto-trader-cycle": {
+        "task": "auto_trader_cycle",
+        "schedule": crontab(minute="*/15", hour="13-20", day_of_week="1-5"),  # US regular hours in UTC
+        "options": {"queue": "trading"},
     },
 }

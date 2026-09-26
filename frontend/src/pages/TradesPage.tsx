@@ -1,7 +1,12 @@
 // frontend/src/pages/TradesPage.tsx
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, lazy, Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import api from '../api/client'
+
+// Deep-analysis chart. Lazy-loaded on purpose: the component is ~2.3k lines and
+// pulls in klinecharts (~600kB), which would otherwise land in the main bundle
+// for every visitor even though most never open a chart.
+const KLineChartOverlay = lazy(() => import('../components/chart/KLineChartOverlay'))
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -73,7 +78,7 @@ interface DiscoveryInfo {
   bias: string
 }
 
-function useStreamingScan() {
+function useStreamingScan(endpointBase: string = '/trade-signals') {
   const [progress, setProgress] = useState<ScanProgress | null>(null)
   const [results, setResults] = useState<ScanResult | null>(null)
   const [isScanning, setIsScanning] = useState(false)
@@ -105,7 +110,7 @@ function useStreamingScan() {
     if (symbols) params.set('symbols', symbols)
 
     const baseUrl = (api.defaults.baseURL || '/api').replace(/\/$/, '')
-    const url = `${baseUrl}/trade-signals/scan/stream?${params}`
+    const url = `${baseUrl}${endpointBase}/scan/stream?${params}`
 
     fetch(url, { signal: controller.signal })
       .then(async (response) => {
@@ -159,7 +164,7 @@ function useStreamingScan() {
           setIsScanning(false)
         }
       })
-  }, [])
+  }, [endpointBase])
 
   const abort = useCallback(() => {
     abortRef.current?.abort()
@@ -169,10 +174,10 @@ function useStreamingScan() {
   return { progress, results, isScanning, error, recentSymbols, liveTrades, regime, discovery, statusMsg, startScan, abort }
 }
 
-function useTradeLookup(symbol: string, profile: string, account: number) {
+function useTradeLookup(symbol: string, profile: string, account: number, endpointBase: string = '/trade-signals') {
   return useQuery<LookupResult>({
-    queryKey: ['trade-signals', 'lookup', symbol, profile, account],
-    queryFn: () => api.get(`/trade-signals/lookup/${symbol}?profile=${profile}&account=${account}`).then(r => r.data),
+    queryKey: [endpointBase, 'lookup', symbol, profile, account],
+    queryFn: () => api.get(`${endpointBase}/lookup/${symbol}?profile=${profile}&account=${account}`).then(r => r.data),
     enabled: !!symbol && symbol.length >= 1,
     staleTime: 60_000,
     retry: false,
@@ -208,7 +213,7 @@ function ScoreBar({ score }: { score: number }) {
 
 // ── Trade Card (scanner results) ─────────────────────────────────────────────
 
-function TradeCard({ rec }: { rec: TradeRec }) {
+function TradeCard({ rec, onOpenChart }: { rec: TradeRec; onOpenChart?: (symbol: string) => void }) {
   const [expanded, setExpanded] = useState(false)
   const isActionable = rec.verdict === 'BUY' || rec.verdict === 'SELL'
 
@@ -235,6 +240,17 @@ function TradeCard({ rec }: { rec: TradeRec }) {
             </span>
           )}
           <ScoreBar score={rec.score} />
+          {onOpenChart && (
+            <button
+              // stopPropagation: the card itself toggles expand on click, and
+              // opening the chart should not also expand the row behind it.
+              onClick={(e) => { e.stopPropagation(); onOpenChart(rec.symbol) }}
+              className="px-2 py-1 rounded bg-gray-800 hover:bg-emerald-700/40 border border-gray-700 hover:border-emerald-600/50 text-gray-400 hover:text-emerald-300 text-[10px] font-bold tracking-wider transition-colors"
+              title={`Open ${rec.symbol} chart`}
+            >
+              ↗ CHART
+            </button>
+          )}
         </div>
       </div>
 
@@ -293,11 +309,11 @@ function TradeCard({ rec }: { rec: TradeRec }) {
 
 // ── Lookup Panel ─────────────────────────────────────────────────────────────
 
-function LookupPanel({ profile, account }: { profile: string; account: number }) {
+function LookupPanel({ profile, account, endpointBase = '/trade-signals', lookupPlaceholder = 'Enter ticker (e.g., AAPL)', onOpenChart }: { profile: string; account: number; endpointBase?: string; lookupPlaceholder?: string; onOpenChart?: (symbol: string) => void }) {
   const [input, setInput] = useState('')
   const [symbol, setSymbol] = useState('')
 
-  const { data, isLoading, error } = useTradeLookup(symbol, profile, account)
+  const { data, isLoading, error } = useTradeLookup(symbol, profile, account, endpointBase)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -311,7 +327,7 @@ function LookupPanel({ profile, account }: { profile: string; account: number })
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Enter ticker (e.g., AAPL)"
+          placeholder={lookupPlaceholder}
           className="flex-1 px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white font-mono
                      placeholder-gray-600 focus:border-emerald-500 focus:outline-none"
         />
@@ -340,7 +356,18 @@ function LookupPanel({ profile, account }: { profile: string; account: number })
               <span className="text-gray-400 font-mono">${data.current_price?.toFixed(2)}</span>
               <VerdictBadge verdict={data.verdict} score={data.score} />
             </div>
-            <span className="text-gray-500 text-xs uppercase">{data.profile}</span>
+            <div className="flex items-center gap-3">
+              {onOpenChart && (
+                <button
+                  onClick={() => onOpenChart(data.symbol)}
+                  className="px-2.5 py-1 rounded bg-gray-800 hover:bg-emerald-700/40 border border-gray-700 hover:border-emerald-600/50 text-gray-400 hover:text-emerald-300 text-[10px] font-bold tracking-wider transition-colors"
+                  title={`Open ${data.symbol} chart`}
+                >
+                  ↗ CHART
+                </button>
+              )}
+              <span className="text-gray-500 text-xs uppercase">{data.profile}</span>
+            </div>
           </div>
 
           {/* Main verdict */}
@@ -482,12 +509,27 @@ function ScanProgressBar({ progress, recentSymbols }: { progress: ScanProgress; 
   )
 }
 
-export default function TradesPage() {
+interface TradesPageProps {
+  endpointBase?: string
+  title?: string
+  subtitle?: string
+  lookupPlaceholder?: string
+}
+
+export default function TradesPage({
+  endpointBase = '/trade-signals',
+  title = 'TRADES',
+  subtitle = 'Precision entries powered by 18-component SMC scoring',
+  lookupPlaceholder = 'Enter ticker (e.g., AAPL)',
+}: TradesPageProps = {}) {
   const [mode, setMode] = useState<Mode>('lookup')
   const [profile, setProfile] = useState<Profile>('SWING')
   const [account, setAccount] = useState(10000)
+  // Symbol whose deep-analysis chart is open, or null for none. Held here
+  // rather than per-card so only one overlay ever mounts.
+  const [chartSymbol, setChartSymbol] = useState<string | null>(null)
 
-  const { progress, results: scanData, isScanning, error: scanError, recentSymbols, liveTrades, regime, discovery, statusMsg, startScan, abort } = useStreamingScan()
+  const { progress, results: scanData, isScanning, error: scanError, recentSymbols, liveTrades, regime, discovery, statusMsg, startScan, abort } = useStreamingScan(endpointBase)
 
   const handleScanStart = () => {
     setMode('scanner')
@@ -499,8 +541,8 @@ export default function TradesPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">TRADES</h1>
-          <p className="text-gray-500 text-xs mt-0.5">Precision entries powered by 18-component SMC scoring</p>
+          <h1 className="text-xl font-bold text-white">{title}</h1>
+          <p className="text-gray-500 text-xs mt-0.5">{subtitle}</p>
         </div>
         <div className="flex items-center gap-3">
           {/* Profile selector */}
@@ -541,7 +583,7 @@ export default function TradesPage() {
 
       {/* Content */}
       {mode === 'lookup' ? (
-        <LookupPanel profile={profile} account={account} />
+        <LookupPanel profile={profile} account={account} endpointBase={endpointBase} lookupPlaceholder={lookupPlaceholder} onOpenChart={setChartSymbol} />
       ) : (
         <div className="space-y-4">
           {/* Scan controls */}
@@ -634,7 +676,7 @@ export default function TradesPage() {
                       {isScanning ? '🔴 LIVE — ' : ''}Actionable Trades ({buys.length})
                     </h3>
                     <div className="space-y-2">
-                      {buys.map((rec: TradeRec) => <TradeCard key={rec.symbol} rec={rec} />)}
+                      {buys.map((rec: TradeRec) => <TradeCard key={rec.symbol} rec={rec} onOpenChart={setChartSymbol} />)}
                     </div>
                   </div>
                 )}
@@ -645,7 +687,7 @@ export default function TradesPage() {
                       Watchlist ({holds.length})
                     </h3>
                     <div className="space-y-2">
-                      {holds.map((rec: TradeRec) => <TradeCard key={rec.symbol} rec={rec} />)}
+                      {holds.map((rec: TradeRec) => <TradeCard key={rec.symbol} rec={rec} onOpenChart={setChartSymbol} />)}
                     </div>
                   </div>
                 )}
@@ -669,6 +711,23 @@ export default function TradesPage() {
             )
           })()}
         </div>
+      )}
+
+      {/* Deep-analysis chart. Self-contained (fixed inset-0, own Back button and
+          Escape handler), so it only needs a symbol and a way to close. */}
+      {chartSymbol && (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 bg-[#0a0a0f] flex items-center justify-center">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-6 h-6 border-2 border-gray-700 border-t-emerald-500 rounded-full animate-spin" />
+                <div className="text-gray-500 text-xs font-mono">Loading {chartSymbol} chart…</div>
+              </div>
+            </div>
+          }
+        >
+          <KLineChartOverlay symbol={chartSymbol} onClose={() => setChartSymbol(null)} />
+        </Suspense>
       )}
     </div>
   )

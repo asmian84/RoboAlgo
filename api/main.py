@@ -25,6 +25,7 @@ from api.routers import (
     lab,
     trading_control,
     settings,
+    finder,
 )
 
 app = FastAPI(title="RoboAlgo API", version="1.0.0")
@@ -88,6 +89,7 @@ app.include_router(quant_scanner.router,     prefix="/api/quant",             ta
 app.include_router(trade_signals.router,     prefix="/api/trade-signals",     tags=["trade_signals"])
 app.include_router(crypto_signals.router,    prefix="/api/crypto-signals",    tags=["crypto_signals"])
 app.include_router(lab.router,               prefix="/api/lab",               tags=["lab"])
+app.include_router(finder.router,            prefix="/api/finder",            tags=["finder"])
 app.include_router(trading_control.router, prefix="/api/auto-trader", tags=["auto_trader"])
 app.include_router(settings.router,          prefix="/api/settings",          tags=["settings"])
 

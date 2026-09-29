@@ -11,6 +11,7 @@ import TickerIntelPage       from './pages/TickerIntelPage'
 import TradesPage            from './pages/TradesPage'
 import CryptoTradesPage      from './pages/CryptoTradesPage'
 import LabPage               from './pages/LabPage'
+import FinderPage             from './pages/FinderPage'
 import AutoTraderPage         from './pages/AutoTraderPage'
 import SettingsPage          from './pages/SettingsPage'
 import LoginPage             from './pages/LoginPage'
@@ -47,6 +48,7 @@ function ProtectedLayout() {
           <Route path="/trades" element={<TradesPage />} />
           <Route path="/crypto" element={<CryptoTradesPage />} />
           <Route path="/lab"    element={<LabPage />} />
+          <Route path="/finder" element={<FinderPage />} />
           <Route path="/auto"   element={<AutoTraderPage />} />
           <Route path="/command" element={<CommandCenterPage />} />
 

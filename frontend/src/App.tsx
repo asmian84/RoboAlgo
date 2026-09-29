@@ -1,20 +1,10 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import TerminalLayout      from './components/layout/TerminalLayout'
+import FinderPage          from './pages/FinderPage'
 import ChartPage           from './pages/ChartPage'
-import SignalsPage         from './pages/SignalsPage'
-import CommandCenterPage   from './pages/CommandCenterPage'
-import RegimeTimelinePage  from './pages/RegimeTimelinePage'
 import PaperTradingPage    from './pages/PaperTradingPage'
-import OpportunityMatrixPage from './pages/OpportunityMatrixPage'
-import EdgePage              from './pages/EdgePage'
-import TickerIntelPage       from './pages/TickerIntelPage'
-import TradesPage            from './pages/TradesPage'
-import CryptoTradesPage      from './pages/CryptoTradesPage'
-import LabPage               from './pages/LabPage'
-import FinderPage             from './pages/FinderPage'
-import AutoTraderPage         from './pages/AutoTraderPage'
-import SettingsPage          from './pages/SettingsPage'
-import LoginPage             from './pages/LoginPage'
+import SettingsPage        from './pages/SettingsPage'
+import LoginPage           from './pages/LoginPage'
 import { AlertProvider }     from './components/alerts/AlertManager'
 import { AuthProvider, useAuth } from './context/AuthContext'
 
@@ -38,48 +28,32 @@ function ProtectedLayout() {
     <AlertProvider>
       <TerminalLayout>
         <Routes>
-          {/* ── Primary nav (6 sidebar items) ── */}
-          <Route path="/"       element={<Navigate to="/edge" replace />} />
-          <Route path="/edge"   element={<EdgePage />} />
-          <Route path="/intel"  element={<TickerIntelPage />} />
-          <Route path="/chart"  element={<ChartPage />} />
-          <Route path="/signals" element={<SignalsPage />} />
-          <Route path="/paper"  element={<PaperTradingPage />} />
-          <Route path="/trades" element={<TradesPage />} />
-          <Route path="/crypto" element={<CryptoTradesPage />} />
-          <Route path="/lab"    element={<LabPage />} />
-          <Route path="/finder" element={<FinderPage />} />
-          <Route path="/auto"   element={<AutoTraderPage />} />
-          <Route path="/command" element={<CommandCenterPage />} />
+          {/* ── The three destinations ──────────────────────────────────
+             FINDER  the one scanner — penny, small-cap, ETF long/short,
+                     breakout and crypto are PRESETS inside it
+             CHART   the deep view, opened by clicking a finder result
+             PAPER   the mock account, and the auto-trader that trades into it
 
-          {/* ── Consolidated redirects — Signals hub ── */}
-          <Route path="/scan"           element={<Navigate to="/signals" replace />} />
-          <Route path="/watchlist"      element={<Navigate to="/signals" replace />} />
-          <Route path="/probabilities"  element={<Navigate to="/signals" replace />} />
-          <Route path="/recommendation" element={<Navigate to="/signals" replace />} />
-          <Route path="/comparison"     element={<Navigate to="/signals" replace />} />
+             This replaced twelve page routes plus thirteen redirect aliases
+             left over from an earlier consolidation. Everything removed is
+             recoverable from tag pre-consolidation-2026-09-29. */}
+          <Route path="/"        element={<Navigate to="/finder" replace />} />
+          <Route path="/finder"  element={<FinderPage />} />
+          <Route path="/chart"   element={<ChartPage />} />
+          <Route path="/paper"   element={<PaperTradingPage />} />
 
-          {/* ── Consolidated redirects — Edge hub ── */}
-          <Route path="/analytics" element={<Navigate to="/edge" replace />} />
-          <Route path="/dashboard" element={<Navigate to="/edge" replace />} />
-          <Route path="/backtest"  element={<Navigate to="/edge" replace />} />
-          <Route path="/evolution" element={<Navigate to="/edge" replace />} />
-          <Route path="/research"  element={<Navigate to="/edge" replace />} />
-          <Route path="/features"  element={<Navigate to="/edge" replace />} />
+          <Route path="/settings" element={<SettingsPage />} />
 
-          {/* ── Legacy Intel redirects ── */}
-          <Route path="/bull-bear" element={<Navigate to="/intel" replace />} />
-          <Route path="/cycles"    element={<Navigate to="/intel" replace />} />
+          {/* Old links and bookmarks land on the surface that absorbed them
+             rather than on a dead end. */}
+          <Route path="/trades"  element={<Navigate to="/finder" replace />} />
+          <Route path="/crypto"  element={<Navigate to="/finder" replace />} />
+          <Route path="/signals" element={<Navigate to="/finder" replace />} />
+          <Route path="/scan"    element={<Navigate to="/finder" replace />} />
+          <Route path="/auto"    element={<Navigate to="/paper" replace />} />
 
-          {/* ── Settings ── */}
-          <Route path="/settings"        element={<SettingsPage />} />
-
-          {/* ── Deep-link aliases (unique pages, kept accessible) ── */}
-          <Route path="/matrix"          element={<OpportunityMatrixPage />} />
-          <Route path="/regime-timeline" element={<RegimeTimelinePage />} />
-
-          {/* Catch-all — already authed, send to root */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* Catch-all — already authed, send to the scanner */}
+          <Route path="*" element={<Navigate to="/finder" replace />} />
         </Routes>
       </TerminalLayout>
     </AlertProvider>

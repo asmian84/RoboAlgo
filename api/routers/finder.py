@@ -120,6 +120,7 @@ def scan_wide(
     preset: str = Query("", description="signal | pennyking | maker. Empty = library defaults."),
     limit: int = Query(100, ge=1, le=500),
     max_deep: int = Query(400, ge=1, le=2000, description="Deep-analyze at most this many stage-1 survivors, most liquid (price*volume) first."),
+    max_universe: int = Query(3000, ge=0, le=20000, description="Screen at most this many tickers. The full US listing is ~13,786 and takes ~5 minutes; 0 means no cap. stats.universe_capped reports whether it was applied."),
     min_price: float | None = Query(None),
     max_price: float | None = Query(None),
     min_volume: int | None = Query(None),
@@ -170,7 +171,7 @@ def scan_wide(
     if overrides:
         criteria = replace(criteria, **overrides)
 
-    outcome = run_scan_wide(criteria, limit=limit, max_deep=max_deep)
+    outcome = run_scan_wide(criteria, limit=limit, max_deep=max_deep, max_universe=max_universe)
     return {
         "preset": preset or None,
         "criteria": asdict(criteria),

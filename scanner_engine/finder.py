@@ -670,6 +670,14 @@ def _evaluate_wide(symbol: str, criteria: FinderCriteria, df: pd.DataFrame) -> d
     passed = sum(1 for v in checks.values() if v)
     failed = len(checks) - passed
 
+    # Same consolidation-derived levels as the fast path. The wide path has no
+    # RangeCompression row to read bounds from, so use the rolling window it
+    # already computed for the breakout check — recent_high is the same
+    # boundary, and the matching low completes the range.
+    prior_low_window = df["low"].iloc[-(RANGE_SHORT + 1):-1]
+    recent_low = float(prior_low_window.min()) if not prior_low_window.empty else None
+    levels = trade_levels(recent_high, recent_low, price)
+
     return {
         "symbol": symbol,
         "price": price,
@@ -677,6 +685,7 @@ def _evaluate_wide(symbol: str, criteria: FinderCriteria, df: pd.DataFrame) -> d
         "checks": checks,
         "passed": passed,
         "failed": failed,
+        **levels,
         "ma50": ma50,
         "ma200": ma200,
         "avg_volume_20": avg_volume_20,
@@ -750,6 +759,7 @@ def scan_wide(
     limit: int = 100,
     max_deep: int = 400,
     universe: list[str] | None = None,
+    max_universe: int = 3000,
 ) -> dict:
     """
     Live, wide-universe screen — does NOT depend on the precomputed
@@ -785,6 +795,21 @@ def scan_wide(
         universe = _get_all_exchange_tickers()
     universe = list(universe)
 
+    # Cap the interactive sweep. The full US listing is ~13,786 tickers and
+    # stage 1 downloads roughly 300 per 4.5s, so an uncapped scan takes ~5
+    # minutes — long past the point a browser fetch gives up and far past the
+    # point anyone waits after a click. Worse, sweeping the whole listing
+    # back-to-back gets the host rate-limited by Yahoo, after which EVERY
+    # symbol returns empty and the screen looks broken rather than slow.
+    #
+    # The cap costs coverage, so it is reported in stats rather than hidden:
+    # universe_size is what was actually screened, universe_available is what
+    # existed. Pass max_universe=0 for the full sweep when a slow, complete
+    # run is genuinely wanted (a scheduled job rather than a click).
+    universe_available = len(universe)
+    if max_universe and universe_available > max_universe:
+        universe = universe[:max_universe]
+
     if criteria.min_confluence > 0:
         logger.warning(
             "scan_wide: min_confluence=%.1f requested but confluence is skipped in wide-scan "
@@ -809,6 +834,11 @@ def scan_wide(
 
     stats = {
         "universe_size": len(universe),
+        # What existed vs what was screened. If these differ the scan was
+        # capped, and the caller should say so rather than implying full
+        # market coverage.
+        "universe_available": universe_available,
+        "universe_capped": len(universe) < universe_available,
         "stage1_survivors": len(stage1_survivors),
         "deep_analyzed": len(deep_candidates),
         "matched": len(results),

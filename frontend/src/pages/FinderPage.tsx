@@ -50,6 +50,16 @@ interface FinderScanResult {
   gap_max_pct: number
   breakout_strength: number | null
   confluence: number | null
+  // Trade levels derived from the matched consolidation. Null when there was
+  // no consolidation to measure from — the backend does not invent them.
+  entry: number | null
+  stop: number | null
+  target: number | null
+  risk_reward: number | null
+  range_high: number | null
+  range_low: number | null
+  range_mid: number | null
+  distance_to_entry_pct: number | null
 }
 
 interface FinderScanResponse {
@@ -191,6 +201,8 @@ interface Row {
   stop: number | null
   target: number | null
   riskReward: number | null
+  /** % price must move to reach entry. Negative means it is already through. */
+  distanceToEntryPct: number | null
   positionSize: number | null
   compressionScore: number | null
   compressionDuration: number | null
@@ -209,10 +221,14 @@ function rowFromFinderResult(r: FinderScanResult, note: string | null = null): R
     symbol: r.symbol,
     price: r.price,
     trendUp: r.ma50 != null && r.ma200 != null ? r.ma50 >= r.ma200 : null,
-    entry: null,
-    stop: null,
-    target: null,
-    riskReward: null,
+    // Derived from the consolidation the screener matched on: entry at the
+    // range high, stop at the low, target a range-height above. Absent only
+    // when there is no consolidation to measure from — never invented.
+    entry: r.entry ?? null,
+    stop: r.stop ?? null,
+    target: r.target ?? null,
+    riskReward: r.risk_reward ?? null,
+    distanceToEntryPct: r.distance_to_entry_pct ?? null,
     positionSize: null,
     compressionScore: r.compression_score,
     compressionDuration: r.compression_duration,
@@ -237,6 +253,9 @@ function rowFromCryptoRec(rec: CryptoTradeRec): Row {
     stop: actionable ? rec.stop : null,
     target: actionable ? rec.target : null,
     riskReward: actionable ? rec.risk_reward : null,
+    // Crypto recommendations quote entry at the current price, so there is no
+    // gap to the trigger to report.
+    distanceToEntryPct: null,
     positionSize: actionable ? rec.position_size : null,
     compressionScore: null,
     compressionDuration: null,

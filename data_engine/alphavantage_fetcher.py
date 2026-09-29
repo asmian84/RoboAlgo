@@ -93,10 +93,19 @@ def fetch_active_listing() -> list[dict]:
         r = requests.get(url, timeout=30)
         r.raise_for_status()
         from io import StringIO
-        df = pd.read_csv(StringIO(r.text))
+        # keep_default_na=False is load-bearing, not a style choice. Several
+        # real tickers are strings pandas treats as null by default — "NA"
+        # (Nano Labs), "NAN", "NULL". Parsed as NaN they poison every
+        # downstream consumer that expects a string: callers doing
+        # `"." not in row["symbol"]` raise TypeError on a float, and a single
+        # such row was enough to make the whole 14k-symbol universe fetch fail
+        # and silently fall back to a 361-ticker hardcoded list.
+        df = pd.read_csv(StringIO(r.text), keep_default_na=False, na_values=[""])
         df.columns = [c.strip() for c in df.columns]
-        active = df[df.get("status", pd.Series(dtype=str)).str.lower() == "active"]
-        return active.to_dict("records")
+        active = df[df.get("status", pd.Series(dtype=str)).astype(str).str.lower() == "active"]
+        records = active.to_dict("records")
+        # Belt and braces: never hand a caller a non-string symbol.
+        return [r for r in records if isinstance(r.get("symbol"), str) and r["symbol"].strip()]
     except Exception as exc:
         logger.warning("fetch_active_listing failed: %s", exc)
         return []

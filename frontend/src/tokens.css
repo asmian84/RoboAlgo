@@ -1,0 +1,116 @@
+/* Hallmark · macrostructure: Workbench · genre: modern-minimal · tone: utilitarian
+ * anchor hue: cool-neutral · accent: single amber · studied: no
+ *
+ * Why this file exists: the app had five custom properties and a three-colour
+ * Tailwind extend. With no scale to sit on, every component invented its own
+ * sizes and colours inline — which is precisely why everything ended up at the
+ * same visual weight and nothing could recede.
+ *
+ * Three rules this system enforces:
+ *
+ *   1. SIZE carries importance. Not colour, not borders. A symbol is large; the
+ *      number that matters is large; everything supporting it is small and grey.
+ *   2. COLOUR carries meaning, never decoration. Green and red mean direction —
+ *      price up, price down — and nothing else. One amber accent marks the
+ *      interactive/active state. Everything else is greyscale.
+ *   3. SURFACES recede by elevation, not by outline. A border on every box means
+ *      no box stands out. Raise a panel with background, not a rule.
+ */
+
+:root {
+  /* ── Surface ─────────────────────────────────────────────────────────────
+     Four steps of elevation. Panels lift off the page by getting lighter,
+     not by acquiring a border. Only --line-strong is ever a visible divider,
+     and it is reserved for genuine section breaks. */
+  --bg-base:      oklch(17% 0.012 260);   /* page */
+  --bg-panel:     oklch(21% 0.013 260);   /* card / panel */
+  --bg-raised:    oklch(25% 0.014 260);   /* hover, active row, input */
+  --bg-overlay:   oklch(29% 0.015 260);   /* menu, popover */
+
+  --line-subtle:  oklch(28% 0.012 260);   /* hairline, use sparingly */
+  --line-strong:  oklch(36% 0.014 260);   /* real section divider */
+
+  /* ── Text ────────────────────────────────────────────────────────────────
+     Three levels only. If you reach for a fourth, the hierarchy is wrong. */
+  --text-primary:   oklch(96% 0.004 260); /* the number you came to read */
+  --text-secondary: oklch(74% 0.008 260); /* labels, supporting values */
+  --text-muted:     oklch(56% 0.010 260); /* units, timestamps, hints */
+
+  /* ── Direction ───────────────────────────────────────────────────────────
+     ONLY for price/P&L direction. Never for "good UI state", never for a
+     passing check, never for a button. Misusing these is what made four
+     different greens appear on one screen. */
+  --up:       oklch(72% 0.17 150);
+  --up-dim:   oklch(48% 0.09 150);
+  --down:     oklch(66% 0.20 25);
+  --down-dim: oklch(45% 0.11 25);
+
+  /* ── Accent ──────────────────────────────────────────────────────────────
+     Exactly one. Marks the active nav item, focus rings, and the primary
+     action. Amber rather than green so it can never be confused with
+     direction. */
+  --accent:      oklch(78% 0.15 75);
+  --accent-dim:  oklch(52% 0.10 75);
+  --accent-fg:   oklch(18% 0.02 75);
+
+  /* ── Type ────────────────────────────────────────────────────────────────
+     One family, two roles. Numbers use tabular figures so columns of prices
+     align on the decimal — the single highest-value typographic choice in a
+     financial UI, and it was missing entirely. */
+  --font-ui:   ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-num:  ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  /* Scale. Note the jump from -sm to -lg: hierarchy needs gaps, not a smooth
+     ramp. The old UI put everything at 10-12px, which is why it read flat. */
+  --text-xs:   0.6875rem;  /* 11px — units, timestamps */
+  --text-sm:   0.8125rem;  /* 13px — labels, table body */
+  --text-base: 0.9375rem;  /* 15px — default */
+  --text-lg:   1.125rem;   /* 18px — symbol, section head */
+  --text-xl:   1.5rem;     /* 24px — the headline number */
+  --text-2xl:  2rem;       /* 32px — account equity */
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-bold:   650;
+
+  /* ── Space · 4pt ─────────────────────────────────────────────────────── */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* ── Motion ──────────────────────────────────────────────────────────── */
+  --ease-out:    cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in:     cubic-bezier(0.64, 0, 0.78, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast:   120ms;
+  --dur-base:   200ms;
+}
+
+/* Tabular figures everywhere a number lives. Without this, a column of prices
+   jitters as digits change width and the eye cannot scan down it. */
+.num {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Focus must be instant and visible — never animated in. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

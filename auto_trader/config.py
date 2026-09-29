@@ -41,7 +41,7 @@ class AutoTraderConfig:
     enabled: bool = False              # master on/off
     mode: str = "paper"                # "paper" | "live"
     live_confirmed: bool = False       # half of the live gate
-    broker: str = "alpaca"
+    broker: str = "paper"
     asset_class: str = "equity"        # "equity" | "crypto"
     profile: str = "SWING"
     symbols: list[str] = field(default_factory=list)  # empty -> scanner default universe

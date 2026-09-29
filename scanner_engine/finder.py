@@ -170,6 +170,10 @@ def _load_recent_compressions(session, n: int) -> dict[int, list]:
         RangeCompression.instrument_id, RangeCompression.date,
         RangeCompression.is_compressed, RangeCompression.compression_score,
         RangeCompression.compression_duration,
+        # The consolidation bounds ARE the trade: entry at the high, stop at
+        # the low, target a range-height above. Without these columns the
+        # screener can only say "interesting" and never "here is the trade".
+        RangeCompression.range_high, RangeCompression.range_low,
     ]
     return _last_n_rows(session, RangeCompression, n, cols)
 
@@ -180,6 +184,64 @@ def _load_recent_breakouts(session, n: int) -> dict[int, list]:
         BreakoutSignal.breakout_strength, BreakoutSignal.triggers_met,
     ]
     return _last_n_rows(session, BreakoutSignal, n, cols)
+
+
+# ── Trade levels ──────────────────────────────────────────────────────────────
+
+def trade_levels(range_high, range_low, price) -> dict:
+    """Derive entry / stop / target from the consolidation the screener matched.
+
+    A screener that only returns "this looks interesting" leaves the actual
+    decision unmade. For a consolidation-breakout — which is exactly the setup
+    these presets select for — the structure already defines the trade:
+
+        entry   the top of the range. You are buying the break, not the range.
+        stop    the bottom of the range. Below it the consolidation has failed
+                and the reason for the trade no longer exists.
+        target  one range-height above entry — the measured move, the standard
+                projection for a range break.
+
+    Honest note on risk_reward: with a full-range stop this is ~1.0 by
+    construction, because risk and reward are both one range height. That is
+    the arithmetic, not a flattering number — a trader wanting better than 1:1
+    tightens the stop (range_mid is the usual choice, which doubles it), and
+    that is their call to make, not something to bake in so the screen looks
+    better than it is. range_mid is returned so the UI can offer it.
+
+    Returns all-None when there is no consolidation to measure from, rather
+    than inventing levels off a price alone.
+    """
+    try:
+        rh = float(range_high) if range_high is not None else None
+        rl = float(range_low) if range_low is not None else None
+        px = float(price) if price is not None else None
+    except (TypeError, ValueError):
+        rh = rl = px = None
+
+    if rh is None or rl is None or rh <= rl:
+        return {
+            "entry": None, "stop": None, "target": None, "risk_reward": None,
+            "range_high": None, "range_low": None, "range_mid": None,
+        }
+
+    height = rh - rl
+    entry = rh
+    stop = rl
+    target = rh + height
+    risk = entry - stop
+    rr = round((target - entry) / risk, 2) if risk > 0 else None
+
+    return {
+        "entry": round(entry, 4),
+        "stop": round(stop, 4),
+        "target": round(target, 4),
+        "risk_reward": rr,
+        "range_high": round(rh, 4),
+        "range_low": round(rl, 4),
+        "range_mid": round((rh + rl) / 2, 4),
+        # How far price sits below the trigger — 0 means it is breaking out now.
+        "distance_to_entry_pct": round((entry - px) / px * 100, 2) if px else None,
+    }
 
 
 # ── Per-candidate evaluation ──────────────────────────────────────────────────
@@ -282,6 +344,12 @@ def _evaluate(symbol: str, criteria: FinderCriteria, prices: list, indicator, co
     passed = sum(1 for v in checks.values() if v)
     failed = len(checks) - passed
 
+    levels = trade_levels(
+        getattr(driver, "range_high", None) if compression_score is not None else None,
+        getattr(driver, "range_low", None) if compression_score is not None else None,
+        price,
+    )
+
     return {
         "symbol": symbol,
         "price": price,
@@ -297,6 +365,7 @@ def _evaluate(symbol: str, criteria: FinderCriteria, prices: list, indicator, co
         "gap_max_pct": gap_max_pct,
         "breakout_strength": breakout_strength,
         "confluence": confluence,
+        **levels,
     }
 
 

@@ -3,7 +3,7 @@ RoboAlgo — Broker Factory
 Returns the configured broker adapter instance.
 
 Configuration:
-  Set BROKER env var to: "alpaca" | "ibkr" | "questrade"
+  Set BROKER env var to: "paper" | "alpaca" | "ibkr" | "questrade"
   Default: "alpaca"
 
 Usage:
@@ -23,7 +23,7 @@ from broker_engine.base import BrokerBase
 
 logger = logging.getLogger(__name__)
 
-_SUPPORTED_BROKERS = ("alpaca", "ibkr", "questrade")
+_SUPPORTED_BROKERS = ("paper", "alpaca", "ibkr", "questrade")
 
 
 def get_broker(broker_name: str | None = None) -> BrokerBase:
@@ -44,7 +44,13 @@ def get_broker(broker_name: str | None = None) -> BrokerBase:
     """
     name = (broker_name or os.getenv("BROKER", "alpaca")).lower().strip()
 
-    if name == "alpaca":
+    if name == "paper":
+        from broker_engine.paper import PaperBroker
+        broker = PaperBroker()
+        logger.info("Broker: Paper (local simulated, zero credentials)")
+        return broker
+
+    elif name == "alpaca":
         from broker_engine.alpaca import AlpacaBroker
         broker = AlpacaBroker()
         logger.info(f"Broker: Alpaca ({'paper' if broker.is_paper else 'live'})")

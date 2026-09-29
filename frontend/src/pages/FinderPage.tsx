@@ -1,93 +1,314 @@
-import { useEffect, useState } from 'react'
+// frontend/src/pages/FinderPage.tsx
+//
+// FINDER — the single scanner. Penny stocks, small caps, ETF long/short pairs,
+// breakout/momentum signals, and crypto used to be four separate pages (EDGE,
+// SIGNALS, TRADES, CRYPTO) plus this one. They are now presets on one screen:
+// pick a preset, hit scan, see symbol/price/direction/trade-levels, click a
+// row to open the chart. The user never has to know "fast DB scan" vs "live
+// full-market scan" is two different backend paths — this page decides that
+// per preset.
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 
-// ── Types ─────────────────────────────────────────────────────────────────
+const KLineChartOverlay = lazy(() => import('../components/chart/KLineChartOverlay'))
 
-interface FinderCriteria {
-  min_price?: number
-  max_price?: number
-  min_volume?: number
-  require_golden_cross?: boolean
-  require_consolidation?: boolean
-  max_gap_pct?: number
-  gap_lookback?: number
-  min_confluence?: number
-  require_breakout_ready?: boolean
-  consolidation_lookback?: number
-  min_compression_score?: number
+// ── Backend shapes ───────────────────────────────────────────────────────────
+// Verified by reading api/routers/finder.py, scanner_engine/finder.py, and
+// api/routers/crypto_signals.py directly (no live backend was reachable from
+// this environment — see worker report). Two shape bugs in the previous
+// version of this page were caught this way and are fixed here:
+//   1. /api/finder/presets returns a bare dict keyed by preset id
+//      ({signal: {...}, pennyking: {...}, maker: {...}}), not {presets: [...]}.
+//   2. /api/finder/health returns a bare dict keyed by table name
+//      ({price_data: {...}, indicators: {...}, ...}), not {tables: [...]}.
+//      There is also no `stale` field — staleness has to be derived from
+//      latest_date / instruments_current / instruments_total.
+
+interface FinderChecks {
+  // Each key is present only if the backend actually evaluated it — e.g.
+  // `breakout_ready` and `confluence` are omitted entirely (not `null`)
+  // unless the preset's criteria asked for them. Missing key = not evaluated.
+  price_band?: boolean
+  liquidity?: boolean
+  golden_cross?: boolean
+  consolidating?: boolean
+  no_gaps?: boolean
+  breakout_ready?: boolean
+  confluence?: boolean
 }
 
-interface PresetInfo {
-  id: string
-  label: string
-  description: string
-  criteria: FinderCriteria
-}
-
-interface Checks {
-  price_band: boolean
-  liquidity: boolean
-  golden_cross: boolean
-  consolidating: boolean
-  no_gaps: boolean
-  breakout_ready: boolean | null
-  confluence: boolean | null
-}
-
-interface ScanResult {
+interface FinderScanResult {
   symbol: string
   price: number
   volume: number
-  checks: Checks
+  checks: FinderChecks
   passed: number
   failed: number
-  ma50: number
-  ma200: number
-  compression_score: number
-  compression_duration: number
+  ma50: number | null
+  ma200: number | null
+  compression_score: number | null
+  compression_duration: number | null
   gap_max_pct: number
   breakout_strength: number | null
   confluence: number | null
 }
 
-interface ScanResponse {
-  results: ScanResult[]
+interface FinderScanResponse {
   count: number
-  criteria: FinderCriteria
-  elapsed: number
+  results: FinderScanResult[]
+  stats?: {
+    universe_size: number
+    stage1_survivors: number
+    deep_analyzed: number
+    matched: number
+    elapsed_seconds: number
+    failed_downloads: number
+  }
 }
 
-interface HealthTable {
-  table: string
+interface FinderHealthTable {
   latest_date: string | null
-  current_count: number
-  total_count: number
-  stale?: boolean
+  instruments_current: number
+  instruments_total: number
+}
+type FinderHealth = Record<string, FinderHealthTable>
+
+interface CryptoTradeRec {
+  symbol: string
+  verdict: string        // BUY | SELL | HOLD | NO_TRADE
+  direction: string       // LONG | SHORT | NO_TRADE
+  score: number
+  entry: number
+  stop: number
+  target: number
+  risk_reward: number
+  position_size: number
+  rejection_reason?: string
 }
 
-interface HealthResponse {
-  tables: HealthTable[]
+interface CryptoScanResponse {
+  error?: string
+  symbols_scanned?: number
+  recommendations?: CryptoTradeRec[]
 }
 
-const API = '/api/finder'
+// ── Leveraged ETF pairs ──────────────────────────────────────────────────────
+// There is no backend endpoint for "ETFs long/short on an underlying" — per
+// the task, this is transcribed from config/settings.py LEVERAGED_ETF_PAIRS
+// (INDEX_LEVERAGED + SECTOR_LEVERAGED + COMMODITY_LEVERAGED +
+// SINGLE_STOCK_LEVERAGED). Keep in sync manually if settings.py changes.
 
-const PRESET_LABELS: Record<string, string> = {
-  signal:    'SIGNAL FINDER',
-  pennyking: 'PENNYKING',
-  maker:     'MILLIONAIRE MAKER',
+interface EtfPair {
+  bull: string
+  bear: string | null
+  description: string
+  underlying: string | null
 }
 
-// ── Small presentational helpers ────────────────────────────────────────────
+const ETF_PAIRS: EtfPair[] = [
+  // ── Index ──
+  { bull: 'TQQQ', bear: 'SQQQ', description: 'NASDAQ-100 3x', underlying: 'QQQ' },
+  { bull: 'UPRO', bear: 'SPXU', description: 'S&P 500 3x', underlying: 'SPY' },
+  { bull: 'SSO', bear: 'SDS', description: 'S&P 500 2x', underlying: 'SPY' },
+  { bull: 'UDOW', bear: 'SDOW', description: 'Dow Jones 3x', underlying: 'SPY' },
+  { bull: 'TNA', bear: 'TZA', description: 'Russell 2000 3x', underlying: 'IWM' },
+  { bull: 'WANT', bear: null, description: 'Consumer Disc 3x', underlying: 'XLY' },
+  // ── Sector ──
+  { bull: 'SOXL', bear: 'SOXS', description: 'Semiconductor 3x', underlying: 'SOXX' },
+  { bull: 'FAS', bear: 'FAZ', description: 'Financial 3x', underlying: 'JPM' },
+  { bull: 'TECL', bear: 'TECS', description: 'Technology 3x', underlying: 'QQQ' },
+  { bull: 'CURE', bear: null, description: 'Healthcare 3x', underlying: 'XLV' },
+  { bull: 'DFEN', bear: null, description: 'Aerospace & Defense 3x', underlying: 'ITA' },
+  { bull: 'MIDU', bear: null, description: 'Mid-Cap 3x', underlying: 'MDY' },
+  { bull: 'LABU', bear: 'LABD', description: 'Biotech 3x', underlying: 'XBI' },
+  { bull: 'NAIL', bear: null, description: 'Homebuilders 3x', underlying: 'ITB' },
+  { bull: 'WEBL', bear: 'WEBS', description: 'Online Retail 3x', underlying: 'FDN' },
+  { bull: 'RETL', bear: null, description: 'Retail 3x', underlying: 'XRT' },
+  // ── Commodity ──
+  { bull: 'GUSH', bear: 'DRIP', description: 'Oil & Gas E&P 2x', underlying: null },
+  { bull: 'BOIL', bear: 'KOLD', description: 'Natural Gas 2x', underlying: null },
+  { bull: 'UGL', bear: 'GLL', description: 'Gold 2x', underlying: null },
+  { bull: 'UCO', bear: 'SCO', description: 'Crude Oil 2x', underlying: null },
+  { bull: 'AGQ', bear: 'ZSL', description: 'Silver 2x', underlying: null },
+  // ── Single-stock ──
+  { bull: 'MSTU', bear: 'MSTZ', description: 'MicroStrategy 2x', underlying: 'MSTR' },
+  { bull: 'NVDL', bear: 'NVDS', description: 'NVIDIA 2x', underlying: 'NVDA' },
+  { bull: 'NVDU', bear: 'NVD', description: 'NVIDIA 2x', underlying: 'NVDA' },
+  { bull: 'TSLL', bear: 'TSLQ', description: 'Tesla 2x', underlying: 'TSLA' },
+  { bull: 'AAPU', bear: 'AAPD', description: 'Apple 2x', underlying: 'AAPL' },
+  { bull: 'AMZU', bear: 'AMZD', description: 'Amazon 2x', underlying: 'AMZN' },
+  { bull: 'METU', bear: 'METD', description: 'Meta 2x', underlying: 'META' },
+  { bull: 'GGLL', bear: 'GGLS', description: 'Google 2x', underlying: 'GOOGL' },
+  { bull: 'MSFU', bear: 'MSFD', description: 'Microsoft 2x', underlying: 'MSFT' },
+  { bull: 'AMDL', bear: 'AMDD', description: 'AMD 2x', underlying: 'AMD' },
+  { bull: 'PLTU', bear: 'PLTZ', description: 'Palantir 2x', underlying: 'PLTR' },
+  { bull: 'MUU', bear: 'MULL', description: 'Micron 2x', underlying: 'MU' },
+  { bull: 'SMCX', bear: 'SMST', description: 'Super Micro 2x', underlying: 'SMCI' },
+  { bull: 'IONX', bear: 'IONL', description: 'IonQ 2x', underlying: 'IONQ' },
+  { bull: 'AVGX', bear: 'AVL', description: 'Broadcom 2x', underlying: 'AVGO' },
+  { bull: 'ORCX', bear: null, description: 'Oracle 2x', underlying: 'ORCL' },
+  { bull: 'MSFL', bear: null, description: 'Microsoft 2x', underlying: 'MSFT' },
+  { bull: 'AMDG', bear: null, description: 'AMD 2x', underlying: 'AMD' },
+  { bull: 'NFXL', bear: null, description: 'Netflix 2x', underlying: 'NFLX' },
+  { bull: 'CONL', bear: null, description: 'Coinbase 2x', underlying: 'COIN' },
+  { bull: 'MRAL', bear: null, description: 'Marathon Digital 2x', underlying: 'MARA' },
+  { bull: 'BRKU', bear: null, description: 'Berkshire B 2x', underlying: 'BRK-B' },
+  { bull: 'BABX', bear: null, description: 'Alibaba 2x', underlying: 'BABA' },
+  { bull: 'RDTL', bear: null, description: 'Reddit 2x', underlying: 'RDDT' },
+  { bull: 'TSMU', bear: 'TSMG', description: 'TSMC 2x', underlying: 'TSM' },
+  { bull: 'CRWL', bear: null, description: 'CrowdStrike 2x', underlying: 'CRWD' },
+  { bull: 'SOFX', bear: null, description: 'SoFi 2x', underlying: 'SOFI' },
+  { bull: 'RKLX', bear: null, description: 'Rocket Lab 2x', underlying: 'RKLB' },
+  { bull: 'UBRL', bear: null, description: 'Uber 2x', underlying: 'UBER' },
+  { bull: 'DLLL', bear: null, description: 'Dell 2x', underlying: 'DELL' },
+  { bull: 'NOWL', bear: null, description: 'ServiceNow 2x', underlying: 'NOW' },
+  { bull: 'CRMG', bear: null, description: 'Salesforce 2x', underlying: 'CRM' },
+  { bull: 'ARMG', bear: null, description: 'ARM Holdings 2x', underlying: 'ARM' },
+  { bull: 'ADBG', bear: null, description: 'Adobe 2x', underlying: 'ADBE' },
+  { bull: 'LLYX', bear: null, description: 'Eli Lilly 2x', underlying: 'LLY' },
+  { bull: 'PYPG', bear: null, description: 'PayPal 2x', underlying: 'PYPL' },
+  { bull: 'INTW', bear: null, description: 'Intel 2x', underlying: 'INTC' },
+  { bull: 'ROBN', bear: 'HOOG', description: 'Hood 2x', underlying: 'HOOD' },
+  { bull: 'SMCY', bear: null, description: 'YieldMax SMCI Strategy', underlying: 'SMCI' },
+  { bull: 'SQQU', bear: null, description: 'Block (SQ) 2x', underlying: 'SQ' },
+  { bull: 'AFRX', bear: null, description: 'Affirm 2x', underlying: 'AFRM' },
+  { bull: 'QQQX', bear: null, description: 'Qualcomm 2x', underlying: 'QCOM' },
+]
 
-function priceBand(c: FinderCriteria): string {
-  const lo = c.min_price
-  const hi = c.max_price
-  if (lo == null && hi == null) return 'any price'
-  if (lo == null) return `under $${hi}`
-  if (hi == null) return `$${lo}+`
-  return `$${lo}–${hi}`
+const ETF_SYMBOL_INFO = new Map<string, { pair: EtfPair; side: 'bull' | 'bear' }>()
+for (const pair of ETF_PAIRS) {
+  ETF_SYMBOL_INFO.set(pair.bull, { pair, side: 'bull' })
+  if (pair.bear) ETF_SYMBOL_INFO.set(pair.bear, { pair, side: 'bear' })
 }
 
-function fmtNum(n: number | null | undefined, digits = 2): string {
+// ── Unified row — one shape for both finder-scan and crypto-scan results, so
+// there is a single row renderer regardless of which preset produced it. ────
+
+interface Row {
+  symbol: string
+  price: number | null
+  trendUp: boolean | null           // true = bullish trend, false = bearish, null = unknown
+  entry: number | null
+  stop: number | null
+  target: number | null
+  riskReward: number | null
+  positionSize: number | null
+  compressionScore: number | null
+  compressionDuration: number | null
+  ma50: number | null
+  ma200: number | null
+  gapMaxPct: number | null
+  volume: number | null
+  checks: FinderChecks | null
+  passed: number | null
+  failed: number | null
+  note: string | null               // pair relationship, rejection reason, etc — muted supporting text
+}
+
+function rowFromFinderResult(r: FinderScanResult, note: string | null = null): Row {
+  return {
+    symbol: r.symbol,
+    price: r.price,
+    trendUp: r.ma50 != null && r.ma200 != null ? r.ma50 >= r.ma200 : null,
+    entry: null,
+    stop: null,
+    target: null,
+    riskReward: null,
+    positionSize: null,
+    compressionScore: r.compression_score,
+    compressionDuration: r.compression_duration,
+    ma50: r.ma50,
+    ma200: r.ma200,
+    gapMaxPct: r.gap_max_pct,
+    volume: r.volume,
+    checks: r.checks,
+    passed: r.passed,
+    failed: r.failed,
+    note,
+  }
+}
+
+function rowFromCryptoRec(rec: CryptoTradeRec): Row {
+  const actionable = rec.verdict === 'BUY' || rec.verdict === 'SELL'
+  return {
+    symbol: rec.symbol,
+    price: actionable ? rec.entry : null,
+    trendUp: rec.direction === 'LONG' ? true : rec.direction === 'SHORT' ? false : null,
+    entry: actionable ? rec.entry : null,
+    stop: actionable ? rec.stop : null,
+    target: actionable ? rec.target : null,
+    riskReward: actionable ? rec.risk_reward : null,
+    positionSize: actionable ? rec.position_size : null,
+    compressionScore: null,
+    compressionDuration: null,
+    ma50: null,
+    ma200: null,
+    gapMaxPct: null,
+    volume: null,
+    checks: null,
+    passed: null,
+    failed: null,
+    note: !actionable ? (rec.rejection_reason || rec.verdict) : null,
+  }
+}
+
+// ── Presets — plain language, not backend jargon ────────────────────────────
+// Each preset owns which scan path it needs; the user only ever sees "scan".
+
+type ScanMode = 'fast' | 'wide' | 'etf' | 'crypto'
+
+interface UiPreset {
+  id: string
+  label: string
+  hint: string
+  mode: ScanMode
+  backendPreset?: string   // signal | pennyking | maker
+}
+
+const UI_PRESETS: UiPreset[] = [
+  {
+    id: 'penny',
+    label: 'Penny stocks',
+    hint: 'Under $5, with real liquidity',
+    mode: 'wide',
+    backendPreset: 'pennyking',
+  },
+  {
+    id: 'small',
+    label: 'Small caps',
+    hint: '$5–20 band',
+    mode: 'wide',
+    backendPreset: 'maker',
+  },
+  {
+    id: 'etf',
+    label: 'ETFs — long / short',
+    hint: 'Leveraged bull/bear pairs on an underlying',
+    mode: 'etf',
+  },
+  {
+    id: 'breakout',
+    label: 'Breakout & momentum',
+    hint: 'Golden cross, consolidation, clean price action',
+    mode: 'fast',
+    backendPreset: 'signal',
+  },
+  {
+    id: 'crypto',
+    label: 'Crypto',
+    hint: 'Top crypto by market cap',
+    mode: 'crypto',
+  },
+]
+
+// ── Formatting helpers ──────────────────────────────────────────────────────
+
+function fmtPrice(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return '—'
+  const digits = n >= 1 ? 2 : n >= 0.01 ? 4 : 6
+  return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+}
+
+function fmtNum(n: number | null | undefined, digits = 1): string {
   if (n == null || Number.isNaN(n)) return '—'
   return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
 }
@@ -99,282 +320,374 @@ function fmtVolume(n: number | null | undefined): string {
   return String(n)
 }
 
-function CheckPill({ label, v }: { label: string; v: boolean | null }) {
-  const style = v === null
-    ? 'bg-gray-500/10 text-gray-600 border-gray-700/30'
-    : v
-      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-      : 'bg-red-500/15 text-red-400 border-red-500/30'
-  const mark = v === null ? '○' : v ? '✓' : '✕'
+function daysSince(dateStr: string): number {
+  return (Date.now() - new Date(dateStr + 'T00:00:00').getTime()) / 86_400_000
+}
+
+function isStaleTable(t: FinderHealthTable): boolean {
+  if (t.latest_date == null) return true
+  if (daysSince(t.latest_date) > 5) return true
+  if (t.instruments_total > 0 && t.instruments_current / t.instruments_total < 0.5) return true
+  return false
+}
+
+// ── Small presentational pieces ─────────────────────────────────────────────
+
+// Direction is PRICE/TREND direction only, per the design system — never used
+// for pass/fail. Bullish trend (ma50 >= ma200, or crypto LONG) = --up,
+// bearish = --down, unknown = dimmed dash (never colored).
+function TrendMark({ up }: { up: boolean | null }) {
+  if (up === null) {
+    return <span className="text-[color:var(--text-muted)]">–</span>
+  }
   return (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold tracking-wide ${style}`}>
-      {mark} {label}
+    <span className={up ? 'text-[color:var(--up)]' : 'text-[color:var(--down)]'}>
+      {up ? '▲' : '▼'}
     </span>
   )
 }
 
-const CHECK_LABELS: { key: keyof Checks; label: string }[] = [
-  { key: 'price_band',     label: 'PRICE' },
-  { key: 'liquidity',      label: 'LIQ' },
-  { key: 'golden_cross',   label: 'GLDN' },
-  { key: 'consolidating',  label: 'CONSOL' },
-  { key: 'no_gaps',        label: 'GAPS' },
-  { key: 'breakout_ready', label: 'BRKOUT' },
-  { key: 'confluence',     label: 'CONFL' },
+// Checks: passed and failed are both subtle (same weight) — colour never
+// encodes pass/fail, only the glyph does. Not-evaluated is dimmed further and
+// uses a dash, never red, so an unfilled criterion cannot read as "failed."
+function CheckMark({ v }: { v: boolean | undefined }) {
+  if (v === undefined) {
+    return <span className="text-[color:var(--text-muted)] opacity-50">–</span>
+  }
+  return <span className="text-[color:var(--text-secondary)]">{v ? '✓' : '✕'}</span>
+}
+
+const CHECK_DEFS: { key: keyof FinderChecks; label: string }[] = [
+  { key: 'price_band', label: 'Price band' },
+  { key: 'liquidity', label: 'Liquidity' },
+  { key: 'golden_cross', label: 'Golden cross' },
+  { key: 'consolidating', label: 'Consolidating' },
+  { key: 'no_gaps', label: 'No gaps' },
+  { key: 'breakout_ready', label: 'Breakout ready' },
+  { key: 'confluence', label: 'Confluence' },
 ]
 
-function NumberField({ label, value, onChange }: { label: string; value: number | undefined; onChange: (v: number | undefined) => void }) {
+function TradeStat({ label, value, tone, suffix }: { label: string; value: number | null; tone?: 'up' | 'down'; suffix?: string }) {
+  const color = tone === 'up' ? 'text-[color:var(--up)]' : tone === 'down' ? 'text-[color:var(--down)]' : 'text-[color:var(--text-primary)]'
   return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[9px] font-bold text-gray-500 tracking-wider uppercase">{label}</span>
-      <input
-        type="number"
-        value={value ?? ''}
-        onChange={e => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
-        className="px-2.5 py-1.5 bg-gray-800 border border-gray-700 rounded text-gray-200 text-xs font-mono focus:outline-none focus:border-emerald-600"
-      />
-    </label>
+    <div>
+      <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">{label}</div>
+      <div className={`num text-[length:var(--text-base)] font-[var(--weight-medium)] ${color}`}>
+        {value == null ? '—' : suffix ? `${value.toFixed(1)}${suffix}` : `$${fmtPrice(value)}`}
+      </div>
+    </div>
   )
 }
 
-function BoolField({ label, value, onChange }: { label: string; value: boolean | undefined; onChange: (v: boolean) => void }) {
-  return (
-    <label className="flex items-center gap-2 text-[11px] text-gray-400 select-none cursor-pointer mt-4">
-      <input
-        type="checkbox"
-        checked={!!value}
-        onChange={e => onChange(e.target.checked)}
-        className="accent-emerald-600"
-      />
-      {label}
-    </label>
-  )
-}
+// ── Result row ───────────────────────────────────────────────────────────────
 
-function Th({ label, onClick, align = 'left' }: { label: string; onClick?: () => void; align?: 'left' | 'right' }) {
+function ResultRow({ row, onOpenChart }: { row: Row; onOpenChart: (symbol: string) => void }) {
+  const [expanded, setExpanded] = useState(false)
+  const hasTrade = row.entry != null || row.stop != null || row.target != null
+  const hasChecks = row.checks != null && row.passed != null
+
   return (
-    <th
-      className={`px-3 py-2.5 font-medium ${align === 'right' ? 'text-right' : 'text-left'} ${onClick ? 'cursor-pointer hover:text-gray-300' : ''}`}
-      onClick={onClick}
+    <div
+      className="rounded-[var(--radius-lg)] bg-[color:var(--bg-panel)] hover:bg-[color:var(--bg-raised)] transition-colors cursor-pointer px-4 py-3"
+      onClick={() => onOpenChart(row.symbol)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenChart(row.symbol) } }}
+      aria-label={`Open ${row.symbol} chart`}
     >
-      {label}
-    </th>
+      {/* Header: symbol (large) + price + trend */}
+      <div className="flex items-baseline justify-between gap-4">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="num text-[length:var(--text-lg)] font-[var(--weight-bold)] text-[color:var(--text-primary)]">
+            {row.symbol}
+          </span>
+        </div>
+        <div className="flex items-baseline gap-2 shrink-0">
+          <span className="num text-[length:var(--text-xl)] text-[color:var(--text-primary)]">
+            {row.price == null ? '—' : `$${fmtPrice(row.price)}`}
+          </span>
+          <TrendMark up={row.trendUp} />
+        </div>
+      </div>
+
+      {row.note && (
+        <div className="mt-0.5 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">{row.note}</div>
+      )}
+
+      {/* THE TRADE — entry / stop / target / R:R, sized to be readable at a glance */}
+      {hasTrade ? (
+        <div className="mt-3 grid grid-cols-4 gap-3 max-w-md">
+          <TradeStat label="Entry" value={row.entry} />
+          <TradeStat label="Stop" value={row.stop} tone="down" />
+          <TradeStat label="Target" value={row.target} tone="up" />
+          <TradeStat label="R:R" value={row.riskReward} suffix=":1" />
+        </div>
+      ) : (
+        <div className="mt-2 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
+          No trade levels — screener match only
+        </div>
+      )}
+
+      {/* Supporting analysis — small and muted, never the focal point */}
+      {(row.compressionScore != null || row.ma50 != null || row.gapMaxPct != null || row.volume != null || hasChecks) && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
+          {row.compressionScore != null && (
+            <span>compression {fmtNum(row.compressionScore)}{row.compressionDuration != null ? ` / ${row.compressionDuration}d` : ''}</span>
+          )}
+          {row.ma50 != null && row.ma200 != null && (
+            <span className="num">MA50 {fmtNum(row.ma50, 2)} · MA200 {fmtNum(row.ma200, 2)}</span>
+          )}
+          {row.gapMaxPct != null && <span>max gap {fmtNum(row.gapMaxPct)}%</span>}
+          {row.volume != null && <span>vol {fmtVolume(row.volume)}</span>}
+          {hasChecks && (
+            <button
+              onClick={e => { e.stopPropagation(); setExpanded(x => !x) }}
+              className="text-[color:var(--text-muted)] hover:text-[color:var(--text-secondary)] transition-colors"
+            >
+              {expanded ? '▾' : '▸'} {row.passed}/{(row.passed ?? 0) + (row.failed ?? 0)} checks
+            </button>
+          )}
+        </div>
+      )}
+
+      {expanded && row.checks && (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[length:var(--text-xs)] text-[color:var(--text-secondary)]">
+          {CHECK_DEFS.map(c => (
+            <span key={c.key} className="inline-flex items-center gap-1">
+              <CheckMark v={row.checks?.[c.key]} /> {c.label}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Empty state ──────────────────────────────────────────────────────────────
+
+function EmptyState({ preset, staleTables, hasHealthInfo }: { preset: UiPreset; staleTables: [string, FinderHealthTable][]; hasHealthInfo: boolean }) {
+  let headline: string
+  let sub: string
+
+  if (preset.mode === 'crypto') {
+    headline = 'Scan ran, no crypto setups matched.'
+    sub = 'Crypto conditions move fast — try again shortly or with a different preset.'
+  } else if (staleTables.length > 0) {
+    headline = 'No current data, not "no matches."'
+    sub = `${staleTables.map(([name]) => name).join(', ')} ${staleTables.length === 1 ? 'is' : 'are'} stale — the scan ran against whatever data exists. Check the freshness banner above.`
+  } else if (hasHealthInfo) {
+    headline = 'Scan ran, nothing matched.'
+    sub = 'Underlying data is current — try a different preset.'
+  } else {
+    headline = 'Scan ran, nothing matched.'
+    sub = 'Freshness could not be confirmed — an empty result may also reflect stale data.'
+  }
+
+  return (
+    <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-panel)] p-8 text-center">
+      <p className="text-[length:var(--text-base)] text-[color:var(--text-secondary)]">{headline}</p>
+      <p className="mt-1 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">{sub}</p>
+    </div>
   )
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
 export default function FinderPage() {
-  const [presets, setPresets] = useState<PresetInfo[]>([])
-  const [activePreset, setActivePreset] = useState<string>('signal')
-  const [criteria, setCriteria] = useState<FinderCriteria>({})
-  const [panelOpen, setPanelOpen] = useState(false)
+  const [activePresetId, setActivePresetId] = useState<string>(UI_PRESETS[0].id)
+  const activePreset = UI_PRESETS.find(p => p.id === activePresetId) ?? UI_PRESETS[0]
 
-  const [health, setHealth] = useState<HealthTable[]>([])
-  const [healthError, setHealthError] = useState<string | null>(null)
-
-  const [results, setResults] = useState<ScanResult[] | null>(null)
-  const [scanMeta, setScanMeta] = useState<{ count: number; elapsed: number } | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [results, setResults] = useState<Row[] | null>(null)
+  const [scanMeta, setScanMeta] = useState<string | null>(null)
+  const [scanningMode, setScanningMode] = useState<ScanMode | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const [sortKey, setSortKey] = useState<keyof ScanResult | null>(null)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [health, setHealth] = useState<FinderHealth>({})
+  const [healthError, setHealthError] = useState<string | null>(null)
+
+  const [chartSymbol, setChartSymbol] = useState<string | null>(null)
+
+  // Guards against a stale response landing after a newer scan started.
+  const requestId = useRef(0)
 
   useEffect(() => {
-    fetch(`${API}/presets`)
+    fetch('/api/finder/health')
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
-      .then(d => {
-        const p: PresetInfo[] = d.presets ?? []
-        setPresets(p)
-        if (p.length) {
-          setActivePreset(p[0].id)
-          setCriteria(p[0].criteria ?? {})
-        }
-      })
-      .catch(err => setError(err instanceof Error ? err.message : String(err)))
-  }, [])
-
-  useEffect(() => {
-    fetch(`${API}/health`)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
-      .then((d: HealthResponse) => setHealth(d.tables ?? []))
+      .then((d: FinderHealth) => setHealth(d ?? {}))
       .catch(err => setHealthError(err instanceof Error ? err.message : String(err)))
   }, [])
 
-  function selectPreset(p: PresetInfo) {
-    setActivePreset(p.id)
-    setCriteria(p.criteria ?? {})
+  const staleTables = useMemo(
+    () => Object.entries(health).filter(([, t]) => isStaleTable(t)),
+    [health],
+  )
+  const hasHealthInfo = Object.keys(health).length > 0
+
+  async function runScan(preset: UiPreset) {
+    setActivePresetId(preset.id)
+    const myRequest = ++requestId.current
+    setScanningMode(preset.mode)
+    setError(null)
     setResults(null)
     setScanMeta(null)
-  }
 
-  async function runScan() {
-    setLoading(true); setError(null)
     try {
-      const params = new URLSearchParams()
-      params.set('preset', activePreset)
-      params.set('limit', '100')
-      Object.entries(criteria).forEach(([k, v]) => {
-        if (v !== undefined && v !== null && String(v) !== '') params.set(k, String(v))
-      })
-      const res = await fetch(`${API}/scan?${params.toString()}`)
+      if (preset.mode === 'crypto') {
+        const res = await fetch('/api/crypto-signals/scan?profile=SWING&account=10000&max_symbols=30')
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const d: CryptoScanResponse = await res.json()
+        if (d.error) throw new Error(d.error)
+        if (myRequest !== requestId.current) return
+        const recs = d.recommendations ?? []
+        setResults(recs.map(rowFromCryptoRec))
+        setScanMeta(`${d.symbols_scanned ?? recs.length} scanned`)
+        return
+      }
+
+      if (preset.mode === 'etf') {
+        // No dedicated endpoint — run the fast screener with the filters
+        // loosened (we want every tracked leveraged ETF, not just the ones
+        // currently golden-crossed/consolidating), then keep only symbols
+        // that appear in the leveraged-ETF pair table.
+        const params = new URLSearchParams({
+          limit: '500',
+          require_golden_cross: 'false',
+          require_consolidation: 'false',
+          min_volume: '0',
+          max_gap_pct: '100',
+        })
+        const res = await fetch(`/api/finder/scan?${params}`)
+        if (!res.ok) {
+          const body = await res.json().catch(() => null)
+          throw new Error(body?.detail ?? `HTTP ${res.status}`)
+        }
+        const d: FinderScanResponse = await res.json()
+        if (myRequest !== requestId.current) return
+        const rows = (d.results ?? [])
+          .filter(r => ETF_SYMBOL_INFO.has(r.symbol))
+          .map(r => {
+            const info = ETF_SYMBOL_INFO.get(r.symbol)!
+            const opposite = info.side === 'bull' ? info.pair.bear : info.pair.bull
+            const bias = info.side === 'bull' ? 'Long side' : 'Short side'
+            const underlyingNote = info.pair.underlying ? ` on ${info.pair.underlying}` : ''
+            const oppositeNote = opposite ? ` · opposite: ${opposite}` : ''
+            return rowFromFinderResult(r, `${bias} · ${info.pair.description}${underlyingNote}${oppositeNote}`)
+          })
+        setResults(rows)
+        setScanMeta(`${rows.length} of ${ETF_PAIRS.length} tracked pairs matched`)
+        return
+      }
+
+      // fast | wide — same shape, different endpoint + timing.
+      const endpoint = preset.mode === 'wide' ? '/api/finder/scan/wide' : '/api/finder/scan'
+      const params = new URLSearchParams({ preset: preset.backendPreset ?? '', limit: '150' })
+      if (preset.mode === 'wide') params.set('max_deep', '400')
+      const res = await fetch(`${endpoint}?${params}`)
       if (!res.ok) {
         const body = await res.json().catch(() => null)
         throw new Error(body?.detail ?? `HTTP ${res.status}`)
       }
-      const d: ScanResponse = await res.json()
-      setResults(d.results ?? [])
-      setScanMeta({ count: d.count ?? (d.results?.length ?? 0), elapsed: d.elapsed ?? 0 })
+      const d: FinderScanResponse = await res.json()
+      if (myRequest !== requestId.current) return
+      setResults((d.results ?? []).map(r => rowFromFinderResult(r)))
+      setScanMeta(
+        d.stats
+          ? `${d.count} matches · ${d.stats.deep_analyzed}/${d.stats.universe_size} analyzed · ${d.stats.elapsed_seconds}s`
+          : `${d.count} matches`,
+      )
     } catch (err) {
+      if (myRequest !== requestId.current) return
       setError(err instanceof Error ? err.message : String(err))
       setResults(null)
       setScanMeta(null)
     } finally {
-      setLoading(false)
+      if (myRequest === requestId.current) setScanningMode(null)
     }
   }
 
-  function updateCriterion<K extends keyof FinderCriteria>(key: K, value: FinderCriteria[K]) {
-    setCriteria(c => ({ ...c, [key]: value }))
-  }
-
-  function toggleSort(key: keyof ScanResult) {
-    if (sortKey === key) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSortKey(key); setSortDir('desc')
-    }
-  }
-
-  const sortedResults = (() => {
-    if (!results) return []
-    if (!sortKey) return results
-    const arr = [...results]
-    arr.sort((a, b) => {
-      const av = a[sortKey]; const bv = b[sortKey]
-      if (av == null && bv == null) return 0
-      if (av == null) return 1
-      if (bv == null) return -1
-      if (typeof av === 'number' && typeof bv === 'number') return sortDir === 'asc' ? av - bv : bv - av
-      return sortDir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
-    })
-    return arr
-  })()
-
-  const staleTables = health.filter(t => {
-    if (t.stale) return true
-    if (t.total_count > 0) return t.current_count / t.total_count < 0.9
-    return false
-  })
-  const hasAnyHealthInfo = health.length > 0
-  const activePresetInfo = presets.find(p => p.id === activePreset)
+  const isScanning = scanningMode !== null
+  const showHealthBanner = activePreset.mode !== 'crypto'
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="space-y-4">
       {/* Header */}
-      <div className="mb-1">
-        <h1 className="text-2xl font-bold text-white tracking-tight">FINDER</h1>
-        <p className="text-gray-500 text-xs mt-0.5">
-          Scan the universe against preset setups — pass/fail is shown per-check, not just a final score.
+      <div>
+        <h1 className="text-[length:var(--text-xl)] font-[var(--weight-bold)] text-[color:var(--text-primary)] tracking-tight">FINDER</h1>
+        <p className="mt-0.5 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
+          Pick what you're looking for. Symbol, price, and the trade — entry, stop, target — when there is one.
         </p>
       </div>
 
-      {/* Freshness banner */}
-      {staleTables.length > 0 && (
-        <div className="mt-4 border border-amber-600/40 bg-amber-500/10 rounded-lg p-3">
+      {/* Freshness banner — only meaningful for presets backed by the DB tables */}
+      {showHealthBanner && staleTables.length > 0 && (
+        <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-raised)] border border-[color:var(--line-strong)] p-3">
           <div className="flex items-start gap-2">
-            <span className="text-amber-500 text-sm">⚠</span>
-            <div className="flex-1">
-              <div className="text-amber-400 text-xs font-bold tracking-wider">DATA MAY BE STALE</div>
+            <span className="text-[color:var(--accent)] text-[length:var(--text-sm)]">⚠</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-[length:var(--text-xs)] font-[var(--weight-bold)] text-[color:var(--accent)] tracking-wide">
+                DATA MAY BE STALE
+              </div>
               <div className="mt-1 space-y-0.5">
-                {staleTables.map(t => (
-                  <div key={t.table} className="text-[11px] text-amber-500/80 font-mono">
-                    {t.table}: latest {t.latest_date ?? 'unknown'} · {t.current_count}/{t.total_count} instruments current
+                {staleTables.map(([name, t]) => (
+                  <div key={name} className="num text-[length:var(--text-xs)] text-[color:var(--text-secondary)]">
+                    {name}: latest {t.latest_date ?? 'unknown'} · {t.instruments_current}/{t.instruments_total} instruments current
                   </div>
                 ))}
               </div>
-              <p className="mt-1.5 text-[10px] text-amber-500/60">
+              <p className="mt-1.5 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
                 An empty result below may mean the underlying table has no current data — not that nothing matched.
               </p>
             </div>
           </div>
         </div>
       )}
-      {healthError && (
-        <div className="mt-4 text-[11px] text-gray-600">
+      {showHealthBanner && healthError && (
+        <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
           Freshness check unavailable ({healthError}) — results below cannot be cross-checked against data currency.
         </div>
       )}
 
-      {/* Preset tabs */}
-      <div className="flex flex-wrap gap-2 mt-4">
-        {presets.map(p => (
-          <button
-            key={p.id}
-            onClick={() => selectPreset(p)}
-            className={`px-4 py-2 rounded-lg text-left transition-colors ${
-              activePreset === p.id ? 'bg-emerald-600 text-white' : 'bg-gray-900 text-gray-400 hover:text-gray-200 border border-gray-800'
-            }`}
-          >
-            <div className="text-xs font-bold tracking-wide">{PRESET_LABELS[p.id] ?? p.label}</div>
-            <div className={`text-[10px] mt-0.5 ${activePreset === p.id ? 'text-emerald-100' : 'text-gray-600'}`}>
-              {priceBand(p.criteria)}
-            </div>
-          </button>
-        ))}
-        {presets.length === 0 && !error && (
-          <div className="text-[11px] text-gray-600">Loading presets…</div>
-        )}
+      {/* Preset picker — plain language */}
+      <div className="flex flex-wrap gap-2">
+        {UI_PRESETS.map(p => {
+          const active = activePresetId === p.id
+          return (
+            <button
+              key={p.id}
+              onClick={() => runScan(p)}
+              disabled={isScanning}
+              className={`text-left px-4 py-2.5 rounded-[var(--radius-lg)] transition-colors disabled:opacity-50 ${
+                active ? 'bg-[color:var(--bg-raised)]' : 'bg-[color:var(--bg-panel)] hover:bg-[color:var(--bg-raised)]'
+              }`}
+            >
+              <div className={`text-[length:var(--text-sm)] font-[var(--weight-bold)] ${active ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-primary)]'}`}>
+                {p.label}
+              </div>
+              <div className="mt-0.5 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">{p.hint}</div>
+            </button>
+          )
+        })}
       </div>
-      {activePresetInfo?.description && (
-        <p className="mt-2 text-[11px] text-gray-500">{activePresetInfo.description}</p>
+
+      {/* Scan status */}
+      {isScanning && (
+        <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-panel)] px-4 py-3 flex items-center gap-3">
+          <div className="w-4 h-4 border-2 border-[color:var(--line-strong)] border-t-[color:var(--accent)] rounded-full animate-spin shrink-0" />
+          <span className="text-[length:var(--text-sm)] text-[color:var(--text-secondary)]">
+            {scanningMode === 'wide'
+              ? 'Scanning the full market — live data over the whole US ticker universe. Usually 30–60 seconds.'
+              : scanningMode === 'crypto'
+                ? 'Scanning crypto markets…'
+                : 'Scanning…'}
+          </span>
+        </div>
+      )}
+      {!isScanning && scanMeta && !error && (
+        <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">{scanMeta}</div>
       )}
 
-      {/* Criteria panel */}
-      <div className="mt-4 border border-gray-800 rounded-lg bg-gray-900/60">
-        <button
-          onClick={() => setPanelOpen(o => !o)}
-          className="w-full flex items-center justify-between px-4 py-2.5 text-left"
-        >
-          <span className="text-[11px] font-bold text-gray-300 tracking-wider">CRITERIA</span>
-          <span className="text-gray-500 text-[10px]">{panelOpen ? '▾ hide' : '▸ show'}</span>
-        </button>
-
-        {panelOpen && (
-          <div className="px-4 pb-4 grid grid-cols-2 md:grid-cols-3 gap-3 border-t border-gray-800/60 pt-3">
-            <NumberField label="Min price" value={criteria.min_price} onChange={v => updateCriterion('min_price', v)} />
-            <NumberField label="Max price" value={criteria.max_price} onChange={v => updateCriterion('max_price', v)} />
-            <NumberField label="Min volume" value={criteria.min_volume} onChange={v => updateCriterion('min_volume', v)} />
-            <NumberField label="Max gap %" value={criteria.max_gap_pct} onChange={v => updateCriterion('max_gap_pct', v)} />
-            <NumberField label="Gap lookback" value={criteria.gap_lookback} onChange={v => updateCriterion('gap_lookback', v)} />
-            <NumberField label="Min confluence" value={criteria.min_confluence} onChange={v => updateCriterion('min_confluence', v)} />
-            <NumberField label="Consolidation lookback" value={criteria.consolidation_lookback} onChange={v => updateCriterion('consolidation_lookback', v)} />
-            <NumberField label="Min compression score" value={criteria.min_compression_score} onChange={v => updateCriterion('min_compression_score', v)} />
-            <BoolField label="Require golden cross" value={criteria.require_golden_cross} onChange={v => updateCriterion('require_golden_cross', v)} />
-            <BoolField label="Require consolidation" value={criteria.require_consolidation} onChange={v => updateCriterion('require_consolidation', v)} />
-            <BoolField label="Require breakout ready" value={criteria.require_breakout_ready} onChange={v => updateCriterion('require_breakout_ready', v)} />
-          </div>
-        )}
-
-        <div className="px-4 pb-4">
-          <button
-            onClick={runScan}
-            disabled={loading}
-            className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white rounded-lg text-xs font-bold tracking-wide transition-colors"
-          >
-            {loading ? 'SCANNING…' : 'RUN SCAN'}
-          </button>
-          {scanMeta && (
-            <span className="ml-3 text-[11px] text-gray-500">
-              {scanMeta.count} matches · {scanMeta.elapsed.toFixed(2)}s
-            </span>
-          )}
-        </div>
-      </div>
-
       {error && (
-        <div className="mt-4 text-red-400 text-sm p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+        <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-panel)] border border-[color:var(--line-strong)] p-3 text-[length:var(--text-sm)] text-[color:var(--text-secondary)]">
           {error}
         </div>
       )}
@@ -382,80 +695,36 @@ export default function FinderPage() {
       {/* Results */}
       {results !== null && !error && (
         results.length === 0 ? (
-          <div className="mt-6 border border-gray-800 rounded-xl bg-gray-900/40 p-8 text-center">
-            {staleTables.length > 0 ? (
-              <>
-                <p className="text-amber-500 text-sm font-bold">No current data, not &ldquo;no matches&rdquo;</p>
-                <p className="text-gray-500 text-xs mt-1">
-                  {staleTables.map(t => t.table).join(', ')} {staleTables.length === 1 ? 'is' : 'are'} stale — the scan
-                  ran against whatever data exists, but coverage is incomplete. Check the freshness banner above.
-                </p>
-              </>
-            ) : hasAnyHealthInfo ? (
-              <>
-                <p className="text-gray-400 text-sm">Scan ran, nothing matched your criteria.</p>
-                <p className="text-gray-600 text-xs mt-1">Data is current — try loosening the criteria panel above.</p>
-              </>
-            ) : (
-              <>
-                <p className="text-gray-400 text-sm">Scan ran, nothing matched your criteria.</p>
-                <p className="text-gray-600 text-xs mt-1">Freshness could not be confirmed — an empty result may also mean stale data.</p>
-              </>
-            )}
-          </div>
+          <EmptyState preset={activePreset} staleTables={showHealthBanner ? staleTables : []} hasHealthInfo={showHealthBanner && hasHealthInfo} />
         ) : (
-          <div className="mt-6 border border-gray-800 rounded-xl bg-gray-900/60 overflow-hidden overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-gray-800 text-[10px] text-gray-500 uppercase tracking-wider">
-                  <Th label="Symbol" onClick={() => toggleSort('symbol')} />
-                  <Th label="Price" onClick={() => toggleSort('price')} align="right" />
-                  <Th label="Volume" onClick={() => toggleSort('volume')} align="right" />
-                  <Th label="Compression" onClick={() => toggleSort('compression_score')} align="right" />
-                  <Th label="MA50 / MA200" align="right" />
-                  <Th label="Max gap %" onClick={() => toggleSort('gap_max_pct')} align="right" />
-                  <Th label="Breakout" onClick={() => toggleSort('breakout_strength')} align="right" />
-                  <Th label="Checks" />
-                </tr>
-              </thead>
-              <tbody>
-                {sortedResults.map(r => {
-                  const golden = r.ma50 >= r.ma200
-                  return (
-                    <tr key={r.symbol} className="border-b border-gray-800/40 last:border-0 hover:bg-gray-800/30">
-                      <td className="px-4 py-2.5 font-mono font-bold text-white">{r.symbol}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-300">${fmtNum(r.price)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-400">{fmtVolume(r.volume)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-300">
-                        {fmtNum(r.compression_score, 1)}
-                        <span className="text-gray-600"> / {r.compression_duration}d</span>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono">
-                        <span className="text-gray-400">{fmtNum(r.ma50)}</span>
-                        <span className={golden ? 'text-emerald-400' : 'text-red-400'}> {golden ? '▲' : '▼'} </span>
-                        <span className="text-gray-500">{fmtNum(r.ma200)}</span>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-400">{fmtNum(r.gap_max_pct, 1)}%</td>
-                      <td className="px-3 py-2.5 text-right font-mono">
-                        {r.breakout_strength === null
-                          ? <span className="text-gray-700">—</span>
-                          : <span className="text-gray-300">{fmtNum(r.breakout_strength, 1)}</span>}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <div className="flex flex-wrap gap-1 max-w-[280px]">
-                          {CHECK_LABELS.map(c => (
-                            <CheckPill key={c.key} label={c.label} v={r.checks[c.key]} />
-                          ))}
-                        </div>
-                        <div className="text-[9px] text-gray-600 mt-1">{r.passed} passed / {r.failed} failed</div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+          <div className="space-y-2">
+            {results.map(row => (
+              <ResultRow key={row.symbol} row={row} onOpenChart={setChartSymbol} />
+            ))}
           </div>
         )
+      )}
+
+      {results === null && !error && !isScanning && (
+        <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-panel)] p-8 text-center">
+          <p className="text-[length:var(--text-sm)] text-[color:var(--text-secondary)]">Pick a preset above to scan.</p>
+        </div>
+      )}
+
+      {/* Deep-analysis chart — same lazy-load pattern as TradesPage.tsx */}
+      {chartSymbol && (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 bg-[color:var(--bg-base)] flex items-center justify-center">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-6 h-6 border-2 border-[color:var(--line-strong)] border-t-[color:var(--accent)] rounded-full animate-spin" />
+                <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">Loading {chartSymbol} chart…</div>
+              </div>
+            </div>
+          }
+        >
+          <KLineChartOverlay symbol={chartSymbol} onClose={() => setChartSymbol(null)} />
+        </Suspense>
       )}
     </div>
   )

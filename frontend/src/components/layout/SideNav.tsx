@@ -108,17 +108,21 @@ function MacroTickerPanel() {
 
 // ── Nav items ─────────────────────────────────────────────────────────────────
 
+// Three destinations, not ten. The app had CMD / EDGE / SIGNALS / TRADES /
+// CRYPTO / FINDER all doing overlapping versions of "show me something to
+// trade", which left no obvious place to start.
+//
+//   FINDER  the one scanner. Penny, ETF long/short, signals, crypto are
+//           PRESETS inside it, not separate destinations.
+//   CHART   the deep view. Opened by clicking a finder result.
+//   PAPER   the mock account, and the auto-trader that trades into it.
+//
+// Removed: /command /edge /signals /trades /crypto /lab /auto — folded in or
+// retired. Recoverable from tag pre-consolidation-2026-09-29.
 const NAV_ITEMS = [
-  { path: '/command', label: 'CMD',     icon: '⌘' },
-  { path: '/edge',    label: 'EDGE',    icon: '◆' },
-  { path: '/chart',   label: 'CHART',   icon: '↗' },
-  { path: '/signals', label: 'SIGNALS', icon: '◎' },
-  { path: '/paper',   label: 'PAPER',   icon: '□' },
-  { path: '/trades',  label: 'TRADES',  icon: '⚡' },
-  { path: '/finder',  label: 'FINDER',  icon: '⌖' },
-  { path: '/crypto',  label: 'CRYPTO',  icon: '₿' },
-  { path: '/lab',     label: 'LAB',     icon: '⚗' },
-  { path: '/auto',    label: 'AUTO',    icon: '◉' },
+  { path: '/finder', label: 'FINDER', icon: '⌖' },
+  { path: '/chart',  label: 'CHART',  icon: '↗' },
+  { path: '/paper',  label: 'PAPER',  icon: '◫' },
 ] as const
 
 // ── Props ─────────────────────────────────────────────────────────────────────

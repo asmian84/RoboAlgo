@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elliott Wave Engine v3 — Multi-Degree Mock</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow-x: hidden; }
+
+.header {
+  background: #16213e;
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid #2a2a4a;
+}
+.header h1 { font-size: 13px; color: #888; font-weight: 400; }
+.ticker { font-size: 22px; font-weight: 700; color: #fff; }
+.price { font-size: 18px; color: #4ade80; margin-left: 4px; }
+.tf-selector {
+  display: flex; gap: 2px; margin-left: 20px;
+}
+.tf-btn {
+  background: #1a1a2e; color: #888; border: 1px solid #2a2a4a;
+  padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+  transition: all 0.15s;
+}
+.tf-btn:hover { color: #ccc; border-color: #4a5568; }
+.tf-btn.active { background: #fbbf24; color: #000; border-color: #fbbf24; font-weight: 600; }
+
+.main { display: flex; height: calc(100vh - 48px); }
+
+.chart-area { flex: 1; position: relative; padding: 8px; }
+.chart-container { width: 100%; height: 100%; position: relative; }
+canvas { width: 100%; height: 100%; cursor: crosshair; }
+
+/* Side panel */
+.panel {
+  width: 305px; background: #16213e; border-left: 1px solid #2a2a4a;
+  overflow-y: auto; padding: 12px; font-size: 12px;
+}
+.panel h2 {
+  font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px;
+  margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1px solid #2a2a4a;
+}
+
+/* Tabs */
+.tab-bar { display: flex; gap: 0; margin-bottom: 10px; }
+.tab-btn {
+  flex: 1; padding: 7px 0; text-align: center; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer;
+  background: #1a1a2e; color: #888; border: 1px solid #2a2a4a;
+  transition: all 0.15s;
+}
+.tab-btn:first-child { border-radius: 4px 0 0 4px; }
+.tab-btn:last-child { border-radius: 0 4px 4px 0; }
+.tab-btn.active { background: #22d3ee; color: #000; border-color: #22d3ee; font-weight: 600; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Degree legend */
+.degree-row {
+  display: flex; align-items: center; gap: 8px; padding: 4px 6px;
+  border-radius: 3px; cursor: pointer; transition: background 0.15s;
+}
+.degree-row:hover { background: rgba(255,255,255,0.04); }
+.degree-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.degree-name { font-size: 11px; color: #ccc; flex: 1; }
+.degree-notation { font-size: 11px; color: #888; font-family: monospace; }
+
+/* Current position */
+.position-box {
+  background: linear-gradient(135deg, #1a2a1a, #1a1a2e);
+  border: 1px solid #4ade80; border-radius: 6px; padding: 10px; margin-bottom: 10px;
+}
+.position-title { font-size: 10px; color: #4ade80; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.position-wave { font-size: 15px; font-weight: 700; color: #fff; }
+.position-detail { font-size: 11px; color: #999; margin-top: 4px; line-height: 1.5; }
+
+/* Wave count cards */
+.count-card {
+  background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 6px;
+  padding: 8px 10px; margin-bottom: 5px; cursor: pointer; transition: border-color 0.15s;
+}
+.count-card:hover { border-color: #4a5568; }
+.count-card.primary { border-color: #4ade80; }
+.count-header { display: flex; justify-content: space-between; align-items: center; }
+.count-label { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px; }
+.count-label.P { background: #4ade80; color: #000; }
+.count-label.a1 { background: #ef4444; color: #fff; }
+.count-label.a2 { background: #f97316; color: #fff; }
+.count-label.a3 { background: #6b7280; color: #fff; }
+.count-conf { font-size: 11px; color: #ccc; }
+.count-desc { font-size: 11px; color: #999; margin-top: 2px; }
+
+/* Next Subwaves / Forecast table */
+.forecast-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.forecast-table th {
+  font-size: 10px; color: #888; text-align: left; padding: 4px 6px;
+  border-bottom: 1px solid #2a2a4a; text-transform: uppercase;
+}
+.forecast-table td { font-size: 11px; padding: 4px 6px; border-bottom: 1px solid #1e2a3a; }
+.forecast-table .wave-col { color: #22d3ee; }
+.forecast-table .rr-col { color: #ccc; }
+.forecast-table .target-col { color: #4ade80; font-weight: 600; }
+.forecast-table .risk-col { color: #ef4444; }
+.forecast-table .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.forecast-table .status-check { background: #4ade80; }
+.forecast-table .status-pending { background: #f97316; }
+
+/* Wave guide */
+.wave-guide {
+  background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 6px;
+  padding: 8px 10px; margin-top: 8px;
+}
+.wave-guide-title { font-size: 11px; color: #22d3ee; font-weight: 600; margin-bottom: 4px; }
+.wave-guide-rule { font-size: 10px; color: #888; padding: 2px 0; line-height: 1.4; }
+
+/* Hover info */
+.hover-info {
+  position: absolute; background: rgba(22, 33, 62, 0.95); border: 1px solid #fbbf24;
+  border-radius: 5px; padding: 8px 12px; pointer-events: none; display: none;
+  z-index: 100; min-width: 170px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+.hover-info .hw-degree { font-size: 9px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+.hover-info .hw-label { font-size: 15px; font-weight: 700; color: #fff; margin: 1px 0; }
+.hover-info .hw-type { font-size: 11px; color: #fbbf24; }
+.hover-info .hw-price { font-size: 10px; color: #999; margin-top: 3px; }
+.hover-info .hw-range { font-size: 10px; color: #666; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="ticker">SPY</span>
+  <span class="price">679.31</span>
+  <div class="tf-selector">
+    <div class="tf-btn">1D</div>
+    <div class="tf-btn active">1W</div>
+    <div class="tf-btn">1M</div>
+  </div>
+  <h1>Elliott Wave Engine v3 — Multi-Degree Mock</h1>
+</div>
+
+<div class="main">
+  <div class="chart-area">
+    <div class="chart-container">
+      <canvas id="chart"></canvas>
+      <div class="hover-info" id="hoverInfo">
+        <div class="hw-degree"></div>
+        <div class="hw-label"></div>
+        <div class="hw-type"></div>
+        <div class="hw-price"></div>
+        <div class="hw-range"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <!-- Tabs: Next Subwaves | Count Forecast -->
+    <div class="tab-bar">
+      <div class="tab-btn active" data-tab="subwaves">Next Subwaves</div>
+      <div class="tab-btn" data-tab="forecast">Count Forecast</div>
+    </div>
+
+    <!-- Tab: Next Subwaves -->
+    <div class="tab-content active" id="tab-subwaves">
+      <div style="color:#22d3ee;font-size:11px;margin-bottom:6px;font-weight:600;">SPY, 1W</div>
+      <table class="forecast-table">
+        <thead>
+          <tr><th>Wave</th><th>R/R</th><th>Target</th><th>Risk</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="wave-col">3 &nbsp; Impul...</td>
+            <td class="rr-col">&#10052;&#10052;</td>
+            <td class="target-col">988.2 (45.5%)</td>
+            <td class="risk-col">629.28 (7.4%)</td>
+            <td><span class="status-dot status-pending"></span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Current Position -->
+      <div class="position-box" style="margin-top:10px">
+        <div class="position-title">Current Position</div>
+        <div class="position-wave">Impulse 3 — Bullish</div>
+        <div class="position-detail">
+          On the SPY 1W chart, at the Intermediate degree, it looks like wave 3 of a Leading Diagonal is underway.<br><br>
+          Starting point: 481.8 (Leading Diagonal, o)<br>
+          Target: 988.2 &nbsp;|&nbsp; Risk: 629.28
+        </div>
+      </div>
+
+      <!-- Alternate Counts -->
+      <h2>Alternate Counts</h2>
+      <div style="color:#22d3ee;font-size:11px;margin-bottom:6px;font-weight:600;">SPY, 1W &nbsp; &#128279;</div>
+      <div class="count-card primary">
+        <div class="count-header">
+          <span class="count-label P">P</span>
+          <span class="count-conf">Bullish, Impulse 3</span>
+        </div>
+      </div>
+      <div class="count-card">
+        <div class="count-header">
+          <span class="count-label a1">1</span>
+          <span class="count-conf">76.5%</span>
+        </div>
+        <div class="count-desc">Bearish, Impulse 2</div>
+      </div>
+      <div class="count-card">
+        <div class="count-header">
+          <span class="count-label a2">2</span>
+          <span class="count-conf">62.1%</span>
+        </div>
+        <div class="count-desc">Bearish, Impulse 2</div>
+      </div>
+      <div class="count-card">
+        <div class="count-header">
+          <span class="count-label a3">3</span>
+          <span class="count-conf">8%</span>
+        </div>
+        <div class="count-desc">Bearish, Impulse (3)</div>
+      </div>
+    </div>
+
+    <!-- Tab: Count Forecast -->
+    <div class="tab-content" id="tab-forecast">
+      <h2>Projection Targets</h2>
+      <div class="position-box" style="border-color:#f97316;">
+        <div class="position-title" style="color:#f97316">Wave 3 Projection</div>
+        <div style="font-size:12px;color:#ccc;line-height:1.7;">
+          <span style="color:#4ade80;">&#9650; 988.2</span> — 161.8% ext of W1 (45.5% from current)<br>
+          <span style="color:#22d3ee;">&#9650; 875.0</span> — 100% ext of W1 (28.8% from current)<br>
+          <span style="color:#fbbf24;">&#9650; 812.5</span> — 78.6% ext of W1 (19.6% from current)<br>
+          <span style="color:#ef4444;">&#9660; 629.28</span> — Invalidation level (risk: 7.4%)
+        </div>
+      </div>
+      <div class="wave-guide">
+        <div class="wave-guide-title">Leading Diagonal (5-3-5-3-5)</div>
+        <div class="wave-guide-rule">&bull; Waves 1 and 5 can be Impulse or Diagonal</div>
+        <div class="wave-guide-rule">&bull; Waves 2 and 4 are corrective (Zigzag, Flat)</div>
+        <div class="wave-guide-rule">&bull; Wave 3 cannot be the shortest impulse wave</div>
+        <div class="wave-guide-rule">&bull; Overlap between W1 and W4 is expected</div>
+      </div>
+    </div>
+
+    <!-- Degree Legend (always visible) -->
+    <h2 style="margin-top:12px">Degrees</h2>
+    <div class="degree-row"><div class="degree-dot" style="background:#ef4444"></div><span class="degree-name">Cycle</span><span class="degree-notation">((I)) ((II))</span></div>
+    <div class="degree-row"><div class="degree-dot" style="background:#f97316"></div><span class="degree-name">Primary</span><span class="degree-notation">(1) (2) (3)</span></div>
+    <div class="degree-row"><div class="degree-dot" style="background:#22d3ee"></div><span class="degree-name">Intermediate</span><span class="degree-notation">[A] [B] [C]</span></div>
+    <div class="degree-row"><div class="degree-dot" style="background:#a78bfa"></div><span class="degree-name">Minor</span><span class="degree-notation">1 2 3 4 5</span></div>
+    <div class="degree-row"><div class="degree-dot" style="background:#6b7280"></div><span class="degree-name">Minute</span><span class="degree-notation">i ii iii</span></div>
+  </div>
+</div>
+
+<script>
+// --- Tab switching ---
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// --- Timeframe buttons (visual only) ---
+document.querySelectorAll('.tf-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+const hoverInfo = document.getElementById('hoverInfo');
+const dpr = window.devicePixelRatio || 1;
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resize();
+
+// --- Generate SPY Weekly-like data matching the WaveBasis screenshot ---
+// Pattern: big rally from ~320 to ~480, crash to ~350, massive rally to ~700+
+// Starting point marked at the Oct 2022 low (~350/~481 area for weekly)
+
+const totalBars = 160;
+const opens = [], highs = [], lows = [], closes = [], prices = [];
+
+let p = 320;
+const segments = [
+  // Pre-history: slow grind from 320→380 (bars 0-25)
+  { len: 25, trend: 2.4, vol: 4 },
+  // Crash to 350 area (bars 25-40)
+  { len: 15, trend: -5.0, vol: 6 },
+  // === STARTING POINT (o) at bar ~40: the key structural low ~350 ===
+  // Wave 1 up: big rally 350→575 (bars 40-85)
+  { len: 15, trend: 3.0, vol: 5 },  // (1) sub
+  { len: 8, trend: -1.5, vol: 4 },   // (2) sub
+  { len: 20, trend: 4.5, vol: 5 },   // (3) sub — biggest move
+  { len: 5, trend: -2.0, vol: 4 },   // (4) sub
+  { len: 12, trend: 3.5, vol: 5 },   // (5) sub — completes W1
+
+  // Wave 2 correction: 575→480 area (bars 85-110)
+  { len: 8, trend: -3.0, vol: 5 },   // [A] down
+  { len: 6, trend: 2.0, vol: 4 },    // [B] up
+  { len: 11, trend: -3.5, vol: 5 },  // [C] down to ~480 area
+
+  // Wave 3 beginning: 480→700+ (bars 110-145)
+  { len: 8, trend: 3.0, vol: 4 },    // (1) of 3
+  { len: 5, trend: -1.5, vol: 3 },   // (2) of 3
+  { len: 12, trend: 5.0, vol: 5 },   // (3) of 3 — strong thrust
+  { len: 5, trend: -2.5, vol: 4 },   // (4) of 3 — pullback
+  { len: 5, trend: 3.0, vol: 4 },    // (5) of 3 peak area ~720
+
+  // Current: pullback & building (bars 145-160)
+  { len: 6, trend: -4.0, vol: 5 },   // correction from peak
+  { len: 9, trend: 1.5, vol: 4 },    // recovery — current area ~679
+];
+
+let barI = 0;
+for (const seg of segments) {
+  for (let i = 0; i < seg.len; i++) {
+    const noise = (Math.random() - 0.5) * seg.vol;
+    p += seg.trend + noise;
+    p = Math.max(300, p);
+    const o = p + (Math.random() - 0.5) * 3;
+    const h = Math.max(o, p) + Math.random() * 3;
+    const l = Math.min(o, p) - Math.random() * 3;
+    opens.push(o);
+    highs.push(h);
+    lows.push(l);
+    closes.push(p);
+    prices.push(p);
+    barI++;
+  }
+}
+const bars = prices.length;
+
+// Extra space on right for projections
+const projectionBars = 30; // empty space to the right
+const totalVisibleBars = bars + projectionBars;
+
+// Chart dimensions
+let W, H;
+const marginL = 50, marginR = 55, marginT = 30, marginB = 25;
+let chartW, chartH;
+
+// Price range includes projection targets
+const dataMin = Math.min(...lows) - 5;
+const dataMax = Math.max(...highs) + 5;
+const projMax = 1000; // projection target area
+const minP = dataMin;
+const maxP = Math.max(dataMax, projMax) + 20;
+
+function recalc() {
+  W = canvas.width / dpr;
+  H = canvas.height / dpr;
+  chartW = W - marginL - marginR;
+  chartH = H - marginT - marginB;
+}
+recalc();
+
+function xPos(i) { return marginL + (i / (totalVisibleBars - 1)) * chartW; }
+function yPos(price) { return marginT + (1 - (price - minP) / (maxP - minP)) * chartH; }
+
+const barWidth = () => Math.max(2, chartW / totalVisibleBars * 0.55);
+
+// === STARTING POINT (the circle at the structural low) ===
+const startingPointIdx = 40;
+const startingPointPrice = Math.min(...lows.slice(38, 43));
+
+// === WAVE LABELS ===
+const waveLabels = [
+  // Starting point marker
+  { degree: 'start', idx: startingPointIdx, label: 'o', above: false, color: '#22d3ee',
+    hoverData: { type: 'Leading Diagonal', price: startingPointPrice.toFixed(1), pct: 'Starting point', fibPct: '', degree: 'Intermediate' }},
+
+  // Primary W1 peak (~bar 85)
+  { degree: 'primary', idx: 83, label: '(1)', above: true, color: '#f97316' },
+  // B? pullback label
+  { degree: 'intermediate', idx: 72, label: 'B?', above: true, color: '#22d3ee' },
+
+  // Primary W2 low (~bar 110) with sub-labels
+  { degree: 'intermediate', idx: 90, label: '[A]', above: false, color: '#22d3ee' },
+  { degree: 'intermediate', idx: 97, label: '[C]', above: false, color: '#22d3ee' },
+  { degree: 'primary', idx: 108, label: '(2)', above: false, color: '#f97316' },
+
+  // Inside W3: sub waves
+  { degree: 'intermediate', idx: 115, label: '(3B)', above: true, color: '#22d3ee' },
+  { degree: 'minor', idx: 120, label: '1', above: true, color: '#a78bfa' },
+  { degree: 'intermediate', idx: 126, label: '(4A)', above: false, color: '#22d3ee' },
+
+  // W3 peak area with projection
+  { degree: 'primary', idx: 140, label: '(3B)', above: true, color: '#f97316',
+    hoverData: { type: 'Impulse W3', price: prices[140].toFixed(1), pct: '+' + ((prices[140] / startingPointPrice - 1) * 100).toFixed(1) + '%', fibPct: 'from starting point', degree: 'Primary' }},
+
+  // Current correction area
+  { degree: 'intermediate', idx: 148, label: '(C)', above: false, color: '#22d3ee' },
+  { degree: 'primary', idx: 148, label: '2?', above: false, color: '#f97316' },
+
+  // Active zone labels
+  { degree: 'minor', idx: 150, label: 'A', above: true, color: '#a78bfa' },
+  { degree: 'minor', idx: 153, label: 'B', above: false, color: '#a78bfa' },
+];
+
+// === WAVE CONNECTING LINES ===
+const waveLines = {
+  main: {
+    color: '#22d3ee',
+    always: true,
+    alpha: 0.45,
+    width: 1.5,
+    pivots: [startingPointIdx, 60, 68, 83, 90, 97, 108, 115, 126, 140, 148, bars - 1]
+  },
+  primary_structure: {
+    color: '#f97316',
+    always: false,
+    alpha: 0.6,
+    width: 2,
+    pivots: [startingPointIdx, 83, 108, 140, 148]
+  },
+};
+
+// === PROJECTION LINES ===
+const projections = [
+  // W3 target: 161.8% extension
+  { fromIdx: bars - 1, toPrice: 988, color: '#22d3ee', alpha: 0.5, width: 1, label: '988.2 (161.8%)', style: 'solid' },
+  // W3 target: 100% extension
+  { fromIdx: bars - 1, toPrice: 875, color: '#22d3ee', alpha: 0.3, width: 1, label: '875.0 (100%)', style: 'dashed' },
+  // Invalidation level
+  { fromIdx: bars - 1, toPrice: 629, color: '#ef4444', alpha: 0.4, width: 1, label: '629.28 (risk)', style: 'dashed' },
+];
+
+// === ACTIVE PATTERN ZONE ===
+const activeZone = { startIdx: 148, endIdx: bars - 1, label: 'Building next sub-wave' };
+let azHigh = -Infinity, azLow = Infinity;
+for (let i = activeZone.startIdx; i <= activeZone.endIdx; i++) {
+  if (highs[i] > azHigh) azHigh = highs[i];
+  if (lows[i] < azLow) azLow = lows[i];
+}
+activeZone.topPrice = azHigh + 8;
+activeZone.bottomPrice = azLow - 8;
+
+// === HOVER STATE ===
+let hoveredWave = null;
+let mouseX = 0, mouseY = 0;
+
+// --- DRAWING FUNCTIONS ---
+
+function drawGrid() {
+  ctx.fillStyle = '#555';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'right';
+  const priceLevels = [350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000];
+  for (const price of priceLevels) {
+    if (price < minP || price > maxP) continue;
+    const py = yPos(price);
+    ctx.strokeStyle = '#1e2a3a';
+    ctx.lineWidth = 0.4;
+    ctx.beginPath();
+    ctx.moveTo(marginL, py);
+    ctx.lineTo(W - marginR, py);
+    ctx.stroke();
+    ctx.fillStyle = '#444';
+    ctx.fillText(price.toFixed(0), marginL - 4, py + 3);
+  }
+
+  // Right side current price box
+  const lastPrice = prices[bars - 1];
+  const cpY = yPos(lastPrice);
+  ctx.fillStyle = '#22d3ee';
+  ctx.fillRect(W - marginR + 2, cpY - 8, 50, 16);
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(lastPrice.toFixed(1), W - marginR + 5, cpY + 3);
+}
+
+function drawCandles() {
+  const bw = barWidth();
+  for (let i = 0; i < bars; i++) {
+    const cx = xPos(i);
+    const bullish = closes[i] >= opens[i];
+    const bodyTop = yPos(Math.max(opens[i], closes[i]));
+    const bodyBot = yPos(Math.min(opens[i], closes[i]));
+    const wickTop = yPos(highs[i]);
+    const wickBot = yPos(lows[i]);
+
+    ctx.strokeStyle = bullish ? '#22c55e' : '#ef4444';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx, wickTop);
+    ctx.lineTo(cx, wickBot);
+    ctx.stroke();
+
+    const bodyH = Math.max(1, bodyBot - bodyTop);
+    ctx.fillStyle = bullish ? '#22c55e' : '#ef4444';
+    ctx.fillRect(cx - bw / 2, bodyTop, bw, bodyH);
+  }
+}
+
+function drawStartingPoint() {
+  // Big circle at structural low — like WaveBasis "o" marker
+  const px = xPos(startingPointIdx);
+  const py = yPos(startingPointPrice);
+
+  // Outer ring
+  ctx.strokeStyle = '#22d3ee';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(px, py + 15, 10, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Label "o" inside
+  ctx.fillStyle = '#22d3ee';
+  ctx.font = 'bold 12px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('o', px, py + 15);
+
+  // Info box below
+  ctx.fillStyle = 'rgba(22, 33, 62, 0.9)';
+  const boxX = px - 55, boxY = py + 32, boxW = 110, boxH = 44;
+  ctx.fillRect(boxX, boxY, boxW, boxH);
+  ctx.strokeStyle = '#22d3ee44';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+  ctx.fillStyle = '#ccc';
+  ctx.font = '10px -apple-system, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(startingPointPrice.toFixed(1), boxX + 4, boxY + 3);
+  ctx.fillStyle = '#888';
+  ctx.fillText('Leading Diagonal, o', boxX + 4, boxY + 15);
+  ctx.fillText('Starting point', boxX + 4, boxY + 27);
+  ctx.fillStyle = '#22d3ee';
+  ctx.fillText('Intermediate', boxX + 65, boxY + 27);
+}
+
+function drawProjections() {
+  const lastBarX = xPos(bars - 1);
+  const projEndX = xPos(bars + projectionBars - 5);
+
+  for (const proj of projections) {
+    const py = yPos(proj.toPrice);
+
+    // Projection line from current area to the right
+    ctx.strokeStyle = proj.color;
+    ctx.globalAlpha = proj.alpha;
+    ctx.lineWidth = proj.width;
+    ctx.setLineDash(proj.style === 'dashed' ? [6, 4] : []);
+    ctx.beginPath();
+    ctx.moveTo(lastBarX, yPos(prices[bars - 1]));
+    ctx.lineTo(projEndX, py);
+    ctx.stroke();
+
+    // Horizontal target level line
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(projEndX - 30, py);
+    ctx.lineTo(W - marginR, py);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Target label on right
+    ctx.fillStyle = proj.color;
+    ctx.globalAlpha = Math.min(1, proj.alpha + 0.3);
+    ctx.font = 'bold 10px -apple-system, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(proj.label, W - marginR - 2, py);
+
+    // Small diamond at target
+    ctx.beginPath();
+    ctx.moveTo(projEndX, py - 4);
+    ctx.lineTo(projEndX + 4, py);
+    ctx.lineTo(projEndX, py + 4);
+    ctx.lineTo(projEndX - 4, py);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawActiveZone() {
+  const x1 = xPos(activeZone.startIdx) - barWidth();
+  const x2 = xPos(activeZone.endIdx) + barWidth() * 3;
+  const y1 = yPos(activeZone.topPrice);
+  const y2 = yPos(activeZone.bottomPrice);
+
+  // Semi-transparent fill
+  ctx.fillStyle = 'rgba(249, 115, 22, 0.08)';
+  ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+
+  ctx.strokeStyle = 'rgba(249, 115, 22, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = 'rgba(249, 115, 22, 0.8)';
+  ctx.font = '10px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(activeZone.label, (x1 + x2) / 2, y1 - 4);
+}
+
+function drawWaveLines() {
+  for (const [key, line] of Object.entries(waveLines)) {
+    let show = line.always;
+    if (!show && hoveredWave) {
+      if (key === 'primary_structure' && (hoveredWave.degree === 'primary' || hoveredWave.degree === 'start')) show = true;
+    }
+    if (!show) continue;
+
+    ctx.strokeStyle = line.color;
+    ctx.globalAlpha = hoveredWave ? Math.min(1, line.alpha + 0.3) : line.alpha;
+    ctx.lineWidth = line.width;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    for (let i = 0; i < line.pivots.length; i++) {
+      const idx = line.pivots[i];
+      const px = xPos(idx);
+      const py = yPos(prices[Math.min(idx, bars - 1)]);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawLabels() {
+  for (const lbl of waveLabels) {
+    if (lbl.degree === 'start') continue; // drawn separately
+
+    const px = xPos(lbl.idx);
+    const bIdx = Math.min(lbl.idx, bars - 1);
+    const basePrice = lbl.above ? highs[bIdx] : lows[bIdx];
+    const baseY = yPos(basePrice);
+
+    let fontSize, offsetMult;
+    switch (lbl.degree) {
+      case 'cycle': fontSize = 14; offsetMult = 3.2; break;
+      case 'primary': fontSize = 13; offsetMult = 2.8; break;
+      case 'intermediate': fontSize = 11; offsetMult = 2.0; break;
+      case 'minor': fontSize = 10; offsetMult = 1.4; break;
+      default: fontSize = 9; offsetMult = 1.0;
+    }
+
+    const offset = lbl.above ? -10 * offsetMult : 10 * offsetMult;
+    const py = baseY + offset;
+    const isHovered = hoveredWave === lbl;
+
+    // Dot at pivot
+    ctx.fillStyle = isHovered ? '#fff' : lbl.color;
+    ctx.beginPath();
+    ctx.arc(px, baseY, isHovered ? 5 : 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    if (isHovered) { ctx.strokeStyle = lbl.color; ctx.lineWidth = 2; ctx.stroke(); }
+
+    // Line to label
+    ctx.strokeStyle = lbl.color + (isHovered ? '66' : '22');
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(px, baseY);
+    ctx.lineTo(px, py);
+    ctx.stroke();
+
+    // Label
+    const bold = (lbl.degree === 'cycle' || lbl.degree === 'primary') ? 'bold ' : '';
+    ctx.font = `${bold}${isHovered ? fontSize + 2 : fontSize}px -apple-system, sans-serif`;
+    ctx.fillStyle = isHovered ? '#fff' : lbl.color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = lbl.above ? 'bottom' : 'top';
+    ctx.fillText(lbl.label, px, py);
+  }
+}
+
+function draw() {
+  recalc();
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, W, H);
+
+  drawGrid();
+  drawCandles();
+  drawActiveZone();
+  drawWaveLines();
+  drawStartingPoint();
+  drawProjections();
+  drawLabels();
+
+  // Title bar
+  ctx.fillStyle = '#888';
+  ctx.font = '10px -apple-system, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('SPY, 1W  |  Intermediate  |  Leading Diagonal  |  Hover labels for sub-structure  |  Projections shown to the right →', marginL, 14);
+}
+
+// --- HOVER DETECTION ---
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = e.clientX - rect.left;
+  mouseY = e.clientY - rect.top;
+
+  let nearest = null;
+  let nearestDist = 25;
+
+  for (const lbl of waveLabels) {
+    const px = xPos(lbl.idx);
+    const bIdx = Math.min(lbl.idx, bars - 1);
+    const basePrice = lbl.above ? highs[bIdx] : (lbl.degree === 'start' ? startingPointPrice : lows[bIdx]);
+    const py = yPos(basePrice);
+    const dist = Math.sqrt((mouseX - px) ** 2 + (mouseY - py) ** 2);
+    if (dist < nearestDist) { nearestDist = dist; nearest = lbl; }
+  }
+
+  if (nearest !== hoveredWave) {
+    hoveredWave = nearest;
+    draw();
+  }
+
+  if (hoveredWave && hoveredWave.hoverData) {
+    const hd = hoveredWave.hoverData;
+    hoverInfo.style.display = 'block';
+    hoverInfo.style.left = Math.min(mouseX + 15, W - 200) + 'px';
+    hoverInfo.style.top = (mouseY - 10) + 'px';
+    hoverInfo.querySelector('.hw-degree').textContent = hd.degree;
+    hoverInfo.querySelector('.hw-label').textContent = hoveredWave.label;
+    hoverInfo.querySelector('.hw-type').textContent = hd.type;
+    hoverInfo.querySelector('.hw-price').textContent = hd.price + ' (' + hd.pct + ')';
+    hoverInfo.querySelector('.hw-range').textContent = hd.fibPct ? '[' + hd.fibPct + ']' : '';
+    hoverInfo.style.borderColor = hoveredWave.color;
+  } else {
+    hoverInfo.style.display = 'none';
+  }
+});
+
+canvas.addEventListener('mouseleave', () => {
+  hoveredWave = null;
+  hoverInfo.style.display = 'none';
+  draw();
+});
+
+draw();
+window.addEventListener('resize', () => { resize(); draw(); });
+</script>
+
+</body>
+</html>

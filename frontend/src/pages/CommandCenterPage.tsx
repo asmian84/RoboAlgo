@@ -9,8 +9,8 @@ import type {
   CommandCenterData,
   ActiveStrategyData,
 } from '../types'
-import SignalReliabilityPanel from '../components/command/SignalReliabilityPanel'
-import MarketSafetyPanel      from '../components/command/MarketSafetyPanel'
+import SignalReliabilityPanel          from '../components/command/SignalReliabilityPanel'
+import MarketSafetyPanel, { MarketTriggersPanel } from '../components/command/MarketSafetyPanel'
 import MarketHeatmap          from '../components/terminal/MarketHeatmap'
 
 // ── Color constants ─────────────────────────────────────────────────────────────
@@ -436,9 +436,9 @@ function ActiveStrategyBanner({ data }: { data: ActiveStrategyData }) {
       <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">{data.entry_description}</p>
 
       {/* Regime distribution pills */}
-      {Object.keys(data.regime_counts).length > 0 && (
+      {Object.keys(data.regime_counts ?? {}).length > 0 && (
         <div className="flex gap-1 flex-wrap shrink-0">
-          {Object.entries(data.regime_counts)
+          {Object.entries(data.regime_counts ?? {})
             .sort(([, a], [, b]) => b - a)
             .map(([state, count]) => (
               <span
@@ -1160,26 +1160,31 @@ export default function CommandCenterPage() {
             <MarketHeatmap instruments={data.market_state_summary.instruments} />
           )}
 
-          {/* Portfolio Risk (1/3) + System Health (2/3) */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-1">
+          {/* Portfolio Risk (1/2) + System Health (1/2) — equal halves */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
+            <div className="flex flex-col">
               <PortfolioRiskPanel data={data.portfolio_risk} />
             </div>
-            <div className="lg:col-span-2">
+            <div className="flex flex-col">
               <SystemHealthPanel data={data.system_health} />
             </div>
           </div>
 
-          {/* Signal Reliability (1/2) + Market Safety (1/2) — equal proportions */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div>
+          {/* Signal Reliability | Market Safety Score | Triggers & Hedges — 3 equal columns */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
+            <div className="flex flex-col">
               {data.signal_reliability && (
                 <SignalReliabilityPanel data={data.signal_reliability} />
               )}
             </div>
-            <div>
+            <div className="flex flex-col">
               {data.market_safety && (
                 <MarketSafetyPanel data={data.market_safety} />
+              )}
+            </div>
+            <div className="flex flex-col">
+              {data.market_safety && (
+                <MarketTriggersPanel data={data.market_safety} />
               )}
             </div>
           </div>

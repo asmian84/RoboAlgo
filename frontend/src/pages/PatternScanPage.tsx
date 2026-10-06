@@ -41,15 +41,17 @@ function RefreshBar({ active }: { active: boolean }) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-type Category = 'all' | 'chart' | 'harmonic' | 'gann' | 'wyckoff'
+type Category = 'all' | 'chart' | 'harmonic' | 'gann' | 'wyckoff' | 'elliott'
 type StatusFilter = 'all' | 'FORMING' | 'READY' | 'BREAKOUT' | 'COMPLETED'
 type DirFilter = 'all' | 'bullish' | 'bearish'
 type SortKey = 'confidence' | 'symbol' | 'status'
 
-function classifyCategory(entry: PatternScanEntry): 'chart' | 'harmonic' | 'gann' | 'wyckoff' | 'other' {
+function classifyCategory(entry: PatternScanEntry): 'chart' | 'harmonic' | 'gann' | 'wyckoff' | 'elliott' | 'other' {
   const c = (entry.pattern_category || '').toLowerCase()
+  if (c === 'elliott') return 'elliott'
   if (c === 'chart' || c === 'harmonic' || c === 'gann' || c === 'wyckoff') return c as any
   const n = entry.pattern_name.toLowerCase()
+  if (n.startsWith('ew ') || n.includes('elliott wave') || n.includes('impulse') && n.includes('wave')) return 'elliott'
   if (n.includes('gann')) return 'gann'
   if (n.includes('wyckoff') || n.includes('accumulation') || n.includes('distribution')) return 'wyckoff'
   if (n.includes('gartley') || n.includes('bat') || n.includes('butterfly') || n.includes('crab') || n.includes('cypher') || n.includes('harmonic')) return 'harmonic'
@@ -62,11 +64,13 @@ const CAT_COLOR: Record<string, string> = {
   harmonic: '#14b8a6',
   gann:     '#f59e0b',
   wyckoff:  '#a855f7',
+  elliott:  '#f97316',   // orange — Elliott Wave
   other:    '#9ca3af',
 }
 
 const CAT_LABEL: Record<string, string> = {
-  chart: 'Chart', harmonic: 'Harmonic', gann: 'Gann', wyckoff: 'Wyckoff', other: '?',
+  chart: 'Chart', harmonic: 'Harmonic', gann: 'Gann', wyckoff: 'Wyckoff',
+  elliott: 'Elliott Wave', other: '?',
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -109,6 +113,7 @@ export default function PatternScanPage() {
   const [symbolSearch,     setSymbolSearch]      = useState('')
   const [sortKey,          setSortKey]           = useState<SortKey>('confidence')
   const [sortAsc,          setSortAsc]           = useState(false)
+  const [minConfidence,    setMinConfidence]     = useState(60)
 
   const tfParam = scanTF === '1d' ? undefined : scanTF
   const { data, isLoading, isFetching, dataUpdatedAt } = usePatternScan(true, tfParam)
@@ -123,7 +128,7 @@ export default function PatternScanPage() {
 
   // Category counts for tab badges
   const catCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: 0, chart: 0, harmonic: 0, gann: 0, wyckoff: 0 }
+    const counts: Record<string, number> = { all: 0, chart: 0, harmonic: 0, gann: 0, wyckoff: 0, elliott: 0 }
     for (const e of entries) {
       counts.all++
       const c = classifyCategory(e)
@@ -150,6 +155,7 @@ export default function PatternScanPage() {
       if (statusFilter !== 'all' && e.status !== statusFilter) return false
       if (dirFilter !== 'all' && e.direction !== dirFilter) return false
       if (symbolSearch && !e.symbol.toLowerCase().includes(symbolSearch.toLowerCase())) return false
+      if ((e.confidence ?? 0) < minConfidence) return false
       return true
     })
 
@@ -162,7 +168,7 @@ export default function PatternScanPage() {
     })
 
     return rows
-  }, [entries, categoryFilter, patternNameFilter, statusFilter, dirFilter, symbolSearch, sortKey, sortAsc])
+  }, [entries, categoryFilter, patternNameFilter, statusFilter, dirFilter, symbolSearch, minConfidence, sortKey, sortAsc])
 
   const handleRefresh = () => {
     qc.invalidateQueries({ queryKey: ['patterns', 'scan', tfParam ?? 'daily'] })
@@ -260,7 +266,7 @@ export default function PatternScanPage() {
             style={{ color: categoryFilter === 'all' ? '#9ca3af' : CAT_COLOR[categoryFilter] }}
           >
             <option value="all">All patterns ({catCounts.all})</option>
-            {(['chart', 'harmonic', 'gann', 'wyckoff'] as Category[]).map(cat => {
+            {(['chart', 'harmonic', 'gann', 'wyckoff', 'elliott'] as Category[]).map(cat => {
               const count = catCounts[cat] ?? 0
               if (count === 0) return null
               return (
@@ -305,6 +311,23 @@ export default function PatternScanPage() {
             ))}
           </div>
 
+          {/* Confidence threshold */}
+          <div className="flex items-center gap-2 bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5">
+            <label className="text-[11px] text-gray-600 whitespace-nowrap">Min conf:</label>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={minConfidence}
+              onChange={e => setMinConfidence(Number(e.target.value))}
+              className="w-24 h-1.5 bg-gray-800 rounded-full appearance-none cursor-pointer"
+              style={{
+                background: `linear-gradient(to right, rgb(34,197,94) 0%, rgb(34,197,94) ${minConfidence}%, rgb(55,65,81) ${minConfidence}%, rgb(55,65,81) 100%)`
+              }}
+            />
+            <span className="text-[11px] font-semibold text-gray-300 w-6 text-right">{minConfidence}</span>
+          </div>
+
           {/* Symbol search */}
           <div className="relative flex-1 min-w-[140px] max-w-[200px]">
             <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-600 text-[11px]">🔍</span>
@@ -322,41 +345,22 @@ export default function PatternScanPage() {
           <span className="ml-auto text-[11px] text-gray-600">{filtered.length} rows</span>
         </div>
 
-        {/* Row 2: Pattern name chips — quick drill-in by specific pattern */}
+        {/* Row 2: Pattern name dropdown — clean filter */}
         {patternNames.length > 1 && (
-          <div className="flex flex-wrap gap-1 items-center">
-            <span className="text-[10px] text-gray-600 mr-1">Pattern:</span>
-            <button
-              onClick={() => setPatternNameFilter(null)}
-              className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
-                patternNameFilter === null
-                  ? 'bg-gray-700/80 text-gray-200 border-gray-600'
-                  : 'text-gray-500 border-gray-800 hover:text-gray-300 hover:border-gray-700'
-              }`}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-gray-600">Pattern:</span>
+            <select
+              value={patternNameFilter ?? ''}
+              onChange={(e) => setPatternNameFilter(e.target.value || null)}
+              className="px-2 py-1 rounded text-[10px] bg-gray-800 border border-gray-700 text-gray-200 hover:bg-gray-700 transition-colors cursor-pointer"
             >
-              All
-            </button>
-            {patternNames.map(([name, count]) => {
-              // Infer category color from first matching entry
-              const sample = entries.find(e => e.pattern_name === name)
-              const color = sample ? (CAT_COLOR[classifyCategory(sample)] ?? '#9ca3af') : '#9ca3af'
-              const isActive = patternNameFilter === name
-              return (
-                <button
-                  key={name}
-                  onClick={() => setPatternNameFilter(prev => prev === name ? null : name)}
-                  className="px-2 py-0.5 rounded text-[10px] border transition-all"
-                  style={{
-                    borderColor:     isActive ? color + '70' : '#374151',
-                    color:           isActive ? color : '#6b7280',
-                    backgroundColor: isActive ? color + '15' : 'transparent',
-                  }}
-                >
-                  {name}
-                  <span className="ml-1 opacity-40 font-mono">{count}</span>
-                </button>
-              )
-            })}
+              <option value="">All Patterns ({entries.length})</option>
+              {patternNames.map(([name, count]) => (
+                <option key={name} value={name}>
+                  {name} ({count})
+                </option>
+              ))}
+            </select>
           </div>
         )}
       </div>

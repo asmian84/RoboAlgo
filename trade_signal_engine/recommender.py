@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 TRADE_PROFILES = {
-    "SCALP": {"stop_atr_mult": 0.75, "target_rr": 2.5, "max_risk_pct": 1.0},
-    "SWING": {"stop_atr_mult": 1.5, "target_rr": 3.0, "max_risk_pct": 1.5},
-    "POSITION": {"stop_atr_mult": 2.0, "target_rr": 4.0, "max_risk_pct": 2.0},
+    "SCALP": {"stop_atr_mult": 0.5, "target_rr": 5.0, "max_risk_pct": 2.0, "min_target_pct": 3.0},
+    "SWING": {"stop_atr_mult": 1.0, "target_rr": 7.0, "max_risk_pct": 3.0, "min_target_pct": 10.0},
+    "POSITION": {"stop_atr_mult": 1.5, "target_rr": 9.0, "max_risk_pct": 3.5, "min_target_pct": 15.0},
 }
 
 
@@ -111,55 +111,131 @@ class TradeRecommender:
         target_rr = profile_cfg["target_rr"]
         max_risk_pct = profile_cfg["max_risk_pct"]
 
+        # ── Priority 0: SWEEP SNIPER — liquidity sweep + stochastic ──
+        # Entry at reclaimed sweep level, exit at next liquidity pool
+        sweep_detail = signal.component_details.get("sweep", {})
+        sweep_used = False
+
+        if (sweep_detail.get("has_sweep")
+            and sweep_detail.get("entry", 0) > 0
+            and sweep_detail.get("target", 0) > 0):
+
+            rec.entry = round(sweep_detail["entry"], 2)
+            rec.stop = round(sweep_detail["stop"], 2)
+            rec.target = round(sweep_detail["target"], 2)
+            rec.level_source = "sweep_sniper"
+            sweep_used = True
+
+            # Stochastic confirmation notes
+            stk = sweep_detail.get("stoch_k", 50)
+            std = sweep_detail.get("stoch_d", 50)
+            rec.entry_notes.append(
+                f"Sweep sniper: swept ${sweep_detail.get('sweep_level', 0):.2f} "
+                f"→ entry ${rec.entry:.2f} (STO %K={stk:.0f} %D={std:.0f})"
+            )
+            if sweep_detail.get("stoch_oversold"):
+                rec.entry_notes.append("Stochastic oversold confirmation (<25)")
+            if sweep_detail.get("stoch_cross"):
+                rec.entry_notes.append("Stochastic bullish cross (%K > %D)")
+            if sweep_detail.get("base_compressed"):
+                rec.entry_notes.append("Base compression — energy stored for breakout")
+            if sweep_detail.get("volume_confirmed"):
+                rec.entry_notes.append("Volume spike confirmed on sweep bar")
+
+            # Extended targets from liquidity pools above
+            ext = sweep_detail.get("extended_target", 0)
+            runner = sweep_detail.get("runner_target", 0)
+            if ext > 0:
+                rec.entry_notes.append(f"T2 (extended): ${ext:.2f}")
+            if runner > 0:
+                rec.entry_notes.append(f"T3 (runner): ${runner:.2f}")
+
         # ── Priority 1: SMC sniper entry ─────────────────────────
-        smc_detail = signal.component_details.get("smc", {})
-        sniper_entry = smc_detail.get("sniper_entry", 0)
+        if not sweep_used:
+            smc_detail = signal.component_details.get("smc", {})
+            sniper_entry = smc_detail.get("sniper_entry", 0)
 
-        if sniper_entry > 0 and abs(sniper_entry - current_price) / current_price < 0.05:
-            # SMC entry within 5% of current price — use it
-            rec.entry = round(sniper_entry, 2)
-            zone_bottom = smc_detail.get("entry_zone_bottom", sniper_entry)
-            zone_top = smc_detail.get("entry_zone_top", sniper_entry)
+            if sniper_entry > 0 and abs(sniper_entry - current_price) / current_price < 0.05:
+                rec.entry = round(sniper_entry, 2)
+                zone_bottom = smc_detail.get("entry_zone_bottom", sniper_entry)
 
-            if signal.direction == "LONG":
                 rec.stop = round(zone_bottom - atr * 0.3, 2)
                 risk_per_share = rec.entry - rec.stop
                 rec.target = round(rec.entry + risk_per_share * target_rr, 2)
+
+                rec.level_source = "smc_sniper"
+                rec.entry_notes.append(f"SMC sniper entry at FVG/OB zone ({smc_detail.get('zone', 'N/A')})")
+                if smc_detail.get("in_ote"):
+                    rec.entry_notes.append("Entry in OTE zone (62-79% fib retracement)")
+
+            # ── Priority 2: LevelEngine pounce ideas ─────────────────
+            elif signal.component_details.get("levels", {}).get("pounce_ideas"):
+                pounce_ideas = signal.component_details["levels"]["pounce_ideas"]
+                idea = pounce_ideas[0]
+                if idea:
+                    rec.entry = idea.get("entry", current_price)
+                    rec.stop = idea.get("stop", 0)
+                    rec.target = idea.get("target", 0)
+                    rec.level_source = "level_pounce"
+                    rec.entry_notes.append("Entry from LevelEngine gem pounce zone")
+
+            # ── Priority 3: ATR fallback ─────────────────────────────
             else:
-                rec.stop = round(zone_top + atr * 0.3, 2)
-                risk_per_share = rec.stop - rec.entry
-                rec.target = round(rec.entry - risk_per_share * target_rr, 2)
-
-            rec.level_source = "smc_sniper"
-            rec.entry_notes.append(f"SMC sniper entry at FVG/OB zone ({smc_detail.get('zone', 'N/A')})")
-            if smc_detail.get("in_ote"):
-                rec.entry_notes.append("Entry in OTE zone (62-79% fib retracement)")
-
-        # ── Priority 2: LevelEngine pounce ideas ─────────────────
-        elif signal.component_details.get("levels", {}).get("pounce_ideas"):
-            pounce_ideas = signal.component_details["levels"]["pounce_ideas"]
-            # Use the first pounce idea
-            idea = pounce_ideas[0]
-            if idea:
-                rec.entry = idea.get("entry", current_price)
-                rec.stop = idea.get("stop", 0)
-                rec.target = idea.get("target", 0)
-                rec.level_source = "level_pounce"
-                rec.entry_notes.append("Entry from LevelEngine gem pounce zone")
-
-        # ── Priority 3: ATR fallback ─────────────────────────────
-        else:
-            rec.entry = round(current_price, 2)
-            if signal.direction == "LONG":
+                rec.entry = round(current_price, 2)
                 rec.stop = round(current_price - atr * stop_mult, 2)
                 risk_per_share = rec.entry - rec.stop
                 rec.target = round(current_price + risk_per_share * target_rr, 2)
-            else:
+                rec.level_source = "atr_fallback"
+                rec.entry_notes.append(f"ATR-based entry ({stop_mult}x ATR stop, {target_rr}:1 R:R)")
+
+        # ── Validate levels match direction ─────────────────────
+        # LONG must have: target > entry, stop < entry
+        # SHORT must have: target < entry, stop > entry
+        # If mismatch (e.g. sweep sniper produced SHORT levels but direction is LONG),
+        # recompute with ATR fallback in the correct direction.
+        if rec.entry > 0 and rec.target > 0:
+            if signal.direction == "LONG" and (rec.target < rec.entry or rec.stop > rec.entry):
+                # Levels are SHORT-style but direction is LONG — recompute
+                rec.entry = round(current_price, 2)
+                rec.stop = round(current_price - atr * stop_mult, 2)
+                risk_per_share = rec.entry - rec.stop
+                rec.target = round(current_price + risk_per_share * target_rr, 2)
+                rec.level_source = "atr_fallback"
+                rec.entry_notes = [f"ATR-based entry (direction-corrected, {stop_mult}x ATR stop, {target_rr}:1 R:R)"]
+            elif signal.direction == "SHORT" and (rec.target > rec.entry or rec.stop < rec.entry):
+                # Levels are LONG-style but direction is SHORT — recompute
+                rec.entry = round(current_price, 2)
                 rec.stop = round(current_price + atr * stop_mult, 2)
                 risk_per_share = rec.stop - rec.entry
                 rec.target = round(current_price - risk_per_share * target_rr, 2)
-            rec.level_source = "atr_fallback"
-            rec.entry_notes.append(f"ATR-based entry ({stop_mult}x ATR stop, {target_rr}:1 R:R)")
+                rec.level_source = "atr_fallback"
+                rec.entry_notes = [f"ATR-based short entry (direction-corrected, {stop_mult}x ATR stop, {target_rr}:1 R:R)"]
+
+        # ── Enforce minimum target distance ──────────────────────
+        # For SWING, target must be at least 10% from entry (not worth risking for 3%)
+        min_target_pct = profile_cfg.get("min_target_pct", 10.0)
+        if rec.entry > 0 and rec.target > 0:
+            if signal.direction == "LONG":
+                actual_pct = (rec.target - rec.entry) / rec.entry * 100
+                if actual_pct < min_target_pct:
+                    rec.target = round(rec.entry * (1 + min_target_pct / 100), 2)
+                    rec.entry_notes.append(f"Target stretched to {min_target_pct}% minimum (was {actual_pct:.1f}%)")
+            elif signal.direction == "SHORT":
+                actual_pct = (rec.entry - rec.target) / rec.entry * 100
+                if actual_pct < min_target_pct:
+                    rec.target = round(rec.entry * (1 - min_target_pct / 100), 2)
+                    rec.entry_notes.append(f"Target stretched to {min_target_pct}% minimum (was {actual_pct:.1f}%)")
+
+        # ── Price sanity check — reject garbage data ─────────────
+        # Stop and target must be positive; entry must be near current price
+        if rec.stop <= 0 or rec.entry <= 0 or rec.target <= 0:
+            rec.verdict = "NO_TRADE"
+            rec.rejection_reason = f"Invalid levels: entry=${rec.entry}, stop=${rec.stop}, target=${rec.target}"
+            return rec
+        if current_price > 0 and abs(rec.entry - current_price) / current_price > 0.50:
+            rec.verdict = "NO_TRADE"
+            rec.rejection_reason = f"Entry ${rec.entry} too far from market ${current_price:.2f}"
+            return rec
 
         # ── Compute risk:reward ──────────────────────────────────
         if rec.entry > 0 and rec.stop > 0 and rec.target > 0:
@@ -172,28 +248,45 @@ class TradeRecommender:
 
             rec.risk_reward = round(reward / risk, 1) if risk > 0 else 0.0
 
-        # ── Position sizing (fixed fractional) ───────────────────
+        # ── Position sizing (fixed fractional, capped to available capital) ──
         risk_per_share = abs(rec.entry - rec.stop) if rec.entry > 0 and rec.stop > 0 else atr
-        if risk_per_share > 0:
+        if risk_per_share > 0 and rec.entry > 0:
             max_risk_dollars = account_size * (max_risk_pct / 100)
             rec.risk_amount = round(max_risk_dollars, 2)
-            rec.position_size = max(1, int(max_risk_dollars / risk_per_share))
+            # Risk-based size — how many shares to risk exactly max_risk_dollars
+            risk_based_size = int(max_risk_dollars / risk_per_share)
+            # Capital cap — can never buy more than full account allows (no leverage)
+            capital_cap = int(account_size / rec.entry)
+            rec.position_size = max(1, min(risk_based_size, capital_cap))
             rec.position_value = round(rec.position_size * rec.entry, 2)
+            # Actual risk may be less than max if capped by capital
+            rec.risk_amount = round(rec.position_size * risk_per_share, 2)
 
         # ── Profit projection ────────────────────────────────────
         if rec.position_size > 0 and rec.target > 0 and rec.entry > 0:
             if signal.direction == "LONG":
                 rec.projected_profit = round(rec.position_size * (rec.target - rec.entry), 2)
+                # % gain = price move from entry to target (not % of account)
+                rec.projected_profit_pct = round((rec.target - rec.entry) / rec.entry * 100, 2)
             else:
                 rec.projected_profit = round(rec.position_size * (rec.entry - rec.target), 2)
-            rec.projected_profit_pct = round(rec.projected_profit / account_size * 100, 2)
+                rec.projected_profit_pct = round((rec.entry - rec.target) / rec.entry * 100, 2)
+
+        # ── Minimum % gain gate — small moves not worth the risk ──
+        _MIN_GAIN_PCT = {"SCALP": 2.0, "SWING": 8.0, "POSITION": 12.0}
+        min_gain = _MIN_GAIN_PCT.get(signal.profile, 8.0)
 
         # ── Verdict ──────────────────────────────────────────────
-        # Surface every trade — HIGH/MEDIUM = strong signal, LOW = speculative
-        if signal.direction in ("LONG", "SHORT") and signal.score >= 55:
-            rec.verdict = "BUY" if signal.direction == "LONG" else "SELL"
+        if rec.projected_profit_pct < min_gain and signal.score >= 35:
+            # Move below the actionable threshold — watchlist only
+            rec.verdict = "HOLD"
+            rec.entry_notes.append(f"Below {min_gain}% gain threshold ({rec.projected_profit_pct:.1f}%) — watchlist only")
+        elif signal.direction == "LONG" and signal.score >= 55:
+            rec.verdict = "BUY"
+        elif signal.direction == "SHORT" and signal.score >= 55:
+            rec.verdict = "SELL"     # actionable short
         elif signal.direction in ("LONG", "SHORT") and signal.score >= 35:
-            rec.verdict = "HOLD"  # watchlist — has potential
+            rec.verdict = "HOLD"     # watchlist
         else:
             rec.verdict = "NO_TRADE"
 

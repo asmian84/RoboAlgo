@@ -27,12 +27,17 @@ from pattern_engine.chair_pattern import detect as detect_chair
 from pattern_engine.compression_breakout import detect as detect_compression
 from pattern_engine.cup_handle import detect as detect_cup
 from pattern_engine.descending_channel import detect as detect_descending_channel
+from pattern_engine.diamond_pattern import detect as detect_diamond
 from pattern_engine.double_top_bottom import detect as detect_double_patterns
 from pattern_engine.expansion_pattern import detect as detect_megaphone
 from pattern_engine.head_shoulders import detect as detect_head_shoulders
+from pattern_engine.inverse_cup_handle import detect as detect_inv_cup
+from pattern_engine.measured_move import detect as detect_measured_move
 from pattern_engine.pennant import detect as detect_pennants
 from pattern_engine.rectangle_pattern import detect as detect_rectangle
 from pattern_engine.rounding_pattern import detect as detect_rounding
+from pattern_engine.scallop_pattern import detect as detect_scallop
+from pattern_engine.three_peaks_valleys import detect as detect_three_pv
 from pattern_engine.wedge_pattern import detect as detect_wedges
 
 VALID_STATES = {"NOT_PRESENT", "FORMING", "READY", "BREAKOUT", "FAILED", "COMPLETED"}
@@ -94,8 +99,12 @@ def detect_all(
     results.append(_normalize(detect_bear_flag(symbol, price_data),           "Bear Flag"))
     results += _norm_list(detect_pennants(symbol, price_data))               # Bullish + Bearish Pennant
     results.append(_normalize(detect_cup(symbol, price_data),                 "Cup & Handle"))
+    results.append(_normalize(detect_inv_cup(symbol, price_data),            "Inverse Cup & Handle"))
     results.append(_normalize(detect_channel(symbol, price_data),             "Ascending Channel"))
     results.append(_normalize(detect_descending_channel(symbol, price_data),  "Descending Channel"))
+    results += _norm_list(detect_measured_move(symbol, price_data))           # Bullish + Bearish Measured Move
+    results += _norm_list(detect_scallop(symbol, price_data))                # Ascending + Descending Scallop
+    results += _norm_list(detect_three_pv(symbol, price_data))               # 3 Rising Valleys + 3 Desc Peaks
 
     # ── Compression / Triangle / Wedge ────────────────────────────────────
     results += _norm_list(detect_compression(symbol, price_data))             # Sym + Asc + Desc Triangle
@@ -109,6 +118,9 @@ def detect_all(
     # ── Range / Expansion ─────────────────────────────────────────────────
     results.append(_normalize(detect_rectangle(symbol, price_data),          "Rectangle"))
     results.append(_normalize(detect_megaphone(symbol, price_data),          "Megaphone"))
+
+    # ── Diamond reversal ─────────────────────────────────────────────────
+    results += _norm_list(detect_diamond(symbol, price_data))                # Diamond Top + Bottom
 
     return results
 

@@ -294,14 +294,13 @@ def get_gex_profile(symbol: str, near_expiry: bool = Query(default=False)):
     """Full dealer positioning: GEX + DEX + VEX combined."""
     sym = symbol.upper()
     try:
-        from data_engine.yahoo_options_fetcher import OptionsChainFetcher
+        from data_engine.yahoo_options_fetcher import fetch_options_chain
         from options_engine.gamma_exposure import GammaExposureEngine
         from options_engine.dex_engine import DEXEngine
         from options_engine.vanna_exposure import VannaExposureEngine
         from options_engine.dealer_positioning import DealerPositioningEngine
 
-        fetcher = OptionsChainFetcher()
-        chain   = fetcher.fetch(sym)
+        chain = fetch_options_chain(sym)
         if chain is None:
             raise HTTPException(status_code=404, detail=f"Options data unavailable for {sym}")
 
@@ -325,18 +324,26 @@ def get_gex_profile(symbol: str, near_expiry: bool = Query(default=False)):
 
         gex_dict = _to_dict(gex_profile)
         dex_dict = _to_dict(dex_profile)
+        vex_dict = _to_dict(vex_profile)
 
         positioning = dp_eng.compute(gex_profile)
 
+        # Map numeric dealer_bias int to human-readable label
+        _bias_int = dex_dict.get("dealer_bias", 0)
+        _bias_label = {1: "LONG", -1: "SHORT"}.get(_bias_int, "NEUTRAL")
+
         return {
-            "symbol":      sym,
-            "spot_price":  chain.spot_price,
-            "gex":         gex_dict,
-            "dex":         dex_dict,
-            "gamma_flip":  gex_dict.get("zero_gamma"),
-            "gex_regime":  gex_dict.get("gamma_regime"),
-            "dealer_bias": dex_dict.get("dealer_bias"),
-            "positioning": _to_dict(positioning),
+            "symbol":           sym,
+            "spot_price":       chain.spot,
+            "gex":              gex_dict,
+            "dex":              dex_dict,
+            "vex":              vex_dict,
+            "gamma_flip":       gex_dict.get("zero_gamma"),
+            "gex_regime":       gex_dict.get("gamma_regime"),       # POSITIVE | NEGATIVE | NEUTRAL
+            "positioning_bias": gex_dict.get("positioning_bias"),   # BULLISH | BEARISH | NEUTRAL
+            "dex_regime":       dex_dict.get("dex_regime"),         # LONG_DELTA | SHORT_DELTA | NEUTRAL
+            "dealer_bias":      _bias_label,                        # LONG | SHORT | NEUTRAL
+            "positioning":      _to_dict(positioning),
         }
     except HTTPException:
         raise
@@ -627,8 +634,8 @@ def _options_rec(sym: str, spot: float, target_price: float) -> dict | None:
     """
     import datetime
     try:
-        from data_engine.yahoo_options_fetcher import OptionsChainFetcher
-        chain = OptionsChainFetcher().fetch(sym)
+        from data_engine.yahoo_options_fetcher import fetch_options_chain
+        chain = fetch_options_chain(sym)
         if not chain or not chain.contracts:
             return None
 
@@ -1234,9 +1241,9 @@ def enrich_symbol(symbol: str):
         # GEX / dealer positioning (graceful fail — not all tickers have options)
         gex_data: dict | None = None
         try:
-            from data_engine.yahoo_options_fetcher import OptionsChainFetcher
+            from data_engine.yahoo_options_fetcher import fetch_options_chain
             from options_engine.gamma_exposure import GammaExposureEngine
-            chain  = OptionsChainFetcher().fetch(sym)
+            chain  = fetch_options_chain(sym)
             gex    = GammaExposureEngine().compute(chain)
             gex_data = {
                 "zero_gamma":  getattr(gex, "zero_gamma",  None),

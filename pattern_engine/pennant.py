@@ -79,14 +79,26 @@ def _pennant_body(
         return None
 
     first_idx = int(min(xh[0], xl[0]))
-    # Convert local (post sub-DF, 0-based) indices → global bar indices
-    # post_start_global is the global offset of post's first row
     post_global_offset = int(post["index"].iloc[0])
-    g_first = post_global_offset + first_idx
-    g_last  = len(df) - 1   # == post_global_offset + local_last
+    g_last  = len(df) - 1
+    fwd_idx = g_last + 10
+
+    # Draw through ACTUAL swing pivots, extended forward
+    fh0, fh1 = highs[0], highs[-1]
+    gh0, gh1 = post_global_offset + int(fh0["index"]), post_global_offset + int(fh1["index"])
+    h_run = max(gh1 - gh0, 1)
+    h_sl = (float(fh1["price"]) - float(fh0["price"])) / h_run
+    h_fwd = float(fh1["price"]) + h_sl * (fwd_idx - gh1)
+
+    fl0, fl1 = lows[0], lows[-1]
+    gl0, gl1 = post_global_offset + int(fl0["index"]), post_global_offset + int(fl1["index"])
+    l_run = max(gl1 - gl0, 1)
+    l_sl = (float(fl1["price"]) - float(fl0["price"])) / l_run
+    l_fwd = float(fl1["price"]) + l_sl * (fwd_idx - gl1)
+
     overlay_lines = [
-        [[g_first, float(h_slope * first_idx + h_int)], [g_last, upper]],
-        [[g_first, float(l_slope * first_idx + l_int)], [g_last, lower]],
+        [[gh0, float(fh0["price"])], [fwd_idx, round(h_fwd, 4)]],
+        [[gl0, float(fl0["price"])], [fwd_idx, round(l_fwd, 4)]],
     ]
 
     if bullish:
@@ -108,9 +120,27 @@ def _pennant_body(
 
 
 def _detect_bullish_pennant(df: pd.DataFrame, adaptive_mm: float) -> dict[str, Any]:
+    """Multi-scale bullish pennant: tries pole windows of 35, 80, 150 bars."""
+    total_bars = len(df)
+    best = base_result("Bullish Pennant")
+    best_conf = 0.0
+    for pole_size in [35, 80, 150]:
+        if total_bars < pole_size + 20:
+            continue
+        r = _detect_bullish_pennant_at_scale(df, adaptive_mm, pole_size, total_bars)
+        conf = float(r.get("confidence", 0.0))
+        if conf > best_conf:
+            best_conf = conf
+            best = r
+    return best
+
+
+def _detect_bullish_pennant_at_scale(
+    df: pd.DataFrame, adaptive_mm: float, pole_size: int, total_bars: int,
+) -> dict[str, Any]:
     result = base_result("Bullish Pennant")
     close = df["close"].astype(float)
-    pole_window = close.tail(35).reset_index(drop=True)
+    pole_window = close.tail(pole_size).reset_index(drop=True)
     low_idx  = int(pole_window.idxmin())
     high_idx = int(pole_window.idxmax())
     if high_idx <= low_idx:
@@ -136,6 +166,9 @@ def _detect_bullish_pennant(df: pd.DataFrame, adaptive_mm: float) -> dict[str, A
     prob = composite_probability(sq, volume_confirmation(df),
                                  liquidity_alignment_score(df, breakout),
                                  market_regime_score(df), momentum_score(df))
+    # Span bonus
+    span = pole_size / max(total_bars, 1)
+    prob = min(prob + span * 15, 99.0)
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=True)
 
     # Pole: bottom of impulse → top of impulse (global indices)
@@ -144,23 +177,46 @@ def _detect_bullish_pennant(df: pd.DataFrame, adaptive_mm: float) -> dict[str, A
     pole_seg = [[pole_b_global, float(pole_window.iloc[low_idx])],
                 [pole_t_global, float(pole_window.iloc[high_idx])]]
 
+    last_idx = len(df) - 1
     g_off = body["post_global_offset"]
+    # Measured move: breakout → target (pole height projection)
+    mm_seg = [[last_idx, round(breakout, 4)], [last_idx, round(target, 4)]]
     result.update({
         "pattern_name": "Bullish Pennant", "status": status,
         "breakout_level": round(breakout, 4), "invalidation_level": round(invalidation, 4),
         "projected_target": round(target, 4), "confidence": round(prob, 2),
         "probability": round(prob, 2), "direction": "bullish",
         "points": [[g_off + p["index"], p["price"]] for p in body["highs"][-2:] + body["lows"][-2:]],
-        "overlay_lines": [pole_seg] + body["overlay_lines"],
-        "overlay_line_roles": ["pole", "resistance", "support"],
+        "point_labels": ["PENNANT H1", "PENNANT H2", "PENNANT L1", "PENNANT L2"],
+        "overlay_lines": [pole_seg] + body["overlay_lines"] + [mm_seg],
+        "overlay_line_roles": ["pole", "resistance", "support", "measured_move"],
+        "fill_zone": {"upper": 1, "lower": 2, "color": "#00C805", "opacity": 0.15},
     })
     return result
 
 
 def _detect_bearish_pennant(df: pd.DataFrame, adaptive_mm: float) -> dict[str, Any]:
+    """Multi-scale bearish pennant: tries pole windows of 35, 80, 150 bars."""
+    total_bars = len(df)
+    best = base_result("Bearish Pennant")
+    best_conf = 0.0
+    for pole_size in [35, 80, 150]:
+        if total_bars < pole_size + 20:
+            continue
+        r = _detect_bearish_pennant_at_scale(df, adaptive_mm, pole_size, total_bars)
+        conf = float(r.get("confidence", 0.0))
+        if conf > best_conf:
+            best_conf = conf
+            best = r
+    return best
+
+
+def _detect_bearish_pennant_at_scale(
+    df: pd.DataFrame, adaptive_mm: float, pole_size: int, total_bars: int,
+) -> dict[str, Any]:
     result = base_result("Bearish Pennant")
     close = df["close"].astype(float)
-    pole_window = close.tail(35).reset_index(drop=True)
+    pole_window = close.tail(pole_size).reset_index(drop=True)
     high_idx = int(pole_window.idxmax())
     low_idx  = int(pole_window.idxmin())
     if low_idx <= high_idx:
@@ -186,6 +242,9 @@ def _detect_bearish_pennant(df: pd.DataFrame, adaptive_mm: float) -> dict[str, A
     prob = composite_probability(sq, volume_confirmation(df),
                                  liquidity_alignment_score(df, breakout),
                                  market_regime_score(df), momentum_score(df))
+    # Span bonus
+    span = pole_size / max(total_bars, 1)
+    prob = min(prob + span * 15, 99.0)
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=False)
 
     # Pole: top of impulse → bottom of impulse (global indices)
@@ -194,15 +253,20 @@ def _detect_bearish_pennant(df: pd.DataFrame, adaptive_mm: float) -> dict[str, A
     pole_seg = [[pole_t_global, float(pole_window.iloc[high_idx])],
                 [pole_b_global, float(pole_window.iloc[low_idx])]]
 
+    last_idx = len(df) - 1
     g_off = body["post_global_offset"]
+    # Measured move: breakout → target (pole height projection downward)
+    mm_seg = [[last_idx, round(breakout, 4)], [last_idx, round(target, 4)]]
     result.update({
         "pattern_name": "Bearish Pennant", "status": status,
         "breakout_level": round(breakout, 4), "invalidation_level": round(invalidation, 4),
         "projected_target": round(target, 4), "confidence": round(prob, 2),
         "probability": round(prob, 2), "direction": "bearish",
         "points": [[g_off + p["index"], p["price"]] for p in body["highs"][-2:] + body["lows"][-2:]],
-        "overlay_lines": [pole_seg] + body["overlay_lines"],
-        "overlay_line_roles": ["pole", "resistance", "support"],
+        "point_labels": ["PENNANT H1", "PENNANT H2", "PENNANT L1", "PENNANT L2"],
+        "overlay_lines": [pole_seg] + body["overlay_lines"] + [mm_seg],
+        "overlay_line_roles": ["pole", "resistance", "support", "measured_move"],
+        "fill_zone": {"upper": 1, "lower": 2, "color": "#FF3B30", "opacity": 0.15},
     })
     return result
 

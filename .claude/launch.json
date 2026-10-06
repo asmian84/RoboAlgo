@@ -9,9 +9,18 @@
     },
     {
       "name": "frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "/Users/asmian/RoboAlgo/frontend"],
-      "port": 5173
+      "runtimeExecutable": "/usr/local/bin/node",
+      "runtimeArgs": ["/Users/asmian/RoboAlgo/frontend/node_modules/.bin/vite", "--port", "5174", "--host"],
+      "cwd": "/Users/asmian/RoboAlgo/frontend",
+      "port": 5174,
+      "autoPort": false
+    }
+  ],
+  "staticServers": [
+    {
+      "name": "ew-mock",
+      "root": "/Users/asmian/RoboAlgo/docs/superpowers/references",
+      "port": 64493
     }
   ]
 }

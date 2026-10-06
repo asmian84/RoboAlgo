@@ -102,6 +102,7 @@ def _compute_indicators(prices: pd.DataFrame) -> pd.DataFrame:
     df["bb_width"]  = (df["bb_upper"] - df["bb_lower"]) / bb_mid.replace(0, float("nan"))
 
     # ── Moving Averages ────────────────────────────────────────────────────────
+    df["ma20"]  = close.rolling(20).mean()
     df["ma50"]  = close.rolling(50).mean()
     df["ma200"] = close.rolling(200).mean()
 
@@ -109,7 +110,7 @@ def _compute_indicators(prices: pd.DataFrame) -> pd.DataFrame:
         "rsi", "atr",
         "macd_line", "macd_signal", "macd_histogram",
         "bb_upper", "bb_middle", "bb_lower", "bb_width",
-        "ma50", "ma200",
+        "ma20", "ma50", "ma200",
     ]
     return df[ind_cols]
 
@@ -206,15 +207,59 @@ def _alphavantage_fetch(symbol: str, limit: int = 500) -> tuple[pd.DataFrame, pd
         return pd.DataFrame(), pd.DataFrame()
 
 
+def _fmp_fetch(symbol: str, limit: int = 500) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    FMP (Financial Modeling Prep) historical daily fallback.
+    Covers tickers that yfinance and Alpha Vantage miss or rate-limit.
+    Returns (empty, empty) on failure.
+    """
+    try:
+        import urllib.request
+        import json
+
+        FMP_KEY  = "V981vaUJOuOmNrltZDCKNt3RSwsc0MGW"
+        url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{symbol}?apikey={FMP_KEY}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RoboAlgo/3"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            data = json.loads(r.read())
+
+        hist = data.get("historical", [])
+        if not hist:
+            return pd.DataFrame(), pd.DataFrame()
+
+        rows = []
+        for bar in reversed(hist):           # FMP returns newest-first
+            rows.append({
+                "date":   pd.Timestamp(bar["date"]),
+                "open":   float(bar["open"]),
+                "high":   float(bar["high"]),
+                "low":    float(bar["low"]),
+                "close":  float(bar.get("adjClose", bar["close"])),
+                "volume": float(bar["volume"]),
+            })
+
+        if not rows:
+            return pd.DataFrame(), pd.DataFrame()
+
+        prices = pd.DataFrame(rows).set_index("date")
+        prices.index.name = "date"
+        prices = prices.dropna(subset=["open", "close"])
+
+        indicators = _compute_indicators(prices)
+        return prices, indicators
+
+    except Exception:
+        return pd.DataFrame(), pd.DataFrame()
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 def _fetch_any(symbol: str, limit: int = 500) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Data fetching priority: DB (fastest) → yfinance (2y daily) → Alpha Vantage (fallback).
+    Data fetching priority: DB → yfinance → FMP → Alpha Vantage.
 
     limit=0 is treated identically to limit=500 here — the caller (df_to_records)
-    handles the row cap.  AV is only called as a last resort to avoid slow API
-    calls on every chart load.
+    handles the row cap.
     """
     # 1. Database — pre-computed, sub-millisecond
     prices = loader.get_prices(symbol)
@@ -229,7 +274,12 @@ def _fetch_any(symbol: str, limit: int = 500) -> tuple[pd.DataFrame, pd.DataFram
     if not prices.empty:
         return prices, indicators
 
-    # 3. Alpha Vantage — last resort for symbols yfinance doesn't cover
+    # 3. FMP — good coverage, fast
+    prices, indicators = _fmp_fetch(symbol, limit)
+    if not prices.empty:
+        return prices, indicators
+
+    # 4. Alpha Vantage — last resort
     prices, indicators = _alphavantage_fetch(symbol, limit)
     return prices, indicators
 
@@ -264,8 +314,29 @@ def get_chart_data(symbol: str, limit: int = 0, interval: str = "daily"):
     # ── Fetch fresh data ───────────────────────────────────────────────────────
     if interval == "weekly":
         prices, indicators = _yfinance_fetch(sym, limit, yf_interval="1wk")
+        # Fallback: resample daily data to weekly if yfinance weekly fails
+        if prices.empty:
+            import pandas as pd
+            daily_prices, _ = _fetch_any(sym, 0)
+            if not daily_prices.empty:
+                daily_prices.index = pd.to_datetime(daily_prices.index)
+                prices = daily_prices.resample("W").agg({
+                    "open": "first", "high": "max", "low": "min",
+                    "close": "last", "volume": "sum",
+                }).dropna(subset=["open", "close"])
+                indicators = pd.DataFrame()
     elif interval == "monthly":
         prices, indicators = _yfinance_fetch(sym, limit, yf_interval="1mo")
+        if prices.empty:
+            import pandas as pd
+            daily_prices, _ = _fetch_any(sym, 0)
+            if not daily_prices.empty:
+                daily_prices.index = pd.to_datetime(daily_prices.index)
+                prices = daily_prices.resample("ME").agg({
+                    "open": "first", "high": "max", "low": "min",
+                    "close": "last", "volume": "sum",
+                }).dropna(subset=["open", "close"])
+                indicators = pd.DataFrame()
     else:
         prices, indicators = _fetch_any(sym, limit)
 

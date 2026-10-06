@@ -83,7 +83,7 @@ class DEXEngine:
         """Compute full DEX profile from an OptionsChain."""
         from datetime import datetime, timezone
 
-        spot    = chain.spot_price
+        spot    = chain.spot
         today   = datetime.now(timezone.utc)
         strikes: dict[float, dict] = {}
 

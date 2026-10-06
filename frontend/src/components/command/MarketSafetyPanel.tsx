@@ -78,23 +78,20 @@ function HedgeRow({ hedge, onClick }: { hedge: HedgeSuggestion; onClick: () => v
   )
 }
 
-// ── Panel ─────────────────────────────────────────────────────────────────────
+// ── Panel: Safety score + component bars ──────────────────────────────────────
 
 interface Props {
   data: MarketSafetyData
 }
 
 export default function MarketSafetyPanel({ data }: Props) {
-  const navigate   = useNavigate()
   const stateColor = STATE_COLORS[data.safety_state] ?? '#6b7280'
   const stateBg    = STATE_BG[data.safety_state]   ?? '#111827'
   const stateIcon  = STATE_ICONS[data.safety_state] ?? '?'
-
   const components = data.components ?? { volatility: 50, gap: 100, portfolio: 100, data_quality: 50 }
-  const hedges     = data.suggested_hedges ?? []
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl flex flex-col">
+    <div className="bg-gray-900 border border-gray-800 rounded-xl flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
         <div>
@@ -109,13 +106,12 @@ export default function MarketSafetyPanel({ data }: Props) {
         </span>
       </div>
 
-      <div className="p-4 space-y-4">
-        {/* ── Safety score + action ── */}
+      <div className="p-4 space-y-4 flex-1">
+        {/* Safety score + action */}
         <div
           className="flex items-center gap-4 rounded-xl px-4 py-3 border"
           style={{ backgroundColor: stateBg, borderColor: stateColor + '40' }}
         >
-          {/* Big score circle */}
           <div
             className="flex-none w-16 h-16 rounded-full border-4 flex flex-col items-center justify-center"
             style={{ borderColor: stateColor }}
@@ -124,44 +120,62 @@ export default function MarketSafetyPanel({ data }: Props) {
               {data.safety_score.toFixed(0)}
             </span>
           </div>
-
-          {/* Action + multiplier */}
           <div className="flex-1 min-w-0">
-            <p className="text-sm text-gray-200 font-medium leading-snug break-words">{data.system_action}</p>
+            <p className="text-sm text-gray-200 font-medium leading-snug">{data.system_action}</p>
             <div className="flex items-center gap-2 mt-2 text-xs flex-wrap">
               <span className="text-gray-500">Size</span>
-              <span
-                className="font-bold font-mono"
-                style={{ color: data.size_multiplier >= 1 ? '#22c55e' : data.size_multiplier > 0 ? '#eab308' : '#ef4444' }}
-              >
+              <span className="font-bold font-mono" style={{ color: data.size_multiplier >= 1 ? '#22c55e' : data.size_multiplier > 0 ? '#eab308' : '#ef4444' }}>
                 {data.size_multiplier.toFixed(1)}×
               </span>
               <span className="text-gray-500">Trading</span>
-              <span
-                className="font-bold"
-                style={{ color: data.trading_allowed ? '#22c55e' : '#ef4444' }}
-              >
+              <span className="font-bold" style={{ color: data.trading_allowed ? '#22c55e' : '#ef4444' }}>
                 {data.trading_allowed ? 'ALLOWED' : 'BLOCKED'}
               </span>
             </div>
           </div>
         </div>
 
-        {/* ── Component scores ── */}
+        {/* Component scores */}
         <div className="space-y-2">
-          <p className="text-xs text-gray-500 uppercase font-medium">Score Components</p>
-          <ComponentBar label="Volatility (40%)"    score={components.volatility}   />
-          <ComponentBar label="Gap Risk (25%)"       score={components.gap}          />
-          <ComponentBar label="Portfolio (20%)"      score={components.portfolio}    />
-          <ComponentBar label="Data Quality (15%)"   score={components.data_quality} />
+          <p className="text-xs text-gray-500 uppercase font-medium tracking-widest">Score Components</p>
+          <ComponentBar label="Volatility (40%)"  score={components.volatility}   />
+          <ComponentBar label="Gap Risk (25%)"     score={components.gap}          />
+          <ComponentBar label="Portfolio (20%)"    score={components.portfolio}    />
+          <ComponentBar label="Data Quality (15%)" score={components.data_quality} />
         </div>
 
-        {/* ── Active triggers ── */}
-        {data.triggers && data.triggers.length > 0 && (
+        {data.error && (
+          <div className="px-3 py-2 rounded-lg bg-red-900/20 border border-red-800/40 text-xs text-red-400">
+            {data.error}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Panel: Active Triggers + Suggested Hedges ─────────────────────────────────
+
+export function MarketTriggersPanel({ data }: Props) {
+  const navigate   = useNavigate()
+  const stateColor = STATE_COLORS[data.safety_state] ?? '#6b7280'
+  const hedges     = data.suggested_hedges ?? []
+  const triggers   = data.triggers ?? []
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl flex flex-col h-full">
+      <div className="px-4 py-3 border-b border-gray-800">
+        <h2 className="text-sm font-semibold text-gray-100">Triggers & Hedges</h2>
+        <p className="text-xs text-gray-500 mt-0.5">Active risk events · protective instruments</p>
+      </div>
+
+      <div className="p-4 space-y-4 flex-1 overflow-y-auto">
+        {/* Active triggers */}
+        {triggers.length > 0 && (
           <div>
-            <p className="text-xs text-gray-500 uppercase font-medium mb-2">Active Triggers</p>
+            <p className="text-xs text-gray-500 uppercase font-medium tracking-widest mb-2">Active Triggers</p>
             <div className="space-y-1.5">
-              {data.triggers.map((t, i) => (
+              {triggers.map((t, i) => (
                 <div
                   key={i}
                   className="flex items-start gap-2 px-3 py-2 rounded-lg text-xs"
@@ -175,12 +189,12 @@ export default function MarketSafetyPanel({ data }: Props) {
           </div>
         )}
 
-        {/* ── Suggested Hedges (volatility spike only) ── */}
+        {/* Suggested hedges */}
         {hedges.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <p className="text-xs text-gray-500 uppercase font-medium">Suggested Hedges</p>
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-900/40 text-red-400 uppercase tracking-wide">
+              <p className="text-xs text-gray-500 uppercase font-medium tracking-widest">Suggested Hedges</p>
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-900/40 text-red-400 uppercase">
                 Vol Spike
               </span>
             </div>
@@ -196,10 +210,8 @@ export default function MarketSafetyPanel({ data }: Props) {
           </div>
         )}
 
-        {data.error && (
-          <div className="px-3 py-2 rounded-lg bg-red-900/20 border border-red-800/40 text-xs text-red-400">
-            {data.error}
-          </div>
+        {triggers.length === 0 && hedges.length === 0 && (
+          <p className="text-xs text-gray-600 italic">No active triggers or hedge alerts</p>
         )}
       </div>
     </div>

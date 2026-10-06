@@ -9,6 +9,10 @@ import OpportunityMatrixPage from './pages/OpportunityMatrixPage'
 import EdgePage              from './pages/EdgePage'
 import TickerIntelPage       from './pages/TickerIntelPage'
 import TradesPage            from './pages/TradesPage'
+import PatternMockPage       from './pages/PatternMockPage'
+import EWMockPage            from './pages/EWMockPage'
+import AllPatternsMockPage   from './pages/AllPatternsMockPage'
+import TradingViewPage       from './pages/TradingViewPage'
 import SettingsPage          from './pages/SettingsPage'
 import LoginPage             from './pages/LoginPage'
 import { AlertProvider }     from './components/alerts/AlertManager'
@@ -43,6 +47,10 @@ function ProtectedLayout() {
           <Route path="/paper"  element={<PaperTradingPage />} />
           <Route path="/trades" element={<TradesPage />} />
           <Route path="/command" element={<CommandCenterPage />} />
+          <Route path="/pattern-mock" element={<PatternMockPage />} />
+          <Route path="/ew-mock"      element={<EWMockPage />} />
+          <Route path="/all-mock"     element={<AllPatternsMockPage />} />
+          <Route path="/tv" element={<TradingViewPage />} />
 
           {/* ── Consolidated redirects — Signals hub ── */}
           <Route path="/scan"           element={<Navigate to="/signals" replace />} />

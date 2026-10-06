@@ -523,6 +523,32 @@ export function usePriceLevels(symbol: string) {
   })
 }
 
+// ── GEX / Dealer Positioning ───────────────────────────────────────────────────
+
+export interface GexResult {
+  symbol: string
+  spot_price: number
+  gex: Record<string, unknown>
+  dex: Record<string, unknown>
+  vex: Record<string, unknown>
+  gamma_flip: number | null
+  gex_regime: string | null         // POSITIVE | NEGATIVE | NEUTRAL
+  positioning_bias: string | null   // BULLISH | BEARISH | NEUTRAL
+  dex_regime: string | null         // LONG_DELTA | SHORT_DELTA | NEUTRAL
+  dealer_bias: string | null        // LONG | SHORT | NEUTRAL
+  positioning: Record<string, unknown>
+}
+
+export function useGex(symbol: string) {
+  return useQuery<GexResult>({
+    queryKey: ['gex', symbol],
+    queryFn:  () => api.get(`/quant/gex/${symbol}`).then(r => r.data),
+    enabled:  !!symbol,
+    staleTime: 5 * 60_000,
+    retry:    false,
+  })
+}
+
 export function usePatternMTF(symbol: string) {
   return useQuery<PatternMTF>({
     queryKey: ['patterns', 'mtf', symbol],

@@ -12,3 +12,22 @@ python-dotenv>=1.0.0
 tqdm>=4.66.0
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
+
+# Imported directly at module scope by files in the API's import graph.
+# `api/routers/alphavantage.py` and `api/routers/options_data.py` both do a
+# top-level `import httpx`, and `api/main.py` imports and mounts both routers —
+# so `import api.main` needs httpx before it can serve anything. It was NOT
+# guaranteed by any declared package: `pip install --dry-run --report -`
+# against this file resolves 52 packages and httpx is not one of them (only
+# starlette's `full` extra pulls it, and we declare plain `fastapi`). A clean
+# Render build therefore died at startup with `ModuleNotFoundError: No module
+# named 'httpx'` — the whole API, not one route. Verified by blocking httpx in
+# a meta_path finder and running `import api.main`.
+#
+# `requests` and `pydantic` already arrive transitively (via yfinance and
+# fastapi respectively) and are declared here for the same reason: they are
+# imported directly at module scope, so relying on a sub-dependency's pin to
+# supply them is the fragility this block exists to remove.
+httpx>=0.27.0
+requests>=2.31.0
+pydantic>=2.7.0

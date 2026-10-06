@@ -23,9 +23,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ── In-memory cache ────────────────────────────────────────────────────────────
-_CACHE_TTL_SECONDS = 60          # cache lives 60 s — reduces hammering engines
-_COLLECTOR_TIMEOUT = 8           # each panel has max 8 s to respond
+# Fast collectors (≤5s): market_state_summary, opportunity_map, active_trades,
+#                        portfolio_risk, market_safety, signal_reliability
+# Slow collectors (>5s): active_strategy (~22s), opportunity_radar (~13s), system_health
+#
+# Strategy: fast collectors run on every request with a 8s deadline.
+#           Slow collectors run in a background thread, refreshed every 5 min.
+#           Command-center response always returns within ~8s, serving stale
+#           slow data until the background worker finishes.
+
+_FAST_TIMEOUT    = 8             # deadline for fast collectors (s)
+_SLOW_TTL        = 300           # slow panels refresh every 5 min
+_FAST_TTL        = 60            # fast panels refresh every 60 s
 _cache: dict[str, Any] = {"data": None, "expires_at": datetime.min}
+_slow_cache: dict[str, Any] = {}  # latest slow-panel results (stale OK)
+_slow_refreshing = False          # prevent duplicate background refresh
 
 
 def _is_cache_valid() -> bool:
@@ -34,7 +46,7 @@ def _is_cache_valid() -> bool:
 
 def _set_cache(data: dict) -> None:
     _cache["data"] = data
-    _cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_CACHE_TTL_SECONDS)
+    _cache["expires_at"] = datetime.utcnow() + timedelta(seconds=_FAST_TTL)
 
 
 def _run_collector(name: str, fn: Callable, fallback: Any) -> tuple[str, Any]:
@@ -49,63 +61,104 @@ def _run_collector(name: str, fn: Callable, fallback: Any) -> tuple[str, Any]:
         return name, fallback
 
 
+# ── Slow-panel background refresh ─────────────────────────────────────────────
+
+_SLOW_PANELS: list[tuple[str, Callable, Any]] = []   # populated lazily below
+
+def _refresh_slow_panels_bg():
+    """Run slow collectors in background and update _slow_cache."""
+    global _slow_refreshing
+    try:
+        for name, fn, fb in [
+            ("active_strategy", _get_active_strategy, {"dominant_regime": "UNKNOWN", "error": "timeout"}),
+            ("opportunity_radar", _get_opportunity_radar, {"instruments": [], "early_stage_count": 0}),
+            ("system_health", _get_system_health, {"pipeline_status": "UNKNOWN", "data_quality_score": 0}),
+        ]:
+            try:
+                _, value = _run_collector(name, fn, fb)
+                _slow_cache[name] = value
+                _slow_cache[f"{name}_updated_at"] = datetime.utcnow().isoformat() + "Z"
+            except Exception as e:
+                logger.warning(f"Slow panel {name} failed: {e}")
+    finally:
+        _slow_refreshing = False
+
+
+def _maybe_trigger_slow_refresh():
+    """Kick off background slow-panel refresh if not already running and data is stale."""
+    global _slow_refreshing
+    if _slow_refreshing:
+        return
+    last = _slow_cache.get("active_strategy_updated_at")
+    if last:
+        age = (datetime.utcnow() - datetime.fromisoformat(last.rstrip("Z"))).total_seconds()
+        if age < _SLOW_TTL:
+            return   # still fresh
+    _slow_refreshing = True
+    import threading
+    threading.Thread(target=_refresh_slow_panels_bg, daemon=True).start()
+
+
 # ── Main endpoint ──────────────────────────────────────────────────────────────
 
 @router.get("")
 def get_command_center():
     """
     Aggregate and return the full Command Center state.
-    All panel collectors run in parallel with an 8 s timeout each.
-    Cached for 60 seconds.
+    Fast panels (≤5s) run on every request with an 8s deadline.
+    Slow panels (active_strategy, opportunity_radar, system_health) are refreshed
+    in a background thread every 5 min — stale data served until ready.
+    Response time: always ≤ ~8 seconds.
     """
     if _is_cache_valid():
         return _cache["data"]
 
-    # Define collectors with their fallback values
-    collectors: list[tuple[str, Callable, Any]] = [
-        ("active_strategy",      _get_active_strategy,      {"dominant_regime": "UNKNOWN", "error": "timeout"}),
+    # Trigger background refresh of slow panels (non-blocking)
+    _maybe_trigger_slow_refresh()
+
+    # Fast collectors only — complete within 8s
+    fast_collectors: list[tuple[str, Callable, Any]] = [
         ("market_state_summary", _get_market_state_summary, {"counts": {}, "instruments": []}),
-        ("opportunity_radar",    _get_opportunity_radar,    {"instruments": [], "early_stage_count": 0}),
         ("opportunity_map",      _get_opportunity_map,      {"signals": []}),
         ("active_trades",        _get_active_trades,        {"trades": [], "count": 0}),
         ("portfolio_risk",       _get_portfolio_risk,       {"account_equity": 0, "open_positions": 0}),
-        ("system_health",        _get_system_health,        {"pipeline_status": "UNKNOWN", "data_quality_score": 0}),
         ("signal_reliability",   _get_signal_reliability,   {"strategies": [], "system_reliability": None}),
         ("market_safety",        _get_market_safety,        {"safety_state": "CAUTION", "trading_allowed": True}),
     ]
 
     result: dict[str, Any] = {"generated_at": datetime.utcnow().isoformat() + "Z"}
 
-    # Run all collectors in parallel with a GLOBAL deadline.
-    # Bug fixed: per-future timeout=9s applied sequentially = 9 × 9 = 81s worst case.
-    # Fix: compute a single end_time, and shrink each future's timeout to the
-    # remaining budget.  Total wall-time is always ≤ _COLLECTOR_TIMEOUT + 1 seconds.
-    pool = ThreadPoolExecutor(max_workers=len(collectors))
+    # Seed slow panels from background cache (may be stale or empty on first load)
+    for key in ("active_strategy", "opportunity_radar", "system_health"):
+        result[key] = _slow_cache.get(key, {
+            "active_strategy":   {"dominant_regime": "LOADING", "error": "refreshing…"},
+            "opportunity_radar": {"instruments": [], "early_stage_count": 0},
+            "system_health":     {"pipeline_status": "UNKNOWN", "data_quality_score": 0},
+        }.get(key, {}))
+
+    # Run fast collectors in parallel
+    from concurrent.futures import as_completed
+    fallback_map = {name: fb for name, _, fb in fast_collectors}
+    for name, _, fb in fast_collectors:
+        result[name] = fb
+
+    pool = ThreadPoolExecutor(max_workers=len(fast_collectors))
     try:
         futures = {
             pool.submit(_run_collector, name, fn, fb): name
-            for name, fn, fb in collectors
+            for name, fn, fb in fast_collectors
         }
-        # Global deadline — all futures must finish within this window
-        deadline = time.monotonic() + _COLLECTOR_TIMEOUT + 1
-
-        fallback_map = {name: fb for name, _, fb in collectors}
-
-        for future in futures:
-            name     = futures[future]
-            fallback = fallback_map.get(name, {})
-            remaining = max(0.05, deadline - time.monotonic())
+        for future in as_completed(futures, timeout=_FAST_TIMEOUT):
             try:
-                key, value = future.result(timeout=remaining)
+                key, value = future.result(timeout=0)
                 result[key] = value
-            except FuturesTimeout:
-                result[name] = fallback
-                logger.warning(f"Command center timeout: {name}")
             except Exception as e:
-                result[name] = fallback
-                logger.warning(f"Command center error {name}: {e}")
+                name = futures[future]
+                logger.warning(f"Command center fast error {name}: {e}")
+    except FuturesTimeout:
+        slow = [futures[f] for f in futures if not f.done()]
+        logger.warning(f"Command center fast deadline exceeded: {slow}")
     finally:
-        # Abandon any threads still running — don't block the HTTP response
         pool.shutdown(wait=False, cancel_futures=True)
 
     _set_cache(result)
@@ -189,42 +242,57 @@ def _get_market_state_summary() -> dict:
     """
     Aggregate market state data for all instruments.
     Returns state counts + per-symbol detail sorted by state priority.
+    Uses a single JOIN query (no N+1) for speed inside the global deadline.
     """
     STATE_PRIORITY = {"EXPANSION": 0, "TREND": 1, "COMPRESSION": 2, "CHAOS": 3}
 
     try:
-        from market_state_engine.state import MarketStateEngine
         from database.connection import get_session
-        from database.models import Instrument, MarketState
-        from sqlalchemy import select, desc
+        from sqlalchemy import text
 
-        engine = MarketStateEngine()
-        counts = engine.get_state_summary()
-
-        # Get latest state per instrument
-        instruments_data = []
+        # Two fast queries instead of slow engine call (26s → ~3s total)
         with get_session() as session:
-            instruments = session.execute(select(Instrument)).scalars().all()
-            for inst in instruments:
-                row = session.execute(
-                    select(MarketState)
-                    .where(MarketState.instrument_id == inst.id)
-                    .order_by(desc(MarketState.date))
-                    .limit(1)
-                ).scalar_one_or_none()
+            # Latest state per instrument via DISTINCT ON (uses ix_market_state_inst_date)
+            rows = session.execute(text("""
+                SELECT DISTINCT ON (ms.instrument_id)
+                    i.symbol,
+                    ms.state,
+                    ms.volatility_percentile,
+                    ms.trend_strength,
+                    ms.expansion_strength,
+                    ms.ma_alignment,
+                    ms.adx,
+                    ms.volume_ratio,
+                    ms.size_multiplier
+                FROM market_states ms
+                JOIN instruments i ON ms.instrument_id = i.id
+                ORDER BY ms.instrument_id, ms.date DESC
+            """)).all()
 
-                if row:
-                    instruments_data.append({
-                        "symbol":                inst.symbol,
-                        "state":                 row.state,
-                        "volatility_percentile": row.volatility_percentile,
-                        "trend_strength":        row.trend_strength,
-                        "expansion_strength":    row.expansion_strength,
-                        "ma_alignment":          row.ma_alignment,
-                        "adx":                   row.adx,
-                        "volume_ratio":          row.volume_ratio,
-                        "size_multiplier":       row.size_multiplier,
-                    })
+            # State counts from latest date only
+            count_rows = session.execute(text("""
+                SELECT state, COUNT(*) as cnt
+                FROM market_states
+                WHERE date = (SELECT MAX(date) FROM market_states)
+                GROUP BY state
+            """)).all()
+
+        counts = {r.state: r.cnt for r in count_rows}
+
+        instruments_data = [
+            {
+                "symbol":                r.symbol,
+                "state":                 r.state,
+                "volatility_percentile": r.volatility_percentile,
+                "trend_strength":        r.trend_strength,
+                "expansion_strength":    r.expansion_strength,
+                "ma_alignment":          r.ma_alignment,
+                "adx":                   r.adx,
+                "volume_ratio":          r.volume_ratio,
+                "size_multiplier":       r.size_multiplier,
+            }
+            for r in rows
+        ]
 
         # Sort: EXPANSION first, then TREND, then COMPRESSION, then CHAOS
         instruments_data.sort(

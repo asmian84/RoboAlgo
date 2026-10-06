@@ -451,7 +451,12 @@ def _detect_accumulation(
         "invalidation_level": round(invalidation, 4),
         "confidence": round(confidence, 2),
         "points": [[p["index"], p["price"]] for p in range_lows[-3:] + range_highs[-3:]],
+        "point_labels": (["SL1", "SL2", "SL3"][:len(range_lows[-3:])]
+                         + ["SH1", "SH2", "SH3"][:len(range_highs[-3:])]),
         "overlay_lines": overlay_lines,
+        "overlay_line_roles": ["resistance", "support", "midline"] + (
+            ["neckline_ext"] if status in ("BREAKOUT", "COMPLETED") else []
+        ),
         "phase": phase,
         "phase_label": phase_label,
         "events": events,
@@ -576,7 +581,12 @@ def _detect_distribution(
         "invalidation_level": round(invalidation, 4),
         "confidence": round(confidence, 2),
         "points": [[p["index"], p["price"]] for p in range_lows[-3:] + range_highs[-3:]],
+        "point_labels": (["SL1", "SL2", "SL3"][:len(range_lows[-3:])]
+                         + ["SH1", "SH2", "SH3"][:len(range_highs[-3:])]),
         "overlay_lines": overlay_lines,
+        "overlay_line_roles": ["resistance", "support", "midline"] + (
+            ["neckline_ext"] if status in ("BREAKOUT", "COMPLETED") else []
+        ),
         "phase": phase,
         "phase_label": phase_label,
         "events": events,

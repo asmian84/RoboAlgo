@@ -87,11 +87,27 @@ def detect(symbol: str, price_data: pd.DataFrame) -> dict[str, Any]:
                                  market_regime_score(df), momentum_score(df))
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=bullish)
 
+    # ── Draw horizontal lines through actual swing pivot prices, extended forward ──
     first_idx = int(min(xh[0], xl[0]))
+    fwd_idx = last_idx + 15
+    # Resistance: average of swing high prices (flat horizontal line)
+    res_price = float(np.mean(yh))
+    sup_price = float(np.mean(yl))
+
     overlay_lines = [
-        [[first_idx, float(h_slope * first_idx + h_int)], [last_idx, resistance]],
-        [[first_idx, float(l_slope * first_idx + l_int)], [last_idx, support]],
+        # Horizontal resistance through actual highs, extended forward
+        [[first_idx, round(res_price, 4)], [fwd_idx, round(res_price, 4)]],
+        # Horizontal support through actual lows, extended forward
+        [[first_idx, round(sup_price, 4)], [fwd_idx, round(sup_price, 4)]],
+        # Measured move: breakout → target
+        [[last_idx, round(breakout, 4)], [last_idx, round(target, 4)]],
     ]
+
+    all_pts = [[int(p["index"]), float(p["price"])] for p in highs] + \
+              [[int(p["index"]), float(p["price"])] for p in lows]
+    all_pts.sort(key=lambda x: x[0])
+    h_set = {(int(p["index"]), float(p["price"])) for p in highs}
+    pt_labels = ["H" if (pt[0], pt[1]) in h_set else "L" for pt in all_pts]
 
     result.update({
         "pattern_name":       "Rectangle",
@@ -102,9 +118,11 @@ def detect(symbol: str, price_data: pd.DataFrame) -> dict[str, Any]:
         "confidence":         round(prob, 2),
         "probability":        round(prob, 2),
         "direction":          "bullish" if bullish else "bearish",
-        "points":             [[p["index"], p["price"]] for p in highs[-2:] + lows[-2:]],
+        "points":             all_pts,
+        "point_labels":       pt_labels,
         "overlay_lines":      overlay_lines,
-        "overlay_line_roles": ["resistance", "support"],
+        "overlay_line_roles": ["resistance", "support", "measured_move"],
+        "fill_zone": {"upper": 0, "lower": 1, "color": "#8B5CF6", "opacity": 0.08},
         "support_level":      round(support, 4),
         "resistance_level":   round(resistance, 4),
     })

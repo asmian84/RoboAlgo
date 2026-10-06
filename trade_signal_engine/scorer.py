@@ -18,6 +18,552 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+# ── MTF Stochastic Confluence ────────────────────────────────────────────────
+# Computes Slow Stochastic (14,3,3) on any OHLC DataFrame and returns
+# the full recent history needed to detect bull crosses.
+
+def _slow_stochastic_series(
+    df: pd.DataFrame, k_period: int = 14, d_period: int = 3,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return full slow_k and slow_d arrays for a DataFrame with high/low/close."""
+    highs  = df["high"].values.astype(float)
+    lows   = df["low"].values.astype(float)
+    closes = df["close"].values.astype(float)
+    n = len(closes)
+    if n < k_period + d_period:
+        return np.full(n, 50.0), np.full(n, 50.0)
+
+    raw_k = np.full(n, 50.0)
+    for i in range(k_period - 1, n):
+        wh = float(np.max(highs[i - k_period + 1 : i + 1]))
+        wl = float(np.min(lows[i - k_period + 1 : i + 1]))
+        if wh - wl > 0:
+            raw_k[i] = ((closes[i] - wl) / (wh - wl)) * 100.0
+
+    slow_k = np.convolve(raw_k, np.ones(d_period) / d_period, mode="full")
+    slow_k = slow_k[d_period - 1 : n + d_period - 1][:n]
+    slow_d = np.convolve(slow_k, np.ones(d_period) / d_period, mode="full")
+    slow_d = slow_d[d_period - 1 : n + d_period - 1][:n]
+    return slow_k, slow_d
+
+
+def _detect_stoch_setup(
+    df: pd.DataFrame | None,
+    lookback: int = 5,
+) -> dict:
+    """
+    Detect the QUBT-style stochastic setup on a single timeframe.
+
+    LONG setup (oversold bull cross):
+      - %K and %D BOTH below 20 (deep oversold)
+      - %K JUST crossed above %D (fresh cross, no run-up)
+      - After cross: %K still below 30 (hasn't run yet)
+
+    SHORT setup (overbought bear cross):
+      - %K and %D BOTH above 80 (deep overbought)
+      - %K JUST crossed below %D (fresh cross, no fade)
+      - After cross: %K still above 70 (hasn't faded yet)
+
+    Returns dict with setup info for both sides.
+    """
+    empty = {
+        "available": False, "k": 50.0, "d": 50.0,
+        "long_cross": False, "short_cross": False,
+        "long_score": 0.0, "short_score": 0.0,
+        "label": "no data",
+    }
+    if df is None or len(df) < 20:
+        return empty
+
+    sk, sd_arr = _slow_stochastic_series(df)
+    k_now, d_now = float(sk[-1]), float(sd_arr[-1])
+
+    result = {
+        "available": True,
+        "k": round(k_now, 1),
+        "d": round(d_now, 1),
+        "long_cross": False,
+        "short_cross": False,
+        "long_score": 0.0,
+        "short_score": 0.0,
+        "label": "",
+    }
+
+    # ── Scan last `lookback` bars for crosses ──────────────────────
+    best_long_score = 0.0
+    best_short_score = 0.0
+
+    for i in range(-lookback, 0):
+        if abs(i) >= len(sk) or abs(i - 1) >= len(sk):
+            continue
+        prev_k, prev_d = float(sk[i - 1]), float(sd_arr[i - 1])
+        curr_k, curr_d = float(sk[i]),     float(sd_arr[i])
+
+        # ── LONG: bull cross from oversold ─────────────────────────
+        # prev_k <= prev_d AND curr_k > curr_d  (cross happened)
+        # BOTH must be below 20 at time of cross  (deep oversold)
+        # %K must be at least 5 (not scraping zero — that's freefall noise)
+        # %K must separate from %D by at least 2 points (not rounding noise)
+        if prev_k <= prev_d and curr_k > curr_d:
+            spread = curr_k - curr_d
+            if curr_k < 5 or spread < 2.0:
+                pass  # noise cross — K too close to zero or spread too small
+            elif curr_k < 20 and curr_d < 20:
+                # PERFECT: both deep oversold, fresh cross with real separation
+                best_long_score = max(best_long_score, 1.0)
+            elif curr_k < 25 and curr_d < 25:
+                # STRONG: both in oversold zone
+                best_long_score = max(best_long_score, 0.85)
+            elif curr_k < 30:
+                # OK: cross near oversold
+                best_long_score = max(best_long_score, 0.6)
+
+        # ── SHORT: bear cross from overbought ──────────────────────
+        # prev_k >= prev_d AND curr_k < curr_d  (cross happened)
+        # BOTH must be above 80 at time of cross  (deep overbought)
+        # %K must be below 95 (not pinned at 100 — that's melt-up noise)
+        # %K must separate from %D by at least 2 points
+        if prev_k >= prev_d and curr_k < curr_d:
+            spread = curr_d - curr_k
+            if curr_k > 95 or spread < 2.0:
+                pass  # noise cross — K pinned at ceiling or spread too small
+            elif curr_k > 80 and curr_d > 80:
+                # PERFECT: both deep overbought, fresh bear cross
+                best_short_score = max(best_short_score, 1.0)
+            elif curr_k > 75 and curr_d > 75:
+                # STRONG: both in overbought zone
+                best_short_score = max(best_short_score, 0.85)
+            elif curr_k > 70:
+                # OK: cross near overbought
+                best_short_score = max(best_short_score, 0.6)
+
+    # ── ANTI-RUN-UP CHECK ──────────────────────────────────────────
+    # Even if a cross happened recently, if %K has already run away from
+    # the extreme zone, the setup is GONE — you missed it.
+    # Thresholds are tight: we only want the absolute freshest crosses.
+    if best_long_score > 0:
+        if k_now > 30:
+            # %K ran above 30 — the cross already played out
+            best_long_score = 0.0
+            result["label"] = f"Long cross happened but %K ran to {k_now:.0f} — missed"
+        elif k_now > 22:
+            # Slight run-up, reduce confidence significantly
+            best_long_score *= 0.5
+
+    if best_short_score > 0:
+        if k_now < 70:
+            # %K dropped below 70 — the bear cross already played out
+            best_short_score = 0.0
+            result["label"] = f"Short cross happened but %K dropped to {k_now:.0f} — missed"
+        elif k_now < 78:
+            best_short_score *= 0.5
+
+    result["long_cross"] = best_long_score > 0
+    result["short_cross"] = best_short_score > 0
+    result["long_score"] = round(best_long_score, 2)
+    result["short_score"] = round(best_short_score, 2)
+
+    if best_long_score >= 0.85:
+        result["label"] = f"OVERSOLD CROSS %K={k_now:.0f} %D={d_now:.0f}"
+    elif best_long_score > 0:
+        result["label"] = f"Bull cross near oversold %K={k_now:.0f}"
+    elif best_short_score >= 0.85:
+        result["label"] = f"OVERBOUGHT CROSS %K={k_now:.0f} %D={d_now:.0f}"
+    elif best_short_score > 0:
+        result["label"] = f"Bear cross near overbought %K={k_now:.0f}"
+    elif k_now < 20 and d_now < 20:
+        result["label"] = f"Oversold %K={k_now:.0f} %D={d_now:.0f} — cross forming"
+    elif k_now > 80 and d_now > 80:
+        result["label"] = f"Overbought %K={k_now:.0f} %D={d_now:.0f} — bear cross forming"
+    else:
+        result["label"] = f"No setup — %K={k_now:.0f} %D={d_now:.0f}"
+
+    return result
+
+
+def _detect_base_compression(df: pd.DataFrame, lookback: int = 20) -> dict:
+    """
+    Detect if price is forming a compressed base (tight range before breakout).
+    This is the pink circle on price — base at support before the stochastic cross fires.
+    """
+    if df is None or len(df) < lookback:
+        return {"compressed": False, "range_pct": 0.0, "at_support": False}
+
+    closes = df["close"].values.astype(float)
+    highs  = df["high"].values.astype(float)
+    lows   = df["low"].values.astype(float)
+    price  = float(closes[-1])
+
+    # Range compression: recent 10-bar range vs 20-bar range
+    recent_high = float(np.max(highs[-10:]))
+    recent_low  = float(np.min(lows[-10:]))
+    wider_high  = float(np.max(highs[-lookback:]))
+    wider_low   = float(np.min(lows[-lookback:]))
+
+    recent_range = (recent_high - recent_low) / price * 100 if price > 0 else 100
+    wider_range  = (wider_high - wider_low) / price * 100 if price > 0 else 100
+    range_ratio  = recent_range / wider_range if wider_range > 0 else 1.0
+
+    # Base at support: price near the low of the range
+    price_position = (price - wider_low) / (wider_high - wider_low) if (wider_high - wider_low) > 0 else 0.5
+    at_support = price_position < 0.35  # in bottom 35% of range
+    at_resistance = price_position > 0.65  # in top 35% of range
+
+    # Compressed = recent range is <60% of wider range
+    compressed = range_ratio < 0.60
+
+    return {
+        "compressed": compressed,
+        "range_pct": round(recent_range, 2),
+        "range_ratio": round(range_ratio, 2),
+        "at_support": at_support,
+        "at_resistance": at_resistance,
+        "price_position": round(price_position, 2),
+    }
+
+
+def detect_golden_death_cross(df: pd.DataFrame, lookback: int = 5) -> dict:
+    """
+    Detect Golden Cross (50 SMA crosses above 200 SMA) and
+    Death Cross (50 SMA crosses below 200 SMA) on daily bars.
+
+    lookback: how many bars back to check for a recent cross.
+
+    Returns:
+      {
+        "golden_cross": bool,   # 50 SMA just crossed above 200 SMA
+        "death_cross": bool,    # 50 SMA just crossed below 200 SMA
+        "sma50_above_200": bool, # current state: 50 > 200
+        "sma50": float,
+        "sma200": float,
+        "cross_age": int,       # bars since last cross (0 = today)
+      }
+    """
+    empty = {"golden_cross": False, "death_cross": False, "sma50_above_200": False,
+             "sma50": 0.0, "sma200": 0.0, "cross_age": -1}
+
+    if df is None or len(df) < 200:
+        return empty
+
+    closes = df["close"].values.astype(float)
+    sma50 = np.convolve(closes, np.ones(50) / 50, mode="valid")
+    sma200 = np.convolve(closes, np.ones(200) / 200, mode="valid")
+
+    # Align: sma50 has len(closes)-49 elements, sma200 has len(closes)-199
+    # We need the overlap region
+    offset = 150  # sma50 starts 150 elements before sma200 ends
+    sma50_aligned = sma50[offset:]  # trim to same length as sma200
+
+    if len(sma50_aligned) < 2 or len(sma200) < 2:
+        return empty
+
+    current_50 = float(sma50_aligned[-1])
+    current_200 = float(sma200[-1])
+    above_now = current_50 > current_200
+
+    result = {
+        "golden_cross": False,
+        "death_cross": False,
+        "sma50_above_200": above_now,
+        "sma50": round(current_50, 2),
+        "sma200": round(current_200, 2),
+        "cross_age": -1,
+    }
+
+    # Scan last `lookback` bars for a cross
+    scan = min(lookback, len(sma50_aligned) - 1, len(sma200) - 1)
+    for i in range(1, scan + 1):
+        prev_above = sma50_aligned[-i - 1] > sma200[-i - 1]
+        curr_above = sma50_aligned[-i] > sma200[-i]
+
+        if not prev_above and curr_above:
+            # Golden cross — 50 crossed above 200
+            result["golden_cross"] = True
+            result["cross_age"] = i - 1
+            break
+        elif prev_above and not curr_above:
+            # Death cross — 50 crossed below 200
+            result["death_cross"] = True
+            result["cross_age"] = i - 1
+            break
+
+    return result
+
+
+def _tf_direction(r: dict) -> str:
+    """Get the directional bias of a single TF's stochastic state.
+
+    Returns 'LONG', 'SHORT', 'NEUTRAL', or 'NONE' (no data).
+
+    LONG  = %K > %D (bullish — %K leading %D upward)
+    SHORT = %K < %D (bearish — %K leading %D downward)
+
+    A bear cross (%K < %D) is bearish at ANY level — not just overbought.
+    A bull cross (%K > %D) is bullish at ANY level — not just oversold.
+    The *quality* of the cross depends on level, but *direction* is clear.
+    """
+    if not r.get("available", False):
+        return "NONE"
+    k, d = r.get("k", 50), r.get("d", 50)
+    if k > d:
+        return "LONG"
+    if k < d:
+        return "SHORT"
+    return "NEUTRAL"
+
+
+def _tf_has_fresh_cross(r: dict, direction: str) -> bool:
+    """Does this TF have a FRESH cross in the given direction?"""
+    if not r.get("available", False):
+        return False
+    if direction == "LONG":
+        return r.get("long_score", 0) > 0
+    elif direction == "SHORT":
+        return r.get("short_score", 0) > 0
+    return False
+
+
+def compute_stoch_setup_gate(
+    bars: dict[str, pd.DataFrame],
+) -> dict:
+    """
+    CONFLUENCE-FIRST stochastic gate.
+
+    We're looking to WIN — not just spit out scans. Only pass setups where
+    multiple timeframes agree on direction with fresh crosses.
+
+    SCORING TIERS (confluence_level):
+      5 = "PERFECT"  — 1WK + 1D + 4H all have fresh crosses, same direction
+      4 = "STRONG"   — 1WK + 1D fresh crosses aligned, 4H confirms direction
+      3 = "GOOD"     — 1WK + 1D aligned direction (%K vs %D), at least one fresh cross
+      2 = "WEAK"     — Only one higher TF has a cross, others neutral
+      1 = "CONFLICT" — Higher TFs disagree (1WK bull, 1D bear) → REJECT
+      0 = "NONE"     — No crosses anywhere → REJECT
+
+    HARD RULES:
+      - If 1WK is bullish and 1D is bearish (or vice versa) → REJECT
+      - Every TF that agrees must be FRESH (not already ran)
+      - The confluence_level directly scales the final score
+
+    Returns per-TF breakdown + regime direction + confluence_level.
+    """
+    all_tfs = ["1wk", "1d", "4h", "1h", "15m"]
+    tf_lookbacks = {"15m": 8, "1h": 5, "4h": 4, "1d": 5, "1wk": 4}
+
+    tf_results = {}
+    for tf in all_tfs:
+        df = bars.get(tf)
+        lb = tf_lookbacks.get(tf, 5)
+        tf_results[tf] = _detect_stoch_setup(df, lookback=lb)
+
+    # ── Step 1: Read direction + freshness of each key TF ────────
+    wk_r = tf_results.get("1wk", {})
+    dy_r = tf_results.get("1d", {})
+    h4_r = tf_results.get("4h", {})
+    h1_r = tf_results.get("1h", {})
+    m15_r = tf_results.get("15m", {})
+
+    wk_dir = _tf_direction(wk_r)
+    dy_dir = _tf_direction(dy_r)
+    h4_dir = _tf_direction(h4_r)
+
+    wk_cross_long = _tf_has_fresh_cross(wk_r, "LONG")
+    wk_cross_short = _tf_has_fresh_cross(wk_r, "SHORT")
+    dy_cross_long = _tf_has_fresh_cross(dy_r, "LONG")
+    dy_cross_short = _tf_has_fresh_cross(dy_r, "SHORT")
+    h4_cross_long = _tf_has_fresh_cross(h4_r, "LONG")
+    h4_cross_short = _tf_has_fresh_cross(h4_r, "SHORT")
+
+    # ── Step 2: Determine confluence ─────────────────────────────
+    regime_dir = "NO_TRADE"
+    regime_tf = ""
+    regime_score = 0.0
+    confluence_level = 0
+    confluence_label = "NONE"
+    entry_confirms = 0
+    entry_tfs_list = []
+    label = ""
+
+    # Check for CONFLICT first — weekly and daily disagree = no trade
+    if wk_dir in ("LONG", "SHORT") and dy_dir in ("LONG", "SHORT") and wk_dir != dy_dir:
+        confluence_level = 1
+        confluence_label = "CONFLICT"
+        label = (f"TF conflict — 1WK {wk_dir} (%K={wk_r.get('k',0):.0f}) "
+                 f"vs 1D {dy_dir} (%K={dy_r.get('k',0):.0f}) — wait for alignment")
+        # Still return tf_results but REJECT
+    else:
+        # Determine direction from the highest agreeing TFs
+        # Priority: weekly > daily > 4h
+        if wk_dir in ("LONG", "SHORT"):
+            regime_dir = wk_dir
+            regime_tf = "1wk"
+        elif dy_dir in ("LONG", "SHORT"):
+            regime_dir = dy_dir
+            regime_tf = "1d"
+        elif h4_dir in ("LONG", "SHORT"):
+            regime_dir = h4_dir
+            regime_tf = "4h"
+
+        if regime_dir == "NO_TRADE":
+            # Check for any cross at all on lower TFs
+            for tf in all_tfs:
+                r = tf_results[tf]
+                if r.get("long_score", 0) > 0:
+                    regime_dir = "LONG"
+                    regime_tf = tf
+                    regime_score = r["long_score"] * 0.3  # weak — single low TF
+                    confluence_level = 2
+                    confluence_label = "WEAK"
+                    break
+                if r.get("short_score", 0) > 0:
+                    regime_dir = "SHORT"
+                    regime_tf = tf
+                    regime_score = r["short_score"] * 0.3
+                    confluence_level = 2
+                    confluence_label = "WEAK"
+                    break
+
+        if regime_dir != "NO_TRADE" and confluence_level == 0:
+            # Count how many key TFs (1wk, 1d, 4h) agree
+            is_long = regime_dir == "LONG"
+            agree_tfs = []
+            cross_tfs = []
+
+            for tf_name, tf_dir, has_cross_l, has_cross_s in [
+                ("1wk", wk_dir, wk_cross_long, wk_cross_short),
+                ("1d",  dy_dir, dy_cross_long, dy_cross_short),
+                ("4h",  h4_dir, h4_cross_long, h4_cross_short),
+            ]:
+                k_val = tf_results[tf_name].get("k", 50)
+                # Zone-aware: LONG agreement requires K < 50 (still in bullish zone,
+                # not an exhausted short at oversold). SHORT requires K > 50.
+                in_zone = (k_val < 50) if is_long else (k_val > 50)
+                if tf_dir == regime_dir and in_zone:
+                    agree_tfs.append(tf_name)
+                    if (is_long and has_cross_l) or (not is_long and has_cross_s):
+                        cross_tfs.append(tf_name)
+
+            # Also count 1h, 15m, and 4h as entry confirmations
+            # Fresh cross = strongest, but direction agreement also counts
+            for tf_name, tf_r in [("4h", h4_r), ("1h", h1_r), ("15m", m15_r)]:
+                if tf_name in cross_tfs:
+                    continue  # already counted as regime TF
+                tf_d = _tf_direction(tf_r)
+                has_cross = _tf_has_fresh_cross(tf_r, regime_dir)
+                if has_cross:
+                    entry_confirms += 1
+                    entry_tfs_list.append(tf_name)
+                elif tf_d == regime_dir:
+                    entry_confirms += 1
+                    entry_tfs_list.append(tf_name)
+
+            n_agree = len(agree_tfs)
+            n_cross = len(cross_tfs)
+
+            # ── TIER 5: PERFECT — 1WK + 1D + 4H all have fresh crosses
+            if n_cross >= 3:
+                confluence_level = 5
+                confluence_label = "PERFECT"
+                regime_score = 1.0
+                regime_tf = cross_tfs[0]  # highest TF with cross
+
+            # ── TIER 4: STRONG — 1WK + 1D both have fresh crosses, 4H agrees
+            elif n_cross >= 2 and "1wk" in cross_tfs and "1d" in cross_tfs:
+                confluence_level = 5 if h4_dir == regime_dir else 4
+                confluence_label = "PERFECT" if h4_dir == regime_dir else "STRONG"
+                regime_score = 0.95 if confluence_level == 5 else 0.85
+                regime_tf = "1wk"
+
+            # ── TIER 4: STRONG — any 2 of (1wk,1d,4h) have fresh crosses
+            elif n_cross >= 2:
+                confluence_level = 4
+                confluence_label = "STRONG"
+                regime_score = 0.80
+                regime_tf = cross_tfs[0]
+
+            # ── TIER 3: GOOD — 1WK + 1D agree direction, at least one cross
+            elif n_agree >= 2 and n_cross >= 1:
+                confluence_level = 3
+                confluence_label = "GOOD"
+                regime_score = 0.65
+                regime_tf = cross_tfs[0]
+
+            # ── TIER 2: WEAK — only one TF has a cross, others neutral
+            elif n_cross >= 1:
+                confluence_level = 2
+                confluence_label = "WEAK"
+                regime_score = 0.35
+                regime_tf = cross_tfs[0]
+
+            else:
+                # Direction agrees but no fresh crosses — stale
+                confluence_level = 2
+                confluence_label = "WEAK"
+                regime_score = 0.20
+                regime_tf = agree_tfs[0] if agree_tfs else ""
+
+    # ── Base compression check (price structure) ──────────────────
+    base_df = bars.get("1d") if bars.get("1d") is not None and len(bars.get("1d", [])) >= 20 else bars.get("1h")
+    base = _detect_base_compression(base_df)
+
+    # ── Gate decision ─────────────────────────────────────────────
+    # Only pass setups with confluence level >= 4 (STRONG or better)
+    # GOOD, WEAK, and CONFLICT are rejected — fresh cross on 2+ key TFs required.
+    # This ensures the run literally hasn't started yet across multiple timeframes.
+    setup_pass = confluence_level >= 4
+
+    # ── Build label ───────────────────────────────────────────────
+    if not label:  # conflict already set its own label
+        if setup_pass:
+            dir_emoji = "LONG" if regime_dir == "LONG" else "SHORT"
+            cross_info = []
+            for tf in ["1wk", "1d", "4h"]:
+                r = tf_results[tf]
+                if not r.get("available"):
+                    continue
+                d = _tf_direction(r)
+                has_cross = _tf_has_fresh_cross(r, regime_dir)
+                status = "CROSS" if has_cross else d
+                cross_info.append(f"{tf.upper()}:{status}(%K={r['k']:.0f})")
+            label = f"{dir_emoji} {confluence_label} — {' | '.join(cross_info)}"
+            if entry_confirms > 0:
+                label += f" | entry: {','.join(entry_tfs_list)}"
+            if base.get("compressed"):
+                label += " | base compressed"
+        else:
+            if confluence_level == 1:
+                pass  # conflict label already set
+            elif confluence_level == 2:
+                parts = []
+                for tf in ["1wk", "1d", "4h"]:
+                    r = tf_results[tf]
+                    if r.get("available"):
+                        d = _tf_direction(r)
+                        parts.append(f"{tf.upper()}:{d}(%K={r['k']:.0f})")
+                label = f"Weak — only 1 TF cross, no confluence: {' | '.join(parts)}"
+            else:
+                parts = []
+                for tf in all_tfs:
+                    r = tf_results[tf]
+                    if r.get("available"):
+                        parts.append(f"{tf}:%K={r['k']:.0f}")
+                label = f"No setup — {', '.join(parts)}"
+
+    return {
+        "pass": setup_pass,
+        "direction": regime_dir,
+        "regime_tf": regime_tf,
+        "regime_score": round(regime_score, 2),
+        "confluence_level": confluence_level,
+        "confluence_label": confluence_label,
+        "entry_confirms": entry_confirms,
+        "entry_tfs": entry_tfs_list,
+        "base": base,
+        "label": label,
+        "tf_results": tf_results,
+    }
+
+
 @dataclass
 class ScoredSignal:
     symbol: str
@@ -32,29 +578,32 @@ class ScoredSignal:
 
 
 UNIFIED_WEIGHTS = {
-    # Direction Agreement (35%)
-    "mtf_alignment":       0.15,
-    "trend_alignment":     0.10,
-    "wave_phase":          0.05,
-    "structure_shift":     0.05,
-    # Smart Money (20%)
-    "fvg_confluence":      0.06,
-    "order_block":         0.06,
-    "premium_discount":    0.04,
-    "liquidity_sweep":     0.04,
-    # Institutional Flow (15%)
-    "gex_signal":          0.08,
-    "dealer_positioning":  0.04,
+    # Sweep Sniper (20%) — highest priority: liquidity sweep + stochastic
+    "sweep_sniper":        0.12,
+    "stoch_timing":        0.08,
+    # Direction Agreement (25%)
+    "mtf_alignment":       0.10,
+    "trend_alignment":     0.08,
+    "wave_phase":          0.04,
+    "structure_shift":     0.03,
+    # Smart Money (15%)
+    "fvg_confluence":      0.05,
+    "order_block":         0.05,
+    "premium_discount":    0.03,
+    "liquidity_sweep":     0.02,
+    # Institutional Flow (12%)
+    "gex_signal":          0.06,
+    "dealer_positioning":  0.03,
     "catalyst":            0.03,
-    # Structure Quality (15%)
-    "pattern_score":       0.05,
-    "level_confluence":    0.05,
+    # Structure Quality (13%)
+    "pattern_score":       0.04,
+    "level_confluence":    0.04,
     "breakout_strength":   0.03,
     "relative_strength":   0.02,
     # Timing (15%)
-    "cycle_alignment":     0.05,
-    "exhaustion_check":    0.05,
-    "vol_compression":     0.05,
+    "cycle_alignment":     0.04,
+    "exhaustion_check":    0.04,
+    "vol_compression":     0.07,
 }
 
 TRADE_PROFILES = {
@@ -132,6 +681,26 @@ class UnifiedScorer:
         # Compute ATR
         atr = self._compute_atr(primary_df)
 
+        # ── STOCHASTIC SETUP GATE — the ONLY hard gate ──────────────
+        # Find the QUBT setup: Slow STO extreme-zone cross.
+        # LONG:  %K & %D both < 20, %K just crossed above %D, no run-up
+        # SHORT: %K & %D both > 80, %K just crossed below %D, no run-up
+        # ANY timeframe showing this passes. Multiple TFs = higher confidence.
+        stoch_gate = compute_stoch_setup_gate(sd.bars)
+        if not stoch_gate["pass"]:
+            return ScoredSignal(
+                symbol=sd.symbol,
+                profile=sd.profile,
+                score=0,
+                direction="NO_TRADE",
+                confidence="NONE",
+                rejection_reason=stoch_gate["label"],
+                component_details={"stoch_gate": stoch_gate},
+            )
+
+        # Direction comes from the stochastic setup itself
+        gate_direction = stoch_gate["direction"]  # "LONG" or "SHORT"
+
         # ── 1. MTF Alignment (15%) ──────────────────────────────────
         mtf_score = 0.5
         mtf_bias = "NEUTRAL"
@@ -165,13 +734,8 @@ class UnifiedScorer:
         elif mtf_score < 0.40:
             mtf_penalty = 4.0   # slight penalty
 
-        # Determine target direction: MTF bias → trend fallback
-        if mtf_bias in ("LONG", "SHORT"):
-            target_dir = "long" if mtf_bias == "LONG" else "short"
-        else:
-            # Fallback: use simple trend from price vs MA20/MA50
-            trend_score = self._score_trend(primary_df)
-            target_dir = "long" if trend_score >= 0.50 else "short"
+        # Direction is dictated by the stochastic setup (not MTF alignment)
+        target_dir = "long" if gate_direction == "LONG" else "short"
 
         # ── 2. Trend Alignment (10%) ────────────────────────────────
         components["trend_alignment"] = self._score_trend(primary_df)
@@ -278,7 +842,61 @@ class UnifiedScorer:
                 zone_penalty = 8.0
                 bonuses.append("penalty: DISCOUNT zone for shorts (-8)")
 
-        # ── 5. Liquidity Sweep (4%) ────────────────────────────────
+        # ── SWEEP SNIPER (20%) — highest priority component ────────
+        sweep_result = None
+        try:
+            from trade_signal_engine.sweep_sniper import SweepSniper
+
+            sniper = SweepSniper()
+            sweep_result = sniper.analyze(primary_df, current_price, sd.profile)
+
+            # sweep_sniper component (12%): based on sweep score
+            if sweep_result.has_sweep:
+                # Map 0-100 sweep score to 0.5-1.0 (sweep is always bullish)
+                components["sweep_sniper"] = min(1.0, 0.5 + sweep_result.sweep_score / 200)
+            else:
+                components["sweep_sniper"] = 0.45  # slight bearish if no sweep
+
+            # stoch_timing component (8%): stochastic oversold + cross
+            stoch_score = 0.5
+            if sweep_result.stoch_oversold and sweep_result.stoch_cross:
+                stoch_score = 0.95  # perfect timing: oversold + bullish cross
+            elif sweep_result.stoch_oversold:
+                stoch_score = 0.80  # oversold but no cross yet
+            elif sweep_result.stoch_cross:
+                stoch_score = 0.70  # cross but not from deep oversold
+            elif sweep_result.stoch_k < 30:
+                stoch_score = 0.65  # approaching oversold
+            elif sweep_result.stoch_k > 80:
+                stoch_score = 0.30  # overbought — bad timing
+            components["stoch_timing"] = stoch_score
+
+            details["sweep"] = {
+                "has_sweep": sweep_result.has_sweep,
+                "sweep_score": sweep_result.sweep_score,
+                "sweep_level": sweep_result.sweep_level,
+                "entry": sweep_result.entry,
+                "stop": sweep_result.stop,
+                "target": sweep_result.target,
+                "extended_target": sweep_result.extended_target,
+                "runner_target": sweep_result.runner_target,
+                "risk_reward": sweep_result.risk_reward,
+                "stoch_k": sweep_result.stoch_k,
+                "stoch_d": sweep_result.stoch_d,
+                "stoch_oversold": sweep_result.stoch_oversold,
+                "stoch_cross": sweep_result.stoch_cross,
+                "base_compressed": sweep_result.base_compressed,
+                "volume_confirmed": sweep_result.volume_confirmed,
+                "support_pools": sweep_result.support_pools,
+                "resistance_pools": sweep_result.resistance_pools,
+            }
+        except Exception as e:
+            logger.debug("Sweep sniper unavailable: %s", e)
+
+        components.setdefault("sweep_sniper", 0.50)
+        components.setdefault("stoch_timing", 0.50)
+
+        # ── 5. Liquidity Sweep (2%) — legacy component ────────────
         components["liquidity_sweep"] = self._score_liquidity(primary_df, atr)
 
         # ── 6. Time Exhaustion (5%) ────────────────────────────────
@@ -428,6 +1046,122 @@ class UnifiedScorer:
 
         # ── SCORE BOOSTERS ─────────────────────────────────────────
         bonus = 0
+
+        # ── CONFLUENCE BONUS ───────────────────────────────────────
+        # The confluence level from the stochastic gate is the PRIMARY
+        # score driver. More TFs agreeing = dramatically higher score.
+        details["stoch_gate"] = stoch_gate
+        regime_score = stoch_gate["regime_score"]
+        regime_tf = stoch_gate["regime_tf"]
+        entry_confirms = stoch_gate["entry_confirms"]
+        gate_base = stoch_gate.get("base", {})
+        confluence_level = stoch_gate.get("confluence_level", 2)
+        confluence_label = stoch_gate.get("confluence_label", "WEAK")
+
+        # Confluence-based scoring (replaces flat regime bonus)
+        if confluence_level >= 5:
+            bonus += 40
+            bonuses.append(f"PERFECT CONFLUENCE — 1WK+1D+4H all crossing {stoch_gate['direction']} (+40)")
+        elif confluence_level >= 4:
+            bonus += 30
+            bonuses.append(f"STRONG CONFLUENCE — multiple TF crosses aligned (+30)")
+        elif confluence_level >= 3:
+            bonus += 15
+            bonuses.append(f"GOOD confluence — TFs agree with fresh cross (+15)")
+        else:
+            bonus += 5
+            bonuses.append(f"Weak confluence — single TF cross (+5)")
+
+        # Entry TF confirmations (1h, 15m confirming the regime)
+        if entry_confirms >= 2:
+            bonus += 15
+            entry_label = ",".join(stoch_gate.get("entry_tfs", []))
+            bonuses.append(f"{entry_confirms} entry TFs confirm: {entry_label} (+15)")
+        elif entry_confirms >= 1:
+            bonus += 8
+            entry_label = ",".join(stoch_gate.get("entry_tfs", []))
+            bonuses.append(f"Entry TF confirm: {entry_label} (+8)")
+
+        # PENALTY for low confluence — scale down the entire raw score
+        # Weak setups with only 1 TF agreeing get a significant haircut
+        if confluence_level <= 3:
+            raw_score *= 0.75
+            bonuses.append(f"Confluence penalty: {confluence_label} (-25%)")
+
+        # Base compression bonus — the pink circle on price
+        if gate_base.get("compressed"):
+            bonus += 12
+            bonuses.append("Base compression — coiled spring (+12)")
+        if target_dir == "long" and gate_base.get("at_support"):
+            bonus += 8
+            bonuses.append("Price at support level (+8)")
+        elif target_dir == "short" and gate_base.get("at_resistance"):
+            bonus += 8
+            bonuses.append("Price at resistance level (+8)")
+
+        # ── GOLDEN / DEATH CROSS ──────────────────────────────────
+        # 50 SMA crossing 200 SMA on daily bars — strong trend signal
+        daily_df = sd.bars.get("1d")
+        gd_cross = detect_golden_death_cross(daily_df, lookback=10)
+        details["golden_death_cross"] = gd_cross
+
+        if target_dir == "long" and gd_cross["golden_cross"]:
+            bonus += 20
+            age = gd_cross["cross_age"]
+            bonuses.append(f"GOLDEN CROSS — 50 SMA above 200 SMA ({age}d ago, +20)")
+        elif target_dir == "long" and gd_cross["sma50_above_200"]:
+            bonus += 5
+            bonuses.append("50 SMA > 200 SMA (bullish structure, +5)")
+        elif target_dir == "long" and not gd_cross["sma50_above_200"] and gd_cross["sma200"] > 0:
+            bonus -= 10
+            bonuses.append("50 SMA < 200 SMA (bearish structure, -10)")
+
+        if target_dir == "short" and gd_cross["death_cross"]:
+            bonus += 20
+            age = gd_cross["cross_age"]
+            bonuses.append(f"DEATH CROSS — 50 SMA below 200 SMA ({age}d ago, +20)")
+        elif target_dir == "short" and not gd_cross["sma50_above_200"] and gd_cross["sma200"] > 0:
+            bonus += 5
+            bonuses.append("50 SMA < 200 SMA (bearish structure, +5)")
+        elif target_dir == "short" and gd_cross["sma50_above_200"]:
+            bonus -= 10
+            bonuses.append("50 SMA > 200 SMA (fighting bullish trend, -10)")
+
+        # ── SWEEP + STOCHASTIC CONFIRMATION (highest conviction) ──
+        # The VFS pattern: liquidity sweep at support + stochastic oversold/cross
+        # When all signals align, this is the highest-probability entry
+        if sweep_result and sweep_result.has_sweep:
+            if sweep_result.stoch_oversold and sweep_result.stoch_cross:
+                bonus += 25
+                bonuses.append("SNIPER: sweep + stoch oversold + bullish cross (+25)")
+            elif sweep_result.stoch_oversold:
+                bonus += 15
+                bonuses.append("sweep + stoch oversold (+15)")
+            elif sweep_result.stoch_cross:
+                bonus += 12
+                bonuses.append("sweep + stoch bullish cross (+12)")
+            else:
+                bonus += 8
+                bonuses.append("sweep detected (+8)")
+
+            if sweep_result.base_compressed:
+                bonus += 10
+                bonuses.append("base compression before sweep (+10)")
+
+            if sweep_result.volume_confirmed:
+                bonus += 5
+                bonuses.append("volume confirmed sweep (+5)")
+
+        # Stochastic-only signals (no sweep, but timing is right)
+        elif sweep_result and sweep_result.stoch_oversold and sweep_result.stoch_cross:
+            bonus += 10
+            bonuses.append("stoch oversold + bullish cross (no sweep) (+10)")
+
+        # ── PENALTY: Stochastic overbought — bad timing ───────────
+        if sweep_result and sweep_result.stoch_k > 80 and sweep_result.stoch_d > 80:
+            bonus -= 8
+            bonuses.append("penalty: stoch overbought — late entry (-8)")
+
         if smc_result:
             if smc_result.fvg_count > 0 and smc_result.ob_count > 0:
                 bonus += 15
@@ -442,21 +1176,105 @@ class UnifiedScorer:
                 bonus += 8
                 bonuses.append("in OTE zone (+8)")
 
+        # ── CHASE FILTER: reject stocks that already made their move ──
+        # We want setups that are ABOUT TO run, not ones that already ran.
+        # Checks: (1) extension from recent low, (2) stochastic position,
+        #         (3) distance from MA20, (4) ATR expansion (volatility spike)
+        chase_penalty = 0.0
+        chase_reasons: list[str] = []
+        if len(primary_df) >= 20 and atr > 0:
+            closes = primary_df["close"].values
+            lows   = primary_df["low"].values
+            price  = float(closes[-1])
+            ma20   = float(np.mean(closes[-20:]))
+
+            # 1) Extension from 20-bar low — how far has it already run?
+            recent_low_20  = float(np.min(lows[-20:]))
+            extension_pct  = (price - recent_low_20) / recent_low_20 * 100 if recent_low_20 > 0 else 0
+
+            # 2) Distance from MA20 in ATR units — is price stretched?
+            ma20_distance_atr = (price - ma20) / atr if atr > 0 else 0
+
+            # 3) ATR expansion — is recent volatility spiking vs average?
+            if len(primary_df) >= 40:
+                highs = primary_df["high"].values
+                tr_recent = float(np.mean(highs[-5:] - lows[-5:]))
+                tr_avg    = float(np.mean(highs[-40:] - lows[-40:]))
+                atr_expansion = tr_recent / tr_avg if tr_avg > 0 else 1.0
+            else:
+                atr_expansion = 1.0
+
+            # 4) Slow stochastic if available from sweep analysis
+            stoch_k = sweep_result.stoch_k if sweep_result else 50
+
+            # === Scoring the chase risk ===
+            # Extended >25% from 20-bar low: the move already happened
+            if extension_pct > 40:
+                chase_penalty += 25
+                chase_reasons.append(f"CHASE: +{extension_pct:.0f}% from 20-bar low — move complete (-25)")
+            elif extension_pct > 25:
+                chase_penalty += 15
+                chase_reasons.append(f"CHASE: +{extension_pct:.0f}% from 20-bar low — extended (-15)")
+
+            # Price >2 ATR above MA20: already far from mean
+            if ma20_distance_atr > 3.0:
+                chase_penalty += 15
+                chase_reasons.append(f"CHASE: {ma20_distance_atr:.1f}x ATR above MA20 — overstretched (-15)")
+            elif ma20_distance_atr > 2.0:
+                chase_penalty += 8
+                chase_reasons.append(f"CHASE: {ma20_distance_atr:.1f}x ATR above MA20 (-8)")
+
+            # Stochastic deeply overbought (>85) while extended — the worst combo
+            if stoch_k > 85 and extension_pct > 20:
+                chase_penalty += 12
+                chase_reasons.append(f"CHASE: stoch {stoch_k:.0f} + extended {extension_pct:.0f}% — chasing (-12)")
+
+            # Volatility spike (recent TR > 2x average) — move is happening NOW, too late
+            if atr_expansion > 2.5 and extension_pct > 15:
+                chase_penalty += 10
+                chase_reasons.append(f"CHASE: volatility spike {atr_expansion:.1f}x — parabolic move (-10)")
+
+            bonuses.extend(chase_reasons)
+
         # ── Apply soft penalties (replaces hard gates) ─────────────
-        total_penalty = mtf_penalty + correction_penalty + zone_penalty + exhaustion_penalty
+        total_penalty = mtf_penalty + correction_penalty + zone_penalty + exhaustion_penalty + chase_penalty
         final_score = min(100, max(0, raw_score + bonus - total_penalty))
 
         # ── Determine direction and confidence ─────────────────────
-        # Aggressive thresholds: surface every trade the market offers
+        # Surface every trade the market offers — both LONG and SHORT.
+        # Inverse/hedge ETFs with bearish signal → treated as LONG (buy the inverse).
+        _INVERSE_ETFS = {
+            "SQQQ", "SPXS", "SDOW", "TZA", "SOXS", "LABD", "FAZ", "TECS", "DUST",
+            "SH", "PSQ", "DOG", "RWM", "UVXY", "VXX", "VIXY",
+        }
+        is_inverse = sd.symbol in _INVERSE_ETFS
+
         if final_score >= 55:
-            direction = "LONG" if target_dir == "long" else "SHORT"
+            if target_dir == "long":
+                direction = "LONG"
+            elif is_inverse:
+                direction = "LONG"   # buy the inverse ETF
+            else:
+                direction = "SHORT"  # bearish on regular stock → SHORT
             confidence = "HIGH" if final_score >= 80 else "MEDIUM" if final_score >= 65 else "LOW"
         elif final_score >= 35:
-            direction = "LONG" if target_dir == "long" else "SHORT"
+            if target_dir == "long":
+                direction = "LONG"
+            elif is_inverse:
+                direction = "LONG"
+            else:
+                direction = "SHORT"
             confidence = "LOW"
         else:
             direction = "NO_TRADE"
             confidence = "NONE"
+
+        # If chase penalty alone was >= 30, override to NO_TRADE regardless of score
+        rejection = ""
+        if chase_penalty >= 30 and direction != "NO_TRADE":
+            direction = "NO_TRADE"
+            confidence = "NONE"
+            rejection = "Already ran — chasing extended move"
 
         return ScoredSignal(
             symbol=sd.symbol,
@@ -466,6 +1284,7 @@ class UnifiedScorer:
             confidence=confidence,
             components=components,
             component_details=details,
+            rejection_reason=rejection,
             bonuses=bonuses,
         )
 

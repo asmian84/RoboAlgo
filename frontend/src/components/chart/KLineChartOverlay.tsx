@@ -134,12 +134,16 @@ interface WavePoint {
 }
 
 interface WaveProjection {
-  label: string
-  price: number
-  fib: number
-  from_idx: number
-  type: string     // "target" | "retrace"
-  wave: number
+  // New backend format (v2 — from _compute_projections)
+  sequence: string    // "correction" | "impulse" | "in_progress"
+  wave: string        // "A" | "B" | "C" | "1" | "2" | "3" | "4" | "5"
+  label: string       // human-readable description
+  price: number       // Fibonacci target price
+  bar_offset: number  // bars from last confirmed wave end
+  bar_abs: number     // absolute bar index (use with snap())
+  confidence: number  // 0.0–1.0
+  ratio: number | string  // Fib ratio used
+  color: string       // "corrective" | "impulse"
 }
 
 interface WaveCountData {
@@ -151,7 +155,9 @@ interface WaveCountData {
   is_complete: boolean
   waves: WavePoint[]
   labels: string[]
-  projections?: WaveProjection[]
+  projections?: WaveProjection[]  // backend Fibonacci chain (v2 format)
+  wave_type?: string
+  rank?: number
 }
 
 interface ElliottResponse {
@@ -255,6 +261,44 @@ const WAVE_THEMES: WaveColorTheme[] = [
   },
 ]
 
+// ── v3: Multi-degree display settings ─────────────────────────────────────
+interface EWDisplaySettings {
+  showProjections:  boolean
+  showStartingPoint: boolean
+  showWaveLines:    boolean
+  showWaveLabels:   boolean
+  visibleDegrees: {
+    PRIMARY: boolean; INTERMEDIATE: boolean; MINOR: boolean
+    MINUTE: boolean;  SUBMINUTE: boolean
+  }
+  degreeColors: {
+    PRIMARY: string; INTERMEDIATE: string; MINOR: string
+    MINUTE: string;  SUBMINUTE: string;   CYCLE: string; SUPERCYCLE: string
+  }
+  projectionStyle:    'solid' | 'dashed'
+  activeZoneOpacity:  number
+  waveLineOpacity:    number
+}
+
+const DEFAULT_EW_SETTINGS: EWDisplaySettings = {
+  showProjections:  true,
+  showStartingPoint: true,
+  showWaveLines:    true,
+  showWaveLabels:   true,
+  visibleDegrees: {
+    PRIMARY: true, INTERMEDIATE: true, MINOR: true,
+    MINUTE: false, SUBMINUTE: false,
+  },
+  degreeColors: {
+    SUPERCYCLE: '#ff6b6b', CYCLE: '#f97316', PRIMARY: '#fbbf24',
+    INTERMEDIATE: '#22d3ee', MINOR: '#a78bfa',
+    MINUTE: '#6b7280',      SUBMINUTE: '#4b5563',
+  },
+  projectionStyle:   'dashed',
+  activeZoneOpacity: 0.10,
+  waveLineOpacity:   0.55,
+}
+
 function hexToRgba(hex: string, alpha: number): string {
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
@@ -287,6 +331,27 @@ function setEwRedrawTrigger(fn: (() => void) | null) { ewRedrawTrigger = fn }
 // from the EW API so the component can show a progress indicator
 let ewLoadingCallback: ((loading: boolean) => void) | null = null
 function setEwLoadingCallback(fn: ((loading: boolean) => void) | null) { ewLoadingCallback = fn }
+
+// v3 settings ref — module-level so drawElliottWaves (standalone fn) can read it
+let ewV3Settings: EWDisplaySettings = DEFAULT_EW_SETTINGS
+function setEwV3Settings(s: EWDisplaySettings) { ewV3Settings = s }
+// v3 wave tree cache — stores the last fetched wave_tree so UI can render it
+let ewV3WaveTreeCache: any = null
+let ewV3WaveTreeCallback: ((wt: any) => void) | null = null
+function setEwV3WaveTreeCallback(fn: ((wt: any) => void) | null) { ewV3WaveTreeCallback = fn }
+
+// v3 hover system — populated on each draw, read by mousemove handler
+interface V3SegMeta {
+  startTs: number; endTs: number
+  startPrice: number; endPrice: number
+  midTs: number; midPrice: number
+  label: string; degree: string
+  waveType: string; direction: string
+  color: string
+  priceDelta: number; pricePct: number
+  confidence?: number
+}
+let _v3Segments: V3SegMeta[] = []
 
 // Helper: find the bar index whose timestamp is closest to `ts`
 function nearestBarIdx(barTs: number[], ts: number): number {
@@ -428,6 +493,10 @@ async function drawElliottWaves(chart: Chart, symbol: string, bars: KLineData[],
     const CORR_LINE_W    = 5.0
     const LATE_MOTIVE_W  = 5.0
     const CIRCLE_R       = 12
+    // Projection color: clearly distinct from detected waves — muted gray-blue.
+    // Solid (not dotted) so it reads as a real trend line, not noise/decoration.
+    const PROJ_CLR       = 'rgba(160,180,220,0.55)'
+    const PROJ_CIRCLE    = 'rgba(100,130,180,0.70)'
 
     // ── Helper: draw a single wave count on chart ────────────────────
     const drawWaveCount = (
@@ -436,6 +505,7 @@ async function drawElliottWaves(chart: Chart, symbol: string, bars: KLineData[],
         lineColor: string; circleColor: string; circleText: string;
         correctiveLineColor: string; annotColor: string;
         lineWidth: number; isImpulsePhase: boolean;
+        suppressLiveSegment?: boolean;   // true when a linked wave continues from the last pivot
       },
     ) => {
       if (!wc.waves || wc.waves.length === 0) return
@@ -473,31 +543,9 @@ async function drawElliottWaves(chart: Chart, symbol: string, bars: KLineData[],
         })
       }
 
-      // ── Live "in-progress" segment ──────────────────────────────────
-      // If the last confirmed pivot is more than 2 bars before the rightmost
-      // bar, draw a dashed line from the last pivot to the current price.
-      // This ensures the overlay always extends to the right edge of the chart.
-      if (pivots.length > 0) {
-        const lastPivot = pivots[pivots.length - 1]
-        const barsFromEdge = (lastTs - lastPivot.ts) / barStep
-        if (barsFromEdge > 2) {
-          // Use the last bar's close price as the live endpoint
-          const lastBar = serverBars[serverBars.length - 1]
-          const livePrice = lastBar?.close ?? lastPivot.price
-          add({
-            name: 'patternTrendline',
-            points: [
-              { timestamp: lastPivot.ts, value: lastPivot.price },
-              { timestamp: lastTs, value: livePrice },
-            ],
-            extendData: {
-              color: opts.lineColor + '88',  // semi-transparent = in-progress
-              lineWidth: opts.lineWidth,
-              dash: [6, 4],                  // dashed = not yet confirmed
-            },
-          })
-        }
-      }
+      // Live "in-progress" segment intentionally removed.
+      // Projections (drawProjection) handle what comes after the last detected
+      // pivot in a distinct color so there is only ever ONE line from any pivot.
 
       // ── Circled wave numbers at pivots (togglable) ──
       // Map roman numeral labels to clean numbers: i→1, ii→2, iii→3, iv→4, v→5, a→A, b→B, c→C
@@ -569,7 +617,10 @@ async function drawElliottWaves(chart: Chart, symbol: string, bars: KLineData[],
             const midTs = snap(midIdx)
             const allPrices = wc.waves.flatMap(w => [w.start_price, w.end_price])
             const arrow = isUp ? '↗' : '↘'
-            const phaseText = opts.isImpulsePhase ? `${arrow} Impulse` : `${arrow} Correction`
+            const phaseLabel = wc.type === 'diagonal'
+              ? (wc.wave_type === 'ending_diagonal' ? 'Ending Diagonal' : 'Leading Diagonal')
+              : 'Impulse'
+            const phaseText = opts.isImpulsePhase ? `${arrow} ${phaseLabel}` : `${arrow} Correction`
             const annotPrice = opts.isImpulsePhase
               ? (isUp ? Math.min(...allPrices) - atr * 0.7 : Math.max(...allPrices) + atr * 0.7)
               : (isUp ? Math.max(...allPrices) + atr * 0.7 : Math.min(...allPrices) - atr * 0.7)
@@ -605,7 +656,7 @@ async function drawElliottWaves(chart: Chart, symbol: string, bars: KLineData[],
       if (!wc?.waves?.length) return false
       const first = wc.waves[0]
       const last  = wc.waves[wc.waves.length - 1]
-      const priceTol = (trueHighPrice - trueLowPrice) * 0.005  // 0.5% of range
+      const priceTol = (trueHighPrice - trueLowPrice) * 0.015  // 1.5% of range
       const isUp = wc.direction === 'up'
       const startTarget = isUp ? trueLowPrice  : trueHighPrice
       const endTarget   = isUp ? trueHighPrice : trueLowPrice
@@ -615,7 +666,7 @@ async function drawElliottWaves(chart: Chart, symbol: string, bars: KLineData[],
     // Scan all wave counts for a complete 5-wave impulse anchored at both
     // extremes; prefer primary degree when multiple match.
     const anchoredCandidates = (waveCounts || []).filter((wc: any) =>
-      wc?.type === 'impulse' &&
+      (wc?.type === 'impulse' || wc?.type === 'diagonal') &&
       wc?.is_complete &&
       wc?.waves?.length === 5 &&
       matchesExtremes(wc)
@@ -630,7 +681,7 @@ async function drawElliottWaves(chart: Chart, symbol: string, bars: KLineData[],
     // with a 12% W4 retracement is structurally invalid (that's noise
     // within W3, not a real pullback). We re-rank by combining confidence
     // with wave proportion quality so the best-looking count wins.
-    const _is5 = (wc: any) => wc?.type === 'impulse' && wc?.is_complete && wc?.waves?.length === 5
+    const _is5 = (wc: any) => (wc?.type === 'impulse' || wc?.type === 'diagonal') && wc?.is_complete && wc?.waves?.length === 5
     const _waveQuality = (wc: any): number => {
       if (!wc?.waves || wc.waves.length < 5) return 0
       const ws = wc.waves
@@ -754,960 +805,6 @@ async function drawElliottWaves(chart: Chart, symbol: string, bars: KLineData[],
       }
     }
 
-    if (primaryCount && primaryCount.waves && primaryCount.waves.length > 0) {
-      const isUp = primaryCount.direction === 'up'
-
-      drawWaveCount(primaryCount, {
-        lineColor: IMPULSE_CLR,
-        circleColor: IMPULSE_CIRCLE,
-        circleText: '#ffffff',
-        correctiveLineColor: IMPULSE_CLR,
-        annotColor: IMPULSE_CLR,
-        lineWidth: MOTIVE_LINE_W,
-        isImpulsePhase: true,
-      })
-      drewSomething = true
-
-      // Draw linked correction (ABC) if available
-      if (linkedCorrection && linkedCorrection.waves && linkedCorrection.waves.length > 0) {
-        const corrIsDown = linkedCorrection.direction === 'down'
-
-        // ── BRIDGE LINE: connect impulse end → correction start (no gap) ──
-        const impulseLastWave = primaryCount.waves[primaryCount.waves.length - 1]
-        const corrFirstWave = linkedCorrection.waves[0]
-        add({
-          name: 'patternTrendline',
-          points: [
-            { timestamp: snap(impulseLastWave.end_idx), value: impulseLastWave.end_price },
-            { timestamp: snap(corrFirstWave.start_idx), value: corrFirstWave.start_price },
-          ],
-          extendData: { color: IMPULSE_CLR, lineWidth: MOTIVE_LINE_W, dash: [] },
-        })
-
-        drawWaveCount(linkedCorrection, {
-          lineColor: IMPULSE_CLR,
-          circleColor: IMPULSE_CIRCLE,
-          circleText: '#ffffff',
-          correctiveLineColor: IMPULSE_CLR,
-          annotColor: IMPULSE_CLR,
-          lineWidth: CORR_LINE_W,
-          isImpulsePhase: false,
-        })
-
-        // ── CONTINUATION: look for a detected next-impulse after C ──────
-        // The backend returns every candidate wave count; if it has detected a
-        // new impulse whose start is at/after the C pivot, draw that too so
-        // the structure visibly extends to the current candle. We do NOT
-        // fabricate pivots — we only render waves the engine detected.
-        const cWave = linkedCorrection.waves[linkedCorrection.waves.length - 1]
-        const cIdx = cWave.end_idx
-        const newDirExpected = corrIsDown ? 'up' : 'down'  // opposite of correction
-        const nextImpulse = waveCounts.find((wc: any) =>
-          wc !== primaryCount
-          && wc !== linkedCorrection
-          && wc.type === 'impulse'
-          && wc.direction === newDirExpected
-          && wc.waves?.length >= 2
-          && wc.waves[0].start_idx >= cIdx - 2  // starts at or just after C
-        )
-        if (nextImpulse) {
-          // Bridge C → start of next impulse (if not already coincident)
-          const nextStart = nextImpulse.waves[0]
-          if (nextStart.start_idx > cIdx) {
-            add({
-              name: 'patternTrendline',
-              points: [
-                { timestamp: snap(cIdx), value: cWave.end_price },
-                { timestamp: snap(nextStart.start_idx), value: nextStart.start_price },
-              ],
-              extendData: { color: IMPULSE_CLR, lineWidth: MOTIVE_LINE_W, dash: [] },
-            })
-          }
-          drawWaveCount(nextImpulse, {
-            lineColor: IMPULSE_CLR,
-            circleColor: IMPULSE_CIRCLE,
-            circleText: '#ffffff',
-            correctiveLineColor: IMPULSE_CLR,
-            annotColor: IMPULSE_CLR,
-            lineWidth: MOTIVE_LINE_W,
-            isImpulsePhase: true,
-          })
-        }
-      }
-    }
-
-    // ── PROJECTED WAVES — complete the picture ──────────────────────
-    // 1) Partial impulse (2-4 waves): project remaining waves to complete 1-2-3-4-5
-    // 2) Complete impulse (5 waves) with no linked correction: project ABC
-    // 3) Complete correction with no linked impulse: project 1-2-3-4-5
-    if (layers.targets && primaryCount && primaryCount.waves && primaryCount.waves.length >= 2) {
-      const hasLinkedCorr = linkedCorrection && linkedCorrection.waves && linkedCorrection.waves.length > 0
-      const isImpulse = primaryCount.type === 'impulse'
-      const isUp = primaryCount.direction === 'up'
-      const numWaves = primaryCount.waves.length
-      const isComplete = primaryCount.is_complete === true || numWaves >= 5
-
-      const anchorWc = hasLinkedCorr ? linkedCorrection! : primaryCount
-      const anchorWave = anchorWc.waves[anchorWc.waves.length - 1]
-      const anchorTs = snap(anchorWave.end_idx)
-      const anchorPrice = anchorWave.end_price
-      const stepBars = Math.max(12, Math.floor(barTs.length * 0.06))
-
-      // Projection style constants — same color as realized waves. Impulse
-      // completions (W3/W4/W5) draw solid; corrective projections (ABC) dotted.
-      const projLineW = 5.0
-      const projDashSolid: number[] = []
-      const projDashDotted: number[] = [3, 6]
-      const projCircleR = 12
-
-      // Helper: draw projected zigzag + circled labels
-      const visiblePriceMin = Math.min(...serverBars.map((b: any) => b.low  ?? b.close))
-      const visiblePriceMax = Math.max(...serverBars.map((b: any) => b.high ?? b.close))
-      const visiblePriceRange = Math.max(visiblePriceMax - visiblePriceMin, visiblePriceMin * 0.01)
-
-      const drawProjection = (
-        pivots: { ts: number; price: number }[],
-        labels: { label: string; ts: number; price: number; above: boolean }[],
-        phaseLabel: { ts: number; price: number; text: string; sub: string },
-        color: string,
-        cColor: string,
-        dash: number[] = projDashDotted,
-      ) => {
-        // Sanity gate: reject if any projected price is >60% outside the visible price range
-        const priceLo = visiblePriceMin - visiblePriceRange * 0.6
-        const priceHi = visiblePriceMax + visiblePriceRange * 0.6
-        if (pivots.some(p => p.price < priceLo || p.price > priceHi)) return
-
-        // Apply price floor — no projected price can go below $0.01
-        const fp = pivots.map(p => ({ ...p, price: priceFloor(p.price) }))
-        const fl = labels.map(l => ({ ...l, price: priceFloor(l.price) }))
-        const fph = { ...phaseLabel, price: priceFloor(phaseLabel.price) }
-
-        for (let i = 0; i < fp.length - 1; i++) {
-          add({
-            name: 'patternTrendline',
-            points: [
-              { timestamp: fp[i].ts, value: fp[i].price },
-              { timestamp: fp[i + 1].ts, value: fp[i + 1].price },
-            ],
-            extendData: { color, lineWidth: projLineW, dash },
-          })
-        }
-        for (const pl of fl) {
-          add({
-            name: 'waveCircle',
-            points: [{ timestamp: pl.ts, value: pl.price + atr * (pl.above ? 0.35 : -0.35) }],
-            extendData: { text: pl.label, fillColor: cColor, textColor: '#ffffffcc', radius: projCircleR, borderColor: 'rgba(255,255,255,0.15)' },
-          })
-        }
-        // Compact projected phase label — small text, not a big pill
-        add({
-          name: 'patternLabel',
-          points: [{ timestamp: fph.ts, value: fph.price }],
-          extendData: { text: `${fph.text}`, color: color + 'cc', fontSize: 9, offsetY: 0 },
-        })
-      }
-
-      // ── Case 1: PARTIAL IMPULSE — project remaining waves (4-5, or 3-4-5, etc.) then ABC ──
-      if (isImpulse && !isComplete && numWaves < 5) {
-        const w1 = primaryCount.waves[0]
-        const w1Range = Math.abs(w1.end_price - w1.start_price)
-        const dir = isUp ? 1 : -1
-        // Wave duration in bars — used for proportional projections
-        const w1Bars = Math.max(3, w1.end_idx - w1.start_idx)
-        const projStep = Math.max(5, Math.floor(w1Bars * 0.618))  // wave 5 ≈ 0.618 × wave 1 duration
-
-        // Helper: find sequential wave pivots in actual bar data after the last detected wave.
-        // Instead of finding global extremes, this finds them IN ORDER:
-        //   Wave 4 = first significant counter-move, Wave 5 = extreme after that
-        // This ensures waves are chronologically correct and reach the last candle.
-        const lastDetectedIdx = primaryCount.waves[numWaves - 1].end_idx
-        const afterBars = serverBars.slice(lastDetectedIdx + 1)
-        const afterStart = lastDetectedIdx + 1
-
-        // Find sequential pivots: alternating high/low swings in remaining bars
-        const findSequentialPivots = (startAfterIdx: number, count: number, firstSeekLow: boolean) => {
-          const pivots: { price: number; barIdx: number }[] = []
-          let seekLow = firstSeekLow
-          let searchFrom = startAfterIdx
-
-          for (let p = 0; p < count; p++) {
-            if (searchFrom >= serverBars.length) break
-            // Find the extreme from searchFrom to end
-            let bestPrice = seekLow ? Infinity : -Infinity
-            let bestIdx = -1
-            for (let bi = searchFrom; bi < serverBars.length; bi++) {
-              const bar = serverBars[bi]
-              const val = seekLow ? bar.low : bar.high
-              if (seekLow ? val < bestPrice : val > bestPrice) {
-                bestPrice = val; bestIdx = bi
-              }
-            }
-            if (bestIdx < 0) break
-            pivots.push({ price: round2(bestPrice), barIdx: bestIdx })
-            // For next pivot, search AFTER this one (must be chronologically later)
-            searchFrom = bestIdx + 1
-            seekLow = !seekLow
-          }
-          return pivots
-        }
-
-        // Build remaining wave targets using actual bars when available
-        const remaining: { label: string; price: number; ts: number; above: boolean }[] = []
-        const projPivots: { ts: number; price: number }[] = [{ ts: anchorTs, price: anchorPrice }]
-
-        let curPrice = anchorPrice
-        let curTs = anchorTs
-
-        if (numWaves === 4) {
-          // Need only wave 5 — search chart bars after wave 4 (anchor) for the impulse extreme
-          let w4BarIdx = bars.length - 1
-          let bestDist = Infinity
-          for (let i = 0; i < bars.length; i++) {
-            const dist = Math.abs(bars[i].timestamp - curTs)
-            if (dist < bestDist) { bestDist = dist; w4BarIdx = i }
-          }
-          let extremePrice = isUp ? -Infinity : Infinity
-          let extremeIdx = -1
-          for (let i = w4BarIdx + 1; i < bars.length; i++) {
-            const b = bars[i]
-            if (isUp && (b.high as number) > extremePrice) {
-              extremePrice = b.high as number; extremeIdx = i
-            } else if (!isUp && (b.low as number) < extremePrice) {
-              extremePrice = b.low as number; extremeIdx = i
-            }
-          }
-          const validSnap = extremeIdx >= 0 && (isUp ? extremePrice > curPrice : extremePrice < curPrice)
-          if (validSnap) {
-            const extremeTs = bars[extremeIdx].timestamp
-            projPivots.push({ ts: extremeTs, price: round2(extremePrice) })
-            remaining.push({ label: '5', ts: extremeTs, price: round2(extremePrice), above: isUp })
-            curPrice = round2(extremePrice); curTs = extremeTs
-          } else {
-            const impStart = primaryCount.waves[0].start_price
-            const fibW5 = round2(impStart + dir * w1Range * 2.618)
-            const w5Ts = curTs + projStep * barStep
-            projPivots.push({ ts: w5Ts, price: fibW5 })
-            remaining.push({ label: '5', ts: w5Ts, price: fibW5, above: isUp })
-            curPrice = fibW5; curTs = w5Ts
-          }
-        }
-
-        if (numWaves === 3) {
-          // Need waves 4 and 5
-          // Wave 4 = counter-move (bullish: low, bearish: high)
-          // Wave 5 = continuation (bullish: high, bearish: low)
-          const seekLowFirst = isUp  // bullish wave 4 = pullback (low), bearish wave 4 = bounce (high→seekLow=false)
-          const actuals = findSequentialPivots(afterStart, 2, seekLowFirst)
-
-          if (actuals.length >= 1) {
-            // Wave 4 from actual data
-            projPivots.push({ ts: snap(actuals[0].barIdx), price: actuals[0].price })
-            remaining.push({ label: '4', ts: snap(actuals[0].barIdx), price: actuals[0].price, above: !isUp })
-            curPrice = actuals[0].price; curTs = snap(actuals[0].barIdx)
-          } else {
-            // Fibonacci fallback
-            const w3Range = Math.abs(primaryCount.waves[2].end_price - primaryCount.waves[2].start_price)
-            const w4Price = round2(anchorPrice - dir * w3Range * 0.382)
-            const w4Ts = curTs + projStep * barStep
-            projPivots.push({ ts: w4Ts, price: w4Price })
-            remaining.push({ label: '4', ts: w4Ts, price: w4Price, above: !isUp })
-            curPrice = w4Price; curTs = w4Ts
-          }
-
-          {
-            // Wave 5: search chart bars AFTER wave 4 for the impulse extreme
-            // Find the bar in chart data closest to wave 4's timestamp, then search after it
-            const w4Ts = curTs
-            let w4BarIdx = bars.length - 1
-            let bestDist = Infinity
-            for (let i = 0; i < bars.length; i++) {
-              const dist = Math.abs(bars[i].timestamp - w4Ts)
-              if (dist < bestDist) { bestDist = dist; w4BarIdx = i }
-            }
-            // Search bars after wave 4 for the impulse extreme
-            let extremePrice = isUp ? -Infinity : Infinity
-            let extremeIdx = -1
-            for (let i = w4BarIdx + 1; i < bars.length; i++) {
-              const b = bars[i]
-              if (isUp && (b.high as number) > extremePrice) {
-                extremePrice = b.high as number; extremeIdx = i
-              } else if (!isUp && (b.low as number) < extremePrice) {
-                extremePrice = b.low as number; extremeIdx = i
-              }
-            }
-            // Only use candle snap if extreme is more extreme than wave 4 in the impulse direction
-            const validSnap = extremeIdx >= 0 && (isUp ? extremePrice > curPrice : extremePrice < curPrice)
-            if (validSnap) {
-              const extremeTs = bars[extremeIdx].timestamp
-              projPivots.push({ ts: extremeTs, price: round2(extremePrice) })
-              remaining.push({ label: '5', ts: extremeTs, price: round2(extremePrice), above: isUp })
-              curPrice = round2(extremePrice); curTs = extremeTs
-            } else {
-              // Fibonacci projection: wave 5 = impulse start + 2.618 * wave 1 range
-              const impStart = primaryCount.waves[0].start_price
-              const fibW5 = round2(impStart + dir * w1Range * 2.618)
-              const w5Ts = curTs + projStep * barStep
-              projPivots.push({ ts: w5Ts, price: fibW5 })
-              remaining.push({ label: '5', ts: w5Ts, price: fibW5, above: isUp })
-              curPrice = fibW5; curTs = w5Ts
-            }
-          }
-        }
-        if (numWaves === 2) {
-          // Need waves 3, 4, 5 — find 3 sequential pivots
-          // Wave 3 = continuation, Wave 4 = counter, Wave 5 = continuation
-          const seekLowFirst = !isUp  // bullish wave 3 = high (seekLow=false), bearish wave 3 = low (seekLow=true)
-          const actuals = findSequentialPivots(afterStart, 3, seekLowFirst)
-
-          if (actuals.length >= 1) {
-            projPivots.push({ ts: snap(actuals[0].barIdx), price: actuals[0].price })
-            remaining.push({ label: '3', ts: snap(actuals[0].barIdx), price: actuals[0].price, above: isUp })
-            curPrice = actuals[0].price; curTs = snap(actuals[0].barIdx)
-          } else {
-            const w3Price = round2(curPrice + dir * w1Range * 1.618)
-            const w3Ts = curTs + projStep * barStep * 1.5
-            projPivots.push({ ts: w3Ts, price: w3Price })
-            remaining.push({ label: '3', ts: w3Ts, price: w3Price, above: isUp })
-            curPrice = w3Price; curTs = w3Ts
-          }
-
-          if (actuals.length >= 2) {
-            projPivots.push({ ts: snap(actuals[1].barIdx), price: actuals[1].price })
-            remaining.push({ label: '4', ts: snap(actuals[1].barIdx), price: actuals[1].price, above: !isUp })
-            curPrice = actuals[1].price; curTs = snap(actuals[1].barIdx)
-          } else {
-            const w3Range = Math.abs(curPrice - (actuals.length >= 1 ? actuals[0].price : anchorPrice))
-            const w4Price = round2(curPrice - dir * Math.max(w3Range, w1Range) * 0.382)
-            const w4Ts = curTs + projStep * barStep
-            projPivots.push({ ts: w4Ts, price: w4Price })
-            remaining.push({ label: '4', ts: w4Ts, price: w4Price, above: !isUp })
-            curPrice = w4Price; curTs = w4Ts
-          }
-
-          {
-            // Wave 5: search chart bars AFTER wave 4 for the impulse extreme
-            const w4Ts2 = curTs
-            let w4BarIdx2 = bars.length - 1
-            let bestDist2 = Infinity
-            for (let i = 0; i < bars.length; i++) {
-              const dist = Math.abs(bars[i].timestamp - w4Ts2)
-              if (dist < bestDist2) { bestDist2 = dist; w4BarIdx2 = i }
-            }
-            let extremePrice = isUp ? -Infinity : Infinity
-            let extremeIdx = -1
-            for (let i = w4BarIdx2 + 1; i < bars.length; i++) {
-              const b = bars[i]
-              if (isUp && (b.high as number) > extremePrice) {
-                extremePrice = b.high as number; extremeIdx = i
-              } else if (!isUp && (b.low as number) < extremePrice) {
-                extremePrice = b.low as number; extremeIdx = i
-              }
-            }
-            const validSnap2 = extremeIdx >= 0 && (isUp ? extremePrice > curPrice : extremePrice < curPrice)
-            if (validSnap2) {
-              const extremeTs = bars[extremeIdx].timestamp
-              projPivots.push({ ts: extremeTs, price: round2(extremePrice) })
-              remaining.push({ label: '5', ts: extremeTs, price: round2(extremePrice), above: isUp })
-              curPrice = round2(extremePrice); curTs = extremeTs
-            } else {
-              const w5Price = round2(curPrice + dir * w1Range * 0.618)
-              const w5Ts = curTs + projStep * barStep
-              projPivots.push({ ts: w5Ts, price: w5Price })
-              remaining.push({ label: '5', ts: w5Ts, price: w5Price, above: isUp })
-              curPrice = w5Price; curTs = w5Ts
-            }
-          }
-        }
-
-        if (remaining.length > 0) {
-          const projColor = IMPULSE_CLR
-          const cColor = IMPULSE_CIRCLE
-          const allProjPrices = projPivots.map(p => p.price)
-          const midTs2 = projPivots[0].ts + (projPivots[projPivots.length - 1].ts - projPivots[0].ts) / 2
-          const phaseY = isUp ? Math.min(...allProjPrices) - atr * 0.7 : Math.max(...allProjPrices) + atr * 0.7
-
-          drawProjection(projPivots, remaining,
-            { ts: midTs2, price: phaseY, text: 'Projected Waves', sub: isUp ? '↗ Completing impulse' : '↘ Completing impulse' },
-            projColor, cColor, projDashSolid)
-
-          // Also project ABC after the projected wave 5
-          const lastProj = projPivots[projPivots.length - 1]
-          const impStart = primaryCount.waves[0].start_price
-          const impRange = Math.abs(lastProj.price - impStart)
-          const corrDir2 = isUp ? -1 : 1
-          // ABC step proportional to actual wave durations
-          const avgWaveBarsC1 = primaryCount.waves.reduce((s: number, w: any) => s + (w.end_idx - w.start_idx), 0) / primaryCount.waves.length
-          const abcStep = Math.max(5, Math.floor(avgWaveBarsC1 * 0.4))
-          const aTs = lastProj.ts + abcStep * barStep
-          const aPrice = round2(lastProj.price + corrDir2 * impRange * 0.382)
-          const bTs = aTs + abcStep * barStep * 0.7
-          const bPrice = round2(aPrice - corrDir2 * impRange * 0.382 * 0.50)
-          const cTs = bTs + abcStep * barStep
-          const cPrice = round2(lastProj.price + corrDir2 * impRange * 0.618)
-          const abcColor = IMPULSE_CLR
-          const abcCircle = IMPULSE_CIRCLE
-          const abcPivots = [lastProj, { ts: aTs, price: aPrice }, { ts: bTs, price: bPrice }, { ts: cTs, price: cPrice }]
-          const abcLabels = [
-            { label: 'A', ts: aTs, price: aPrice, above: corrDir2 < 0 },
-            { label: 'B', ts: bTs, price: bPrice, above: corrDir2 > 0 },
-            { label: 'C', ts: cTs, price: cPrice, above: corrDir2 < 0 },
-          ]
-          const abcMid = aTs + (cTs - aTs) / 2
-          const abcY = isUp ? Math.min(aPrice, cPrice) - atr * 0.7 : Math.max(aPrice, cPrice) + atr * 0.7
-          drawProjection(abcPivots, abcLabels,
-            { ts: abcMid, price: abcY, text: 'Corrective Wave', sub: isUp ? '↘ Projected ABC' : '↗ Projected ABC' },
-            abcColor, abcCircle)
-        }
-      }
-
-      // ── Case 2: COMPLETE IMPULSE, no linked correction → project ABC + next impulse ──
-      // When enough post-impulse bars exist, anchor A and B to REAL candle
-      // pivots so the correction follows what actually happened, not a
-      // pure Fibonacci guess. Then project C and a new 1-2-3-4-5 impulse
-      // continuation after C — the full EW predictive cycle.
-      if (isImpulse && isComplete && !hasLinkedCorr) {
-        const impStart = primaryCount.waves[0].start_price
-        const impEnd = anchorPrice
-        const impRange = Math.abs(impEnd - impStart)
-        const corrDir = isUp ? -1 : 1
-        const impEndIdx = primaryCount.waves[primaryCount.waves.length - 1].end_idx
-        const barsAfterImp = serverBars.length - 1 - impEndIdx
-        // Only project if impulse ended in the last 15% of visible bars — otherwise it's stale
-        const maxAllowedBarsAfter = Math.max(15, Math.floor(serverBars.length * 0.15))
-        if (barsAfterImp > maxAllowedBarsAfter) return
-
-        // Proportional timing — base projection step on actual wave durations
-        const avgWaveBars = primaryCount.waves.reduce((s: number, w: any) => s + (w.end_idx - w.start_idx), 0) / primaryCount.waves.length
-
-        let aPrice: number, aTs: number, aIdx: number
-        let bPrice: number, bTs: number, bIdx: number
-        let cPrice: number, cTs: number
-
-        if (barsAfterImp > 10) {
-          // ── Use REAL candle data for A and B (magnet to candle body) ──
-          // A = the first significant swing extreme after impulse end.
-          // Search a limited window (half the impulse span or remaining bars).
-          // Uses candle body (open/close) not wicks for reliable pivots.
-          const impSpan = primaryCount.waves[primaryCount.waves.length - 1].end_idx - primaryCount.waves[0].start_idx
-          const aSearchEnd = Math.min(impEndIdx + 1 + Math.max(Math.floor(impSpan * 0.5), 20), serverBars.length - 1)
-          // For up impulse correction: A is a trough (isPeak=false)
-          // For down impulse correction: A is a peak (isPeak=true)
-          const aSwing = findSwing(impEndIdx + 1, aSearchEnd, !isUp)
-          aIdx = aSwing.idx
-          aPrice = aSwing.price
-          aTs = aSwing.ts
-
-          // Validate: A must retrace at least 5% of the impulse — otherwise skip ABC
-          const aRetrace = Math.abs(impEnd - aPrice) / impRange
-          if (aRetrace < 0.05) {
-            // aRetrace too shallow — skip ABC
-          } else {
-
-          // B = the bounce after A (candle body magnet).
-          // Cap B so it never exceeds the impulse end price.
-          const aLegLen = aIdx - impEndIdx
-          const bSearchEnd2 = Math.min(aIdx + 1 + Math.max(aLegLen, 10), serverBars.length - 1)
-          const postACount = bSearchEnd2 - aIdx
-          if (postACount >= 2) {
-            // B is a peak for up-impulse correction, trough for down
-            const bSwing = findSwing(aIdx + 1, bSearchEnd2, isUp)
-            bIdx = bSwing.idx
-            // Cap at impulse end price
-            bPrice = isUp
-              ? Math.min(bSwing.price, impEnd)
-              : Math.max(bSwing.price, impEnd)
-            bTs = bSwing.ts
-          } else {
-            // Not enough data after A for B — project B
-            bIdx = aIdx + Math.max(5, Math.floor(stepBars * 0.2))
-            const aMove = Math.abs(impEnd - aPrice)
-            bPrice = round2(aPrice - corrDir * aMove * 0.50)
-            bTs = snap(Math.min(bIdx, serverBars.length - 1))
-          }
-
-          // C = Fibonacci extension of the A leg (impEnd→A) projected from B.
-          // In EW theory C typically equals 0.618× to 1.0× of A leg length.
-          // Use 1.0× so C ≈ same depth as A (measured from B).
-          // But cap C so it doesn't exceed A — C beyond A is rare (flat or
-          // expanded flat territory, not a standard zigzag).
-          const aLegMove = Math.abs(impEnd - aPrice) // full A leg
-          const bRetrace = Math.abs(bPrice - aPrice) // B bounce
-          const cFromB = Math.max(bRetrace * 1.0, aLegMove * 0.618) // C ≈ B retrace or 61.8% of A
-          const cStepBars = Math.max(aIdx - impEndIdx, 8)
-          const cRaw = bPrice + corrDir * cFromB
-          // Cap: C shouldn't go deeper than A (standard zigzag)
-          cPrice = isUp
-            ? round2(Math.max(cRaw, aPrice))   // up impulse: correction goes down, C can't be below A
-            : round2(Math.min(cRaw, aPrice))   // down impulse: correction goes up, C can't be above A
-          cTs = bTs + cStepBars * barStep
-
-          // Draw ABC + projected impulse (inside the aRetrace validation block)
-          const projColor2 = IMPULSE_CLR
-          const cColor2 = IMPULSE_CIRCLE
-
-          drawProjection(
-            [{ ts: anchorTs, price: impEnd }, { ts: aTs, price: aPrice }, { ts: bTs, price: bPrice }, { ts: cTs, price: cPrice }],
-            [
-              { label: 'A', ts: aTs, price: aPrice, above: corrDir < 0 },
-              { label: 'B', ts: bTs, price: bPrice, above: corrDir > 0 },
-              { label: 'C', ts: cTs, price: cPrice, above: corrDir < 0 },
-            ],
-            { ts: aTs + (cTs - aTs) / 2, price: isUp ? Math.min(aPrice, cPrice) - atr * 0.7 : Math.max(aPrice, cPrice) + atr * 0.7, text: 'Corrective Wave', sub: isUp ? '↘ Projected' : '↗ Projected' },
-            projColor2, cColor2,
-          )
-
-          // ── CHANNEL-FIRST projection: define channel, waves fit ON it ──
-          // In proper EW, waves travel within a parallel channel:
-          //   Corrective line: through C, W2, W4 (corrective sub-wave troughs/peaks)
-          //   Motive line:     through W1, W3, W5 (motive sub-wave peaks/troughs)
-          // We define the channel first, then place waves on its boundaries.
-          const newDir2 = isUp ? 1 : -1
-          const corrRange2Raw = Math.abs(impEnd - cPrice)
-          const corrRange2 = safeRange(cPrice, corrRange2Raw, newDir2)
-          const newStep2 = Math.max(8, Math.floor(avgWaveBars * 0.6))
-
-          // Channel parameters
-          const totalProjMs = newStep2 * 4.4 * barStep  // total duration for ~5 waves
-          const chEndTarget = cPrice + newDir2 * corrRange2 * 0.764  // corrective line end target
-          const chSlope = (chEndTarget - cPrice) / totalProjMs       // price per ms
-          const chWidth = corrRange2 * 0.35                           // channel width
-
-          // Channel line helpers
-          const corrLine = (ts: number) => cPrice + chSlope * (ts - cTs)
-          const motiveLine = (ts: number) => corrLine(ts) + newDir2 * chWidth
-
-          // Find the effective C index in bar data
-          const cBarIdx = Math.min(bIdx + Math.max(aIdx - impEndIdx, 8), serverBars.length - 1)
-          const barsAfterC = serverBars.length - 1 - bIdx
-
-          // Wave timing
-          const t1 = cTs + newStep2 * barStep
-          const t2 = t1 + Math.floor(newStep2 * 0.5) * barStep
-          const t3 = t2 + Math.floor(newStep2 * 1.5) * barStep
-          const t4 = t3 + Math.floor(newStep2 * 0.4) * barStep
-          const t5 = t4 + newStep2 * barStep
-
-          let n1Price: number, n1Ts: number
-          let n2Price: number, n2Ts: number
-          let n3Price: number, n3Ts: number
-          let n4Price: number, n4Ts: number
-          let n5Price: number, n5Ts: number
-
-          if (barsAfterC > 5) {
-            // Use REAL candle body data for W1 and W2, then channel for W3-W5
-            const w1Swing = findSwing(bIdx + 1, serverBars.length - 1, isUp)
-            n1Price = w1Swing.price; n1Ts = w1Swing.ts
-
-            if (serverBars.length - 1 - w1Swing.idx >= 3) {
-              const w2Swing = findSwing(w1Swing.idx + 1, serverBars.length - 1, !isUp)
-              n2Price = w2Swing.price; n2Ts = w2Swing.ts
-            } else {
-              n2Price = round2(corrLine(t2)); n2Ts = t2
-            }
-            // Derive channel from real W1/W2: corrective line through C and W2
-            const realSlope = (n2Price - cPrice) / Math.max(1, n2Ts - cTs)
-            const realCorrAt = (ts: number) => cPrice + realSlope * (ts - cTs)
-            const realChW = Math.abs(n1Price - (cPrice + realSlope * (n1Ts - cTs)))
-            const realMotiveAt = (ts: number) => realCorrAt(ts) + newDir2 * realChW
-
-            // W3, W4, W5 placed ON the channel derived from real W1/W2
-            n3Ts = n2Ts + Math.floor(newStep2 * 1.5) * barStep
-            n3Price = round2(realMotiveAt(n3Ts))
-            n4Ts = n3Ts + Math.floor(newStep2 * 0.4) * barStep
-            n4Price = round2(realCorrAt(n4Ts))
-            n5Ts = n4Ts + newStep2 * barStep
-            n5Price = round2(realMotiveAt(n5Ts))
-          } else {
-            // Pure channel projection — all waves placed ON channel lines
-            n1Ts = t1; n1Price = round2(motiveLine(t1))
-            n2Ts = t2; n2Price = round2(corrLine(t2))
-            n3Ts = t3; n3Price = round2(motiveLine(t3))
-            n4Ts = t4; n4Price = round2(corrLine(t4))
-            n5Ts = t5; n5Price = round2(motiveLine(t5))
-          }
-
-          drawProjection(
-            [
-              { ts: cTs, price: cPrice },
-              { ts: n1Ts, price: n1Price },
-              { ts: n2Ts, price: n2Price },
-              { ts: n3Ts, price: n3Price },
-              { ts: n4Ts, price: n4Price },
-              { ts: n5Ts, price: n5Price },
-            ],
-            [
-              { label: '1', ts: n1Ts, price: n1Price, above: newDir2 > 0 },
-              { label: '2', ts: n2Ts, price: n2Price, above: newDir2 < 0 },
-              { label: '3', ts: n3Ts, price: n3Price, above: newDir2 > 0 },
-              { label: '4', ts: n4Ts, price: n4Price, above: newDir2 < 0 },
-              { label: '5', ts: n5Ts, price: n5Price, above: newDir2 > 0 },
-            ],
-            { ts: n2Ts + (n5Ts - n2Ts) / 2, price: isUp ? cPrice - atr * 0.5 : cPrice + atr * 0.5, text: 'Projected Impulse', sub: '' },
-            projColor2, cColor2, projDashDotted,
-          )
-
-          // ── Draw the projected channel (two parallel trendlines) ──
-          const chColor = 'rgba(255,215,0,0.25)'
-          const chEndTs = n5Ts + newStep2 * barStep  // extend slightly past W5
-          add({
-            name: 'patternTrendline',
-            points: [
-              { timestamp: cTs, value: cPrice },
-              { timestamp: chEndTs, value: barsAfterC > 5 ? cPrice + ((n2Price - cPrice) / Math.max(1, n2Ts - cTs)) * (chEndTs - cTs) : corrLine(chEndTs) },
-            ],
-            extendData: { color: chColor, lineWidth: 1.5, dash: [8, 6] },
-          })
-          add({
-            name: 'patternTrendline',
-            points: [
-              { timestamp: n1Ts, value: n1Price },
-              { timestamp: chEndTs, value: barsAfterC > 5 ? n1Price + ((n2Price - cPrice) / Math.max(1, n2Ts - cTs)) * (chEndTs - n1Ts) : motiveLine(chEndTs) },
-            ],
-            extendData: { color: chColor, lineWidth: 1.5, dash: [8, 6] },
-          })
-
-          } // end aRetrace >= 0.05
-        } else {
-          // ── Not enough real data — use pure Fibonacci projection ──
-          const abcStep2 = Math.max(5, Math.floor(avgWaveBars * 0.5))
-          aPrice = round2(impEnd + corrDir * impRange * 0.382)
-          aTs = anchorTs + abcStep2 * barStep
-          aIdx = impEndIdx + abcStep2
-          bPrice = round2(aPrice - corrDir * impRange * 0.382 * 0.50)
-          bTs = aTs + abcStep2 * barStep * 0.7
-          bIdx = aIdx + Math.floor(abcStep2 * 0.7)
-          cPrice = round2(impEnd + corrDir * impRange * 0.618)
-          cTs = bTs + abcStep2 * barStep
-
-          const projColor = IMPULSE_CLR
-          const cColor = IMPULSE_CIRCLE
-
-          drawProjection(
-            [{ ts: anchorTs, price: impEnd }, { ts: aTs, price: aPrice }, { ts: bTs, price: bPrice }, { ts: cTs, price: cPrice }],
-            [
-              { label: 'A', ts: aTs, price: aPrice, above: corrDir < 0 },
-              { label: 'B', ts: bTs, price: bPrice, above: corrDir > 0 },
-              { label: 'C', ts: cTs, price: cPrice, above: corrDir < 0 },
-            ],
-            { ts: aTs + (cTs - aTs) / 2, price: isUp ? Math.min(aPrice, cPrice) - atr * 0.7 : Math.max(aPrice, cPrice) + atr * 0.7, text: 'Corrective Wave', sub: isUp ? '↘ Projected' : '↗ Projected' },
-            projColor, cColor,
-          )
-          // ── CHANNEL-FIRST: define channel, waves ON it (Fib branch) ──
-          const newDir = isUp ? 1 : -1
-          const corrRange = safeRange(cPrice, Math.abs(impEnd - cPrice), newDir)
-          const newStepBars = Math.max(8, Math.floor(avgWaveBars * 0.6))
-
-          // Channel: corrective line from C slopes toward impulse end, motive line parallel
-          const totalMsF = newStepBars * 4.4 * barStep
-          const chEndF = cPrice + newDir * corrRange * 0.764
-          const chSlopeF = (chEndF - cPrice) / totalMsF
-          const chWidthF = corrRange * 0.35
-          const corrLineF = (ts: number) => cPrice + chSlopeF * (ts - cTs)
-          const motiveLineF = (ts: number) => corrLineF(ts) + newDir * chWidthF
-
-          const n1Ts = cTs + newStepBars * barStep
-          const n1Price = round2(motiveLineF(n1Ts))
-          const n2Ts = n1Ts + Math.floor(newStepBars * 0.5) * barStep
-          const n2Price = round2(corrLineF(n2Ts))
-          const n3Ts = n2Ts + Math.floor(newStepBars * 1.5) * barStep
-          const n3Price = round2(motiveLineF(n3Ts))
-          const n4Ts = n3Ts + Math.floor(newStepBars * 0.4) * barStep
-          const n4Price = round2(corrLineF(n4Ts))
-          const n5Ts = n4Ts + newStepBars * barStep
-          const n5Price = round2(motiveLineF(n5Ts))
-
-          drawProjection(
-            [
-              { ts: cTs, price: cPrice },
-              { ts: n1Ts, price: n1Price },
-              { ts: n2Ts, price: n2Price },
-              { ts: n3Ts, price: n3Price },
-              { ts: n4Ts, price: n4Price },
-              { ts: n5Ts, price: n5Price },
-            ],
-            [
-              { label: '1', ts: n1Ts, price: n1Price, above: newDir > 0 },
-              { label: '2', ts: n2Ts, price: n2Price, above: newDir < 0 },
-              { label: '3', ts: n3Ts, price: n3Price, above: newDir > 0 },
-              { label: '4', ts: n4Ts, price: n4Price, above: newDir < 0 },
-              { label: '5', ts: n5Ts, price: n5Price, above: newDir > 0 },
-            ],
-            { ts: n2Ts + (n5Ts - n2Ts) / 2, price: isUp ? cPrice - atr * 0.5 : cPrice + atr * 0.5, text: 'Projected Impulse', sub: '' },
-            projColor, cColor, projDashDotted,
-          )
-
-          // ── Draw the projected channel ──
-          const chColorF = 'rgba(255,215,0,0.25)'
-          const chEndTsF = n5Ts + newStepBars * barStep
-          add({
-            name: 'patternTrendline',
-            points: [
-              { timestamp: cTs, value: cPrice },
-              { timestamp: chEndTsF, value: corrLineF(chEndTsF) },
-            ],
-            extendData: { color: chColorF, lineWidth: 1.5, dash: [8, 6] },
-          })
-          add({
-            name: 'patternTrendline',
-            points: [
-              { timestamp: n1Ts, value: n1Price },
-              { timestamp: n5Ts, value: n5Price },
-            ],
-            extendData: { color: chColorF, lineWidth: 1.5, dash: [8, 6] },
-          })
-        }
-      } // end Case 2
-
-      // ── Case 2b: COMPLETE IMPULSE + LINKED CORRECTION → project 1-2-3-4-5 + ABC ──
-      // When the backend provides both impulse and correction, project the next
-      // impulse continuation from the correction end, then a second ABC.
-      if (isImpulse && isComplete && hasLinkedCorr) {
-        const corrEndPrice = anchorPrice
-        const corrStartPrice = linkedCorrection!.waves[0].start_price
-        const newDir = isUp ? 1 : -1
-        const corrRange = safeRange(corrEndPrice, Math.abs(corrStartPrice - corrEndPrice), newDir)
-        const avgWaveBars2b = primaryCount.waves.reduce((s: number, w: any) => s + (w.end_idx - w.start_idx), 0) / primaryCount.waves.length
-        const newStep = Math.max(8, Math.floor(avgWaveBars2b * 0.6))
-        const corrEndIdx = linkedCorrection!.waves[linkedCorrection!.waves.length - 1].end_idx
-        const barsAfterCorr = serverBars.length - 1 - corrEndIdx
-        const maxAllowedBarsAfterCorr = Math.max(15, Math.floor(serverBars.length * 0.15))
-        if (barsAfterCorr > maxAllowedBarsAfterCorr) return
-
-        let n1P: number, n1T: number, n2P: number, n2T: number
-        let n3P: number, n3T: number, n4P: number, n4T: number
-        let n5P: number, n5T: number
-
-        // Channel-first: define channel from correction, waves on boundaries
-        const totalMs2b = newStep * 4.4 * barStep
-        const chEnd2b = corrEndPrice + newDir * corrRange * 0.764
-        const chSlope2b = (chEnd2b - corrEndPrice) / totalMs2b
-        const chWidth2b = corrRange * 0.35
-        const corrLine2b = (ts: number) => corrEndPrice + chSlope2b * (ts - anchorTs)
-        const motiveLine2b = (ts: number) => corrLine2b(ts) + newDir * chWidth2b
-
-        if (barsAfterCorr > 5) {
-          // W1/W2 from real candle body, then channel for W3-W5
-          const w1s = findSwing(corrEndIdx + 1, serverBars.length - 1, isUp)
-          n1P = w1s.price; n1T = w1s.ts
-          if (serverBars.length - 1 - w1s.idx >= 3) {
-            const w2s = findSwing(w1s.idx + 1, serverBars.length - 1, !isUp)
-            n2P = w2s.price; n2T = w2s.ts
-          } else {
-            n2P = round2(corrLine2b(anchorTs + newStep * 1.5 * barStep))
-            n2T = n1T + Math.floor(newStep * 0.5) * barStep
-          }
-          // Channel from real W1/W2
-          const realSlope2b = (n2P - corrEndPrice) / Math.max(1, n2T - anchorTs)
-          const realCorr2b = (ts: number) => corrEndPrice + realSlope2b * (ts - anchorTs)
-          const realChW2b = Math.abs(n1P - realCorr2b(n1T))
-          const realMotive2b = (ts: number) => realCorr2b(ts) + newDir * realChW2b
-          n3T = n2T + Math.floor(newStep * 1.5) * barStep; n3P = round2(realMotive2b(n3T))
-          n4T = n3T + Math.floor(newStep * 0.4) * barStep; n4P = round2(realCorr2b(n4T))
-          n5T = n4T + newStep * barStep; n5P = round2(realMotive2b(n5T))
-        } else {
-          // Pure channel projection
-          const t1 = anchorTs + newStep * barStep
-          n1T = t1; n1P = round2(motiveLine2b(t1))
-          const t2 = t1 + Math.floor(newStep * 0.5) * barStep
-          n2T = t2; n2P = round2(corrLine2b(t2))
-          const t3 = t2 + Math.floor(newStep * 1.5) * barStep
-          n3T = t3; n3P = round2(motiveLine2b(t3))
-          const t4 = t3 + Math.floor(newStep * 0.4) * barStep
-          n4T = t4; n4P = round2(corrLine2b(t4))
-          const t5 = t4 + newStep * barStep
-          n5T = t5; n5P = round2(motiveLine2b(t5))
-        }
-
-        const projColor = IMPULSE_CLR
-        const cColor = IMPULSE_CIRCLE
-
-        drawProjection(
-          [
-            { ts: anchorTs, price: corrEndPrice },
-            { ts: n1T, price: n1P },
-            { ts: n2T, price: n2P },
-            { ts: n3T, price: n3P },
-            { ts: n4T, price: n4P },
-            { ts: n5T, price: n5P },
-          ],
-          [
-            { label: '1', ts: n1T, price: n1P, above: newDir > 0 },
-            { label: '2', ts: n2T, price: n2P, above: newDir < 0 },
-            { label: '3', ts: n3T, price: n3P, above: newDir > 0 },
-            { label: '4', ts: n4T, price: n4P, above: newDir < 0 },
-            { label: '5', ts: n5T, price: n5P, above: newDir > 0 },
-          ],
-          { ts: n2T + (n5T - n2T) / 2, price: newDir > 0 ? corrEndPrice - atr * 0.5 : corrEndPrice + atr * 0.5, text: 'Projected Impulse', sub: '' },
-          projColor, cColor, projDashDotted,
-        )
-
-        // ── Projected channel (Case 2b) ──
-        const chColor2bLine = 'rgba(255,215,0,0.25)'
-        const chEndTs2b = n5T + newStep * barStep
-        add({
-          name: 'patternTrendline',
-          points: [
-            { timestamp: anchorTs, value: corrEndPrice },
-            { timestamp: chEndTs2b, value: barsAfterCorr > 5 ? corrEndPrice + ((n2P - corrEndPrice) / Math.max(1, n2T - anchorTs)) * (chEndTs2b - anchorTs) : corrLine2b(chEndTs2b) },
-          ],
-          extendData: { color: chColor2bLine, lineWidth: 1.5, dash: [8, 6] },
-        })
-        add({
-          name: 'patternTrendline',
-          points: [
-            { timestamp: n1T, value: n1P },
-            { timestamp: chEndTs2b, value: barsAfterCorr > 5 ? n1P + ((n2P - corrEndPrice) / Math.max(1, n2T - anchorTs)) * (chEndTs2b - n1T) : motiveLine2b(chEndTs2b) },
-          ],
-          extendData: { color: chColor2bLine, lineWidth: 1.5, dash: [8, 6] },
-        })
-      } // end Case 2b
-
-      // ── Case 3: COMPLETE CORRECTION, no linked impulse → project 12345 ──
-      if (!isImpulse && !hasLinkedCorr) {
-        const newDir = isUp ? -1 : 1
-        const corrRange = safeRange(anchorPrice, Math.abs(primaryCount.waves[0].start_price - anchorPrice), newDir)
-
-        // Channel-first (Case 3)
-        const avgWaveBars3 = primaryCount.waves.reduce((s: number, w: any) => s + (w.end_idx - w.start_idx), 0) / primaryCount.waves.length
-        const step3 = Math.max(8, Math.floor(avgWaveBars3 * 0.6))
-        const totalMs3 = step3 * 4.4 * barStep
-        const chEnd3 = anchorPrice + newDir * corrRange * 0.764
-        const chSlope3 = (chEnd3 - anchorPrice) / totalMs3
-        const chWidth3 = corrRange * 0.35
-        const corrLine3 = (ts: number) => anchorPrice + chSlope3 * (ts - anchorTs)
-        const motiveLine3 = (ts: number) => corrLine3(ts) + newDir * chWidth3
-
-        const w1T = anchorTs + step3 * barStep
-        const w1P = round2(motiveLine3(w1T))
-        const w2T = w1T + Math.floor(step3 * 0.5) * barStep
-        const w2P = round2(corrLine3(w2T))
-        const w3T = w2T + Math.floor(step3 * 1.5) * barStep
-        const w3P = round2(motiveLine3(w3T))
-        const w4T = w3T + Math.floor(step3 * 0.4) * barStep
-        const w4P = round2(corrLine3(w4T))
-        const w5T = w4T + step3 * barStep
-        const w5P = round2(motiveLine3(w5T))
-
-        const projColor = IMPULSE_CLR
-        const cColor = IMPULSE_CIRCLE
-
-        drawProjection(
-          [{ ts: anchorTs, price: anchorPrice }, { ts: w1T, price: w1P }, { ts: w2T, price: w2P }, { ts: w3T, price: w3P }, { ts: w4T, price: w4P }, { ts: w5T, price: w5P }],
-          [
-            { label: '1', ts: w1T, price: w1P, above: newDir > 0 },
-            { label: '2', ts: w2T, price: w2P, above: newDir < 0 },
-            { label: '3', ts: w3T, price: w3P, above: newDir > 0 },
-            { label: '4', ts: w4T, price: w4P, above: newDir < 0 },
-            { label: '5', ts: w5T, price: w5P, above: newDir > 0 },
-          ],
-          { ts: w1T + (w5T - w1T) / 2, price: newDir > 0 ? Math.min(anchorPrice, w2P) - atr * 0.7 : Math.max(anchorPrice, w2P) + atr * 0.7, text: 'Impulsive Wave', sub: newDir > 0 ? '↗ Projected 1-2-3-4-5' : '↘ Projected 1-2-3-4-5' },
-          projColor, cColor, projDashSolid,
-        )
-
-        // ── Projected channel (Case 3) ──
-        const chColor3 = 'rgba(255,215,0,0.25)'
-        const chEndTs3 = w5T + step3 * barStep
-        add({
-          name: 'patternTrendline',
-          points: [
-            { timestamp: anchorTs, value: anchorPrice },
-            { timestamp: chEndTs3, value: corrLine3(chEndTs3) },
-          ],
-          extendData: { color: chColor3, lineWidth: 1.5, dash: [8, 6] },
-        })
-        add({
-          name: 'patternTrendline',
-          points: [
-            { timestamp: anchorTs, value: anchorPrice + newDir * chWidth3 },
-            { timestamp: chEndTs3, value: motiveLine3(chEndTs3) },
-          ],
-          extendData: { color: chColor3, lineWidth: 1.5, dash: [8, 6] },
-        })
-      }
-    }
-
-    // ── EW CHANNELS — trend channels containing the wave structure ──────────
-    const ewChannels = (resp as any).channels as EWChannel[] | undefined
-    if (ewChannels && ewChannels.length > 0 && serverBars.length > 0) {
-      const CHANNEL_COLORS: Record<string, { line: string; fill: string }> = {
-        base:         { line: 'rgba(100,150,255,0.35)', fill: 'rgba(100,150,255,0.04)' },
-        acceleration: { line: 'rgba(245,158,11,0.45)',  fill: 'rgba(245,158,11,0.05)' },
-        corrective:   { line: 'rgba(239,68,68,0.40)',   fill: 'rgba(239,68,68,0.04)' },
-      }
-
-      for (const ch of ewChannels) {
-        const colors = CHANNEL_COLORS[ch.type] || CHANNEL_COLORS.base
-
-        // Convert bar indices to timestamps via serverBars
-        const snapIdx = (idx: number) => {
-          const clamped = Math.max(0, Math.min(idx, serverBars.length - 1))
-          return serverBars[clamped]?.timestamp || lastTs
-        }
-
-        const lowerStartTs = snapIdx(ch.lower.start_idx)
-        const lowerEndTs = ch.lower.end_idx >= serverBars.length
-          ? lastTs + (ch.lower.end_idx - serverBars.length + 1) * barStep
-          : snapIdx(ch.lower.end_idx)
-        const upperStartTs = snapIdx(ch.upper.start_idx)
-        const upperEndTs = ch.upper.end_idx >= serverBars.length
-          ? lastTs + (ch.upper.end_idx - serverBars.length + 1) * barStep
-          : snapIdx(ch.upper.end_idx)
-
-        // Lower channel line
-        add({
-          name: 'patternTrendline',
-          points: [
-            { timestamp: lowerStartTs, value: ch.lower.start_price },
-            { timestamp: lowerEndTs,   value: ch.lower.end_price },
-          ],
-          extendData: { color: colors.line, lineWidth: 1.5, dash: [6, 4] },
-        })
-
-        // Upper channel line
-        add({
-          name: 'patternTrendline',
-          points: [
-            { timestamp: upperStartTs, value: ch.upper.start_price },
-            { timestamp: upperEndTs,   value: ch.upper.end_price },
-          ],
-          extendData: { color: colors.line, lineWidth: 1.5, dash: [6, 4] },
-        })
-
-        // Channel type label
-        const labelMap: Record<string, string> = {
-          base: 'Base Channel',
-          acceleration: '2-4 Channel',
-          corrective: 'Corrective Channel',
-        }
-        const labelTs = lowerStartTs + Math.floor((lowerEndTs - lowerStartTs) * 0.1)
-        const labelPrice = ch.direction === 'up' ? ch.lower.start_price : ch.upper.start_price
-        add({
-          name: 'patternLabel',
-          points: [{ timestamp: labelTs, value: labelPrice }],
-          extendData: { text: labelMap[ch.type] || ch.type, color: colors.line, fontSize: 9, offsetY: ch.direction === 'up' ? 12 : -12 },
-        })
-
-        // Breakout marker
-        if (ch.breakout) {
-          const bkTs = ch.breakout.idx >= serverBars.length
-            ? lastTs + (ch.breakout.idx - serverBars.length + 1) * barStep
-            : snapIdx(ch.breakout.idx)
-
-          add({
-            name: 'patternBadge',
-            points: [{ timestamp: bkTs, value: ch.breakout.price }],
-            extendData: {
-              text: ch.breakout.label,
-              bgColor: ch.breakout.new_phase === 'corrective'
-                ? 'rgba(239,68,68,0.85)'
-                : 'rgba(34,197,94,0.85)',
-              textColor: '#ffffff',
-            },
-          })
-        }
-      }
-    }
 
     // ── STATUS BADGES — derived from the DRAWN wave count, not current_position ──
     if (layers.status && primaryCount && primaryCount.waves && primaryCount.waves.length > 0) {
@@ -1750,70 +847,6 @@ async function drawElliottWaves(chart: Chart, symbol: string, bars: KLineData[],
     // ── DRAGGABLE HANDLES: W1 start, W1 end, and last wave's end ──
     // Allow user to manually adjust the key pivots. On drag end, the new
     // point is saved to ewAdjustmentsRef and the overlays are re-rendered.
-    if (primaryCount && primaryCount.waves && primaryCount.waves.length > 0) {
-      const waves = primaryCount.waves
-      const w1 = waves[0]
-      const wLast = waves[waves.length - 1]
-      const isUp = primaryCount.direction === 'up'
-
-      type HandleKind = 'w1Start' | 'w1End' | 'wLastEnd'
-      const makeHandle = (kind: HandleKind, idx: number, price: number, label: string) => {
-        const ts = snap(idx)
-        chart.createOverlay({
-          name: 'waveHandle',
-          groupId: 'auto-overlays',
-          points: [{ timestamp: ts, value: price }],
-          lock: false,
-          mode: 'normal',
-          needDefaultPointFigure: false,
-          needDefaultXAxisFigure: false,
-          needDefaultYAxisFigure: false,
-          extendData: { color: '#fde047', label },
-          onPressedMoveEnd: (e: any) => {
-            try {
-              const pt = e?.overlay?.points?.[0] || e?.points?.[0]
-              if (!pt) return
-              const newTs = pt.timestamp
-              const newPrice = pt.value
-              const newIdx = nearestBarIdx(barTs, newTs)
-              const key = adjustmentKey(symbol, tfKey)
-              const prev = ewAdjustmentsRef[key] || {}
-              ewAdjustmentsRef[key] = {
-                ...prev,
-                [kind]: { idx: newIdx, price: newPrice },
-              }
-              if (ewRedrawTrigger) ewRedrawTrigger()
-            } catch (err) {
-              console.warn('[EW handle drag] failed:', err)
-            }
-            return false
-          },
-          // Right-click → revert this handle to its backend-detected position.
-          // Deletes just this kind's entry from the adjustment ref so other
-          // dragged handles keep their overrides.
-          onRightClick: (_e: any) => {
-            try {
-              const key = adjustmentKey(symbol, tfKey)
-              const prev = ewAdjustmentsRef[key]
-              if (prev && prev[kind]) {
-                const { [kind]: _removed, ...rest } = prev
-                if (Object.keys(rest).length === 0) delete ewAdjustmentsRef[key]
-                else ewAdjustmentsRef[key] = rest
-                if (ewRedrawTrigger) ewRedrawTrigger()
-              }
-            } catch (err) {
-              console.warn('[EW handle undo] failed:', err)
-            }
-            return true  // swallow the event (prevent default context menu)
-          },
-        } as any)
-      }
-
-      makeHandle('w1Start', w1.start_idx, w1.start_price, 'W1 start')
-      makeHandle('w1End',   w1.end_idx,   w1.end_price,   'W1 end')
-      makeHandle('wLastEnd', wLast.end_idx, wLast.end_price, `W${waves.length} end`)
-      void isUp // silence unused-var lint in case isUp isn't referenced below
-    }
 
     // ── AUTO-ZOOM: frame the EW structure vertically + horizontally ──
     // Collect all wave pivots (prices + bar indices) from the primary count,
@@ -1915,38 +948,278 @@ async function drawElliottWaves(chart: Chart, symbol: string, bars: KLineData[],
           // the earliest (iMin). Padding goes on the LEFT so pivots
           // aren't pressed against the left edge; the right edge hugs
           // the last bar (current price) with minimal padding.
+          // Two-phase zoom: first set bar space, then scroll after a short
+          // delay to allow klinecharts to complete its internal relayout.
+          // A single setTimeout with both operations races against the layout.
           setTimeout(() => {
             try {
               const totalBars = serverBars.length
               const lastBarIdx = Math.max(totalBars - 1, 0)
-              // Coverage needed: from earliest pivot through last candle.
-              // We can extend a bit LEFT of iMin too (user said "almost
-              // even go backward") so wave 1 start has breathing room.
               const coverageBars = Math.max(lastBarIdx - iMin + 1, 20)
-              // Left padding: 10% of coverage, min 5 bars, max 25 bars
               const leftPadBars = Math.min(Math.max(Math.floor(coverageBars * 0.10), 5), 25)
-              // Right padding: small — the last candle should hug the right edge
               const rightPadBars = 6
               const visibleBars = Math.min(coverageBars + leftPadBars + rightPadBars, totalBars)
 
               const chartWidth = (chart as any).getSize?.()?.width
                 || (typeof window !== 'undefined' ? window.innerWidth * 0.7 : 900)
               const targetBarSpace = Math.max(1.5, Math.min(40, chartWidth / visibleBars))
-              chart.setBarSpace(targetBarSpace)
 
-              // Scroll so the LAST bar is at the right edge of the viewport.
-              const lastTs = snap(lastBarIdx)
-              chart.scrollToTimestamp(lastTs, 300)
+              // Phase 1: set bar space (triggers internal relayout)
+              chart.setBarSpace(targetBarSpace)
               chart.setOffsetRightDistance(rightPadBars * targetBarSpace)
+
+              // Phase 2: scroll to current (last) candle AFTER relayout settles.
+              // Bar space is already set to show the full wave — scrollToTimestamp
+              // positions the most recent candle at the right edge so the user
+              // lands on the current price with the whole pattern in view.
+              setTimeout(() => {
+                try {
+                  chart.scrollToTimestamp(snap(lastBarIdx))
+                } catch (e2) {
+                  console.warn('[EW auto-zoom] scroll phase failed:', e2)
+                }
+              }, 50)
             } catch (e) {
               console.warn('[EW auto-zoom] horizontal zoom failed:', e)
             }
-          }, 100)
+          }, 150)
         }
       } catch (e) {
         console.warn('[EW auto-zoom] failed:', e)
       }
     }
+
+    // ── v3: Multi-degree wave tree rendering ─────────────────────────────
+    // Renders when: v3 toggle is ON and backend returned wave_tree data.
+    // Falls back gracefully — v2 rendering is unaffected.
+    const waveTree = (resp as any)?.wave_tree
+    ewV3WaveTreeCache = waveTree || null
+    if (ewV3WaveTreeCallback) ewV3WaveTreeCallback(ewV3WaveTreeCache)
+    if (waveTree?.primary_count) {
+      const primaryNode = waveTree.primary_count
+
+      // Helper: walk the tree and collect all pivot labels to draw
+      interface V3Label {
+        idx: number; price: number; label: string
+        degree: string; color: string; isHigh: boolean
+      }
+      const v3Labels: V3Label[] = []
+
+      function collectV3Labels(node: any) {
+        if (!node?.sub_waves?.length) return
+        const deg = (node.degree || '').toUpperCase() as keyof typeof ewV3Settings.degreeColors
+        if (!ewV3Settings.visibleDegrees[deg as keyof typeof ewV3Settings.visibleDegrees]) {
+          // Still recurse — children may be at a visible degree
+          for (const sw of node.sub_waves) collectV3Labels(sw)
+          return
+        }
+        const color = ewV3Settings.degreeColors[deg] || '#888888'
+        for (const sw of node.sub_waves) {
+          v3Labels.push({
+            idx:    sw.end_idx,
+            price:  sw.end_price,
+            label:  sw.label,
+            degree: deg,
+            color,
+            isHigh: sw.direction === 'UP',
+          })
+          if (sw.sub_waves?.length) collectV3Labels(sw)
+        }
+      }
+      collectV3Labels(primaryNode)
+      _v3Segments = []
+
+      // Draw starting point marker
+      if (ewV3Settings.showStartingPoint && waveTree.starting_point) {
+        const sp = waveTree.starting_point
+        add({
+          name: 'waveCircle',
+          points: [{ timestamp: snap(sp.idx), value: sp.price }],
+          extendData: {
+            text: 'o',
+            fillColor: ewV3Settings.degreeColors.INTERMEDIATE + 'aa',
+            textColor: '#ffffff',
+            radius: 10,
+            borderColor: ewV3Settings.degreeColors.INTERMEDIATE,
+          },
+        })
+      }
+
+      // Draw connecting lines between sub-waves at each visible degree
+      if (ewV3Settings.showWaveLines) {
+        function drawV3Lines(node: any) {
+          if (!node?.sub_waves?.length) return
+          const deg = (node.degree || '').toUpperCase()
+          const visible = ewV3Settings.visibleDegrees[deg as keyof typeof ewV3Settings.visibleDegrees]
+          if (visible && node.sub_waves.length >= 2) {
+            const color = ewV3Settings.degreeColors[deg as keyof typeof ewV3Settings.degreeColors] || '#888'
+            const opacity = Math.round(ewV3Settings.waveLineOpacity * 255).toString(16).padStart(2, '0')
+            // Draw zigzag lines connecting the sub-wave pivots
+            const pivs = [
+              { idx: node.sub_waves[0].start_idx, price: node.sub_waves[0].start_price },
+              ...node.sub_waves.map((sw: any) => ({ idx: sw.end_idx, price: sw.end_price })),
+            ]
+            for (let i = 0; i < pivs.length - 1; i++) {
+              add({
+                name: 'patternTrendline',
+                points: [
+                  { timestamp: snap(pivs[i].idx),     value: pivs[i].price },
+                  { timestamp: snap(pivs[i + 1].idx), value: pivs[i + 1].price },
+                ],
+                extendData: {
+                  color:     color + opacity,
+                  lineWidth: deg === 'PRIMARY' || deg === 'CYCLE' ? 2.5 : 1.5,
+                  dash:      [],
+                },
+              })
+              // Populate hit cache for hover tooltips
+              const sw = node.sub_waves[i] as any
+              const sTs = snap(pivs[i].idx), eTs = snap(pivs[i + 1].idx)
+              const sp = pivs[i].price, ep = pivs[i + 1].price
+              const delta = ep - sp
+              const pct = sp !== 0 ? (delta / sp) * 100 : 0
+              _v3Segments.push({
+                startTs: sTs, endTs: eTs, startPrice: sp, endPrice: ep,
+                midTs: Math.round((sTs + eTs) / 2), midPrice: (sp + ep) / 2,
+                label:     sw?.label   ?? String(i + 1),
+                degree:    deg,
+                waveType:  sw?.wave_type ?? (Math.abs(delta) > 0 ? 'wave' : 'wave'),
+                direction: delta >= 0 ? 'up' : 'down',
+                color,
+                priceDelta: delta,
+                pricePct:   pct,
+                confidence: node.confidence,
+              })
+            }
+          }
+          for (const sw of node.sub_waves) drawV3Lines(sw)
+        }
+        drawV3Lines(primaryNode)
+      }
+
+      // Draw wave labels at each visible degree
+      if (ewV3Settings.showWaveLabels) {
+        for (const lbl of v3Labels) {
+          add({
+            name: 'patternLabel',
+            points: [{ timestamp: snap(lbl.idx), value: lbl.price }],
+            extendData: {
+              text:    lbl.label,
+              color:   lbl.color,
+              fontSize: lbl.degree === 'PRIMARY' || lbl.degree === 'CYCLE' ? 11 : 9,
+              offsetY:  lbl.isHigh ? -18 : 18,
+            },
+          })
+        }
+      }
+
+      // ── Draw linked correction (ABC after primary impulse) ─────────────────
+      const linkedCorr = waveTree.linked_correction
+      if (linkedCorr?.sub_waves?.length) {
+        // Corrective waves use a separate color palette — orange-red tones
+        // distinct from the impulse degree colors
+        const CORR_COLORS: Record<string, string> = {
+          A: '#f97316',  // orange
+          B: '#fb923c',  // lighter orange
+          C: '#ef4444',  // red
+        }
+        const CORR_DEFAULT = '#f97316'
+
+        // Bridge line from impulse end → correction start (if gap)
+        const corrFirstSub = linkedCorr.sub_waves[0]
+        const impulseEndTs = snap(primaryNode.end_idx ?? linkedCorr.start_idx)
+        const corrStartTs  = snap(corrFirstSub.start_idx)
+        if (corrFirstSub.start_idx !== (primaryNode.end_idx ?? corrFirstSub.start_idx)) {
+          add({
+            name: 'patternTrendline',
+            points: [
+              { timestamp: impulseEndTs, value: primaryNode.end_price ?? corrFirstSub.start_price },
+              { timestamp: corrStartTs,  value: corrFirstSub.start_price },
+            ],
+            extendData: { color: CORR_DEFAULT + '55', lineWidth: 1, dash: [4, 4] },
+          })
+        }
+
+        // Draw each A-B-C segment
+        const corrPivs = [
+          { idx: corrFirstSub.start_idx, price: corrFirstSub.start_price },
+          ...linkedCorr.sub_waves.map((sw: any) => ({ idx: sw.end_idx, price: sw.end_price })),
+        ]
+        for (let i = 0; i < corrPivs.length - 1; i++) {
+          const sw = linkedCorr.sub_waves[i]
+          const color = CORR_COLORS[sw.label] ?? CORR_DEFAULT
+          const sTs = snap(corrPivs[i].idx), eTs = snap(corrPivs[i + 1].idx)
+          const sp = corrPivs[i].price, ep = corrPivs[i + 1].price
+          add({
+            name: 'patternTrendline',
+            points: [
+              { timestamp: sTs, value: sp },
+              { timestamp: eTs, value: ep },
+            ],
+            extendData: { color: color + 'dd', lineWidth: 2.5, dash: [] },
+          })
+          // Add to hover cache
+          const delta = ep - sp
+          const pct = sp !== 0 ? (delta / sp) * 100 : 0
+          _v3Segments.push({
+            startTs: sTs, endTs: eTs, startPrice: sp, endPrice: ep,
+            midTs: Math.round((sTs + eTs) / 2), midPrice: (sp + ep) / 2,
+            label: sw.label, degree: linkedCorr.degree ?? 'INTERMEDIATE',
+            waveType: sw.wave_type ?? 'zigzag', direction: delta >= 0 ? 'up' : 'down',
+            color, priceDelta: delta, pricePct: pct, confidence: linkedCorr.confidence,
+          })
+          // Label
+          if (ewV3Settings.showWaveLabels) {
+            add({
+              name: 'patternLabel',
+              points: [{ timestamp: eTs, value: ep }],
+              extendData: {
+                text: sw.label,
+                color,
+                fontSize: 11,
+                offsetY: delta >= 0 ? -18 : 18,
+              },
+            })
+          }
+        }
+      }
+
+      // Draw v3 projections (Fibonacci targets)
+      if (ewV3Settings.showProjections && waveTree.projections?.length) {
+        const lastBar = serverBars[serverBars.length - 1]
+        const lastTs  = snap(serverBars.length - 1)
+        const projStep = Math.max(15, Math.floor(serverBars.length * 0.08)) * barStep
+
+        for (const proj of waveTree.projections) {
+          const projColor = proj.is_invalidation ? '#ef4444' : PROJ_CLR
+          const projTs    = lastTs + projStep
+
+          add({
+            name: 'patternTrendline',
+            points: [
+              { timestamp: lastTs,    value: lastBar?.close ?? proj.target_price },
+              { timestamp: projTs,    value: proj.target_price },
+            ],
+            extendData: {
+              color:     projColor + '99',
+              lineWidth: 1.5,
+              dash:      ewV3Settings.projectionStyle === 'dashed' ? [5, 4] : [],
+            },
+          })
+          add({
+            name: 'patternLabel',
+            points: [{ timestamp: projTs, value: proj.target_price }],
+            extendData: {
+              text:    `${proj.target_price.toFixed(2)} (${proj.fib_label})`,
+              color:   projColor,
+              fontSize: 9,
+              offsetY:  0,
+            },
+          })
+        }
+      }
+    }
+    // ── end v3 ───────────────────────────────────────────────────────────
   } catch (e) {
     console.warn('Elliott Wave overlay failed:', e)
   } finally {
@@ -2101,6 +1374,111 @@ export default function KLineChartOverlay({ symbol, onClose }: Props) {
   const [ewVisible, setEwVisible] = useState(true)
   const [chartPatternsVisible, setChartPatternsVisible] = useState(true)
   const [waveThemeIdx, setWaveThemeIdx] = useState(0) // default: Gold
+
+  // v3 display settings — persisted per symbol
+  const [ewSettings, setEwSettings] = useState<EWDisplaySettings>(() => {
+    try {
+      const saved = localStorage.getItem(`ew_v3_settings_${symbol}`)
+      if (saved) return { ...DEFAULT_EW_SETTINGS, ...JSON.parse(saved) }
+    } catch {}
+    return DEFAULT_EW_SETTINGS
+  })
+  const [showEWSettingsPanel, setShowEWSettingsPanel] = useState(false)
+  const [ewV3WaveTree, setEwV3WaveTree] = useState<any>(null)
+
+  // Persist settings
+  useEffect(() => {
+    try { localStorage.setItem(`ew_v3_settings_${symbol}`, JSON.stringify(ewSettings)) }
+    catch {}
+  }, [ewSettings, symbol])
+
+  // Sync settings to module-level ref so drawElliottWaves can read them
+  useEffect(() => {
+    setEwV3Settings(ewSettings)
+  }, [ewSettings])
+
+  // Register wave_tree callback so the settings panel can display current position
+  useEffect(() => {
+    setEwV3WaveTreeCallback((wt) => setEwV3WaveTree(wt))
+    return () => setEwV3WaveTreeCallback(null)
+  }, [])
+
+  // v3 wave hover — tooltip state
+  const [v3HoverSeg, setV3HoverSeg] = useState<V3SegMeta | null>(null)
+  const [v3HoverPos, setV3HoverPos] = useState({ x: 0, y: 0 })
+  const v3HoverSegRef = useRef<V3SegMeta | null>(null)
+
+  useEffect(() => {
+    const container = chartContainerRef.current
+    if (!container) return
+    const HIT_R = 28  // px — hit radius around segment midpoint
+
+    const onMove = (e: MouseEvent) => {
+      const chart = chartRef.current
+      if (!chart || !ewVisibleRef.current || !_v3Segments.length) {
+        if (v3HoverSegRef.current) { v3HoverSegRef.current = null; setV3HoverSeg(null) }
+        return
+      }
+      const rect = container.getBoundingClientRect()
+      const mx = e.clientX - rect.left
+      const my = e.clientY - rect.top
+
+      let bestSeg: V3SegMeta | null = null
+      let bestD2 = HIT_R * HIT_R
+
+      for (const seg of _v3Segments) {
+        const px = chart.convertToPixel(
+          { timestamp: seg.midTs, value: seg.midPrice },
+          { paneId: 'candle_pane' }
+        ) as { x?: number; y?: number }
+        if (px.x == null || px.y == null) continue
+        const dx = mx - px.x, dy = my - px.y
+        const d2 = dx * dx + dy * dy
+        if (d2 < bestD2) { bestD2 = d2; bestSeg = seg }
+      }
+
+      if (bestSeg !== v3HoverSegRef.current) {
+        v3HoverSegRef.current = bestSeg
+        setV3HoverSeg(bestSeg)
+
+        // Highlight overlay — remove old, draw new
+        try { (chart as any).removeOverlay({ id: 'v3-hl' }) } catch {}
+        if (bestSeg) {
+          chart.createOverlay({
+            id: 'v3-hl',
+            name: 'patternTrendline',
+            points: [
+              { timestamp: bestSeg.startTs, value: bestSeg.startPrice },
+              { timestamp: bestSeg.endTs,   value: bestSeg.endPrice   },
+            ],
+            extendData: { color: '#f97316', lineWidth: 4, dash: [] },
+            groupId: 'ew-overlays',
+            lock: true,
+            mode: 'normal' as any,
+            needDefaultPointFigure: false,
+            needDefaultXAxisFigure: false,
+            needDefaultYAxisFigure: false,
+            styles: { point: { activeColor: 'transparent', activeBorderColor: 'transparent', activeBorderSize: 0, activeRadius: 0, color: 'transparent', borderColor: 'transparent', borderSize: 0, radius: 0 } },
+          } as any)
+        }
+      }
+      if (bestSeg) setV3HoverPos({ x: mx, y: my })
+    }
+
+    const onLeave = () => {
+      v3HoverSegRef.current = null
+      setV3HoverSeg(null)
+      try { (chartRef.current as any)?.removeOverlay({ id: 'v3-hl' }) } catch {}
+    }
+
+    container.addEventListener('mousemove', onMove)
+    container.addEventListener('mouseleave', onLeave)
+    return () => {
+      container.removeEventListener('mousemove', onMove)
+      container.removeEventListener('mouseleave', onLeave)
+    }
+  }, [])  // no deps — reads refs at call time
+
   // EW layer toggles
   const [ewShowLabels, setEwShowLabels] = useState(true)
   const [ewShowTargets, setEwShowTargets] = useState(true)
@@ -2121,6 +1499,15 @@ export default function KLineChartOverlay({ symbol, onClose }: Props) {
   const [ewLoading, setEwLoading] = useState(false)
   const ewLoadStartRef = useRef<number>(0)
   const [ewLoadElapsed, setEwLoadElapsed] = useState(0)
+  // ── Magnifying glass dissection tool ──────────────────────────────────────
+  const [magnifierActive, setMagnifierActive] = useState(false)
+  const [magnifierPos, setMagnifierPos] = useState<{ x: number; y: number } | null>(null)
+  const magnifierCanvasRef = useRef<HTMLCanvasElement>(null)
+  const LENS_W = 280
+  const LENS_H = 190
+  const ZOOM   = 2.8
+  const SRC_W  = Math.round(LENS_W / ZOOM)
+  const SRC_H  = Math.round(LENS_H / ZOOM)
   const DRAW_GROUP = 'user-drawings'
   const startDrawing = useCallback((name: string) => {
     const chart = chartRef.current
@@ -2217,6 +1604,72 @@ export default function KLineChartOverlay({ symbol, onClose }: Props) {
     }, 100)
     return () => window.clearInterval(id)
   }, [ewLoading])
+
+  // ── Magnifying glass: composite all klinecharts canvas layers into lens ──
+  useEffect(() => {
+    const container = chartContainerRef.current
+    if (!container) return
+
+    const onMove = (e: MouseEvent) => {
+      if (!magnifierActive) return
+      const rect = container.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const y = e.clientY - rect.top
+      setMagnifierPos({ x, y })
+
+      const lensCanvas = magnifierCanvasRef.current
+      if (!lensCanvas) return
+      const ctx = lensCanvas.getContext('2d')
+      if (!ctx) return
+
+      // Source region centered on cursor (clamped to chart bounds)
+      // CRITICAL: klinecharts renders canvases at devicePixelRatio scale
+      // for Retina crispness. CSS coordinates must be multiplied by dpr
+      // to index into the actual canvas pixel buffer.
+      const dpr = window.devicePixelRatio || 1
+      const sx = Math.max(0, Math.min(rect.width  - SRC_W, x - SRC_W / 2))
+      const sy = Math.max(0, Math.min(rect.height - SRC_H, y - SRC_H / 2))
+
+      // Dark background
+      ctx.fillStyle = '#0d0d12'
+      ctx.fillRect(0, 0, LENS_W, LENS_H)
+
+      // Composite all canvas layers (klinecharts uses 2-3 overlapping canvases)
+      // Multiply source coordinates and dimensions by dpr to read the correct
+      // region from the high-resolution canvas backing store.
+      const canvases = container.querySelectorAll<HTMLCanvasElement>('canvas')
+      for (const c of canvases) {
+        try {
+          ctx.drawImage(
+            c,
+            sx * dpr, sy * dpr,       // source x, y (in canvas pixels)
+            SRC_W * dpr, SRC_H * dpr, // source width, height (in canvas pixels)
+            0, 0,                      // destination x, y
+            LENS_W, LENS_H            // destination width, height
+          )
+        } catch {}
+      }
+
+      // Crosshair at center of lens
+      const cx = LENS_W / 2, cy = LENS_H / 2
+      ctx.save()
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+      ctx.lineWidth = 0.75
+      ctx.setLineDash([3, 3])
+      ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, LENS_H); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(LENS_W, cy); ctx.stroke()
+      ctx.restore()
+    }
+
+    const onLeave = () => setMagnifierPos(null)
+
+    container.addEventListener('mousemove', onMove)
+    container.addEventListener('mouseleave', onLeave)
+    return () => {
+      container.removeEventListener('mousemove', onMove)
+      container.removeEventListener('mouseleave', onLeave)
+    }
+  }, [magnifierActive, LENS_W, LENS_H, SRC_W, SRC_H])
 
   // ── Create chart + load data (recreate on symbol/tf change) ────────────
   useEffect(() => {
@@ -2437,6 +1890,19 @@ export default function KLineChartOverlay({ symbol, onClose }: Props) {
           ))}
         </div>
 
+        {/* Magnifying glass / dissection tool */}
+        <button
+          onClick={() => { setMagnifierActive(a => !a); setMagnifierPos(null) }}
+          className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
+            magnifierActive
+              ? 'bg-blue-600/30 border-blue-500/60 text-blue-300 hover:bg-blue-600/40'
+              : 'bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white border-gray-700'
+          }`}
+          title={magnifierActive ? 'Magnifier ON — click to disable' : 'Magnifier — hover to dissect candles'}
+        >
+          🔍
+        </button>
+
         {/* Refresh button */}
         <button
           onClick={() => setRefreshKey(k => k + 1)}
@@ -2457,7 +1923,7 @@ export default function KLineChartOverlay({ symbol, onClose }: Props) {
       </div>
 
       {/* ── Chart area ──────────────────────────────────────────────── */}
-      <div className="flex-1 relative min-h-0 overflow-hidden">
+      <div className="flex-1 relative min-h-0 overflow-hidden" style={{ cursor: magnifierActive ? 'crosshair' : undefined }}>
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center z-10 bg-[#0a0a0f]/60 pointer-events-none">
             <div className="flex items-center gap-2 text-gray-400 text-sm">
@@ -2665,6 +2131,117 @@ export default function KLineChartOverlay({ symbol, onClose }: Props) {
                         </button>
                       ))}
                     </div>
+
+                    {/* Wave settings (v3 engine) */}
+                    <div className="flex items-center gap-1.5 mt-2 ml-4 relative">
+                      <button
+                        onClick={() => setShowEWSettingsPanel(s => !s)}
+                        className={`px-2 py-0.5 rounded text-xs border transition-colors ${
+                          showEWSettingsPanel
+                            ? 'bg-zinc-700/60 border-zinc-500/60 text-zinc-200'
+                            : 'bg-zinc-800/60 border-zinc-600/40 text-zinc-400 hover:text-zinc-200'
+                        }`}
+                        title="Wave display settings"
+                      >
+                        ⚙ Settings
+                      </button>
+
+                      {/* Settings panel — opens UPWARD, scrollable so all options visible */}
+                      {showEWSettingsPanel && (
+                        <div className="absolute left-0 bottom-full mb-2 z-50 w-64 max-h-[70vh] overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-lg p-3 shadow-xl text-xs">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="font-semibold text-zinc-200">Wave v3 Settings</span>
+                            <button onClick={() => setShowEWSettingsPanel(false)} className="text-zinc-500 hover:text-zinc-200 text-base leading-none">✕</button>
+                          </div>
+
+                          {/* Degree visibility */}
+                          <div className="mb-3">
+                            <div className="text-zinc-400 mb-1 font-medium">Visible Degrees</div>
+                            {(['PRIMARY','INTERMEDIATE','MINOR','MINUTE','SUBMINUTE'] as const).map(deg => (
+                              <label key={deg} className="flex items-center gap-2 mb-1 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={ewSettings.visibleDegrees[deg]}
+                                  onChange={e => setEwSettings(s => ({
+                                    ...s,
+                                    visibleDegrees: { ...s.visibleDegrees, [deg]: e.target.checked }
+                                  }))}
+                                  className="accent-cyan-500"
+                                />
+                                <span style={{ color: ewSettings.degreeColors[deg] }} className="font-mono">{deg}</span>
+                              </label>
+                            ))}
+                          </div>
+
+                          {/* Projection toggle */}
+                          <label className="flex items-center gap-2 mb-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={ewSettings.showProjections}
+                              onChange={e => setEwSettings(s => ({ ...s, showProjections: e.target.checked }))}
+                              className="accent-cyan-500"
+                            />
+                            <span className="text-zinc-300">Show Projections</span>
+                          </label>
+
+                          {/* Starting point toggle */}
+                          <label className="flex items-center gap-2 mb-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={ewSettings.showStartingPoint}
+                              onChange={e => setEwSettings(s => ({ ...s, showStartingPoint: e.target.checked }))}
+                              className="accent-cyan-500"
+                            />
+                            <span className="text-zinc-300">Show Starting Point</span>
+                          </label>
+
+                          {/* Wave line opacity slider */}
+                          <div className="mb-3">
+                            <div className="flex justify-between text-zinc-400 mb-1">
+                              <span>Line Opacity</span>
+                              <span className="text-zinc-300 font-mono">{Math.round(ewSettings.waveLineOpacity * 100)}%</span>
+                            </div>
+                            <input
+                              type="range" min="0.1" max="1.0" step="0.05"
+                              value={ewSettings.waveLineOpacity}
+                              onChange={e => setEwSettings(s => ({ ...s, waveLineOpacity: parseFloat(e.target.value) }))}
+                              className="w-full accent-cyan-500"
+                            />
+                          </div>
+
+                          {/* Projection style */}
+                          <div className="mb-3">
+                            <div className="text-zinc-400 mb-1">Projection Lines</div>
+                            <div className="flex gap-2">
+                              {(['solid','dashed'] as const).map(style => (
+                                <button
+                                  key={style}
+                                  onClick={() => setEwSettings(s => ({ ...s, projectionStyle: style }))}
+                                  className={`px-2.5 py-0.5 rounded border text-xs transition-colors ${
+                                    ewSettings.projectionStyle === style
+                                      ? 'border-cyan-500 bg-cyan-500/15 text-cyan-300'
+                                      : 'border-zinc-600 text-zinc-400 hover:text-zinc-200'
+                                  }`}
+                                >{style}</button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Current position display */}
+                          {ewV3WaveTree?.current_position && (
+                            <div className="mt-1 pt-2 border-t border-zinc-700">
+                              <div className="text-zinc-400 mb-1 font-medium">Current Position</div>
+                              <div className="text-cyan-300 font-mono text-[10px] leading-relaxed break-words">
+                                {ewV3WaveTree.current_position}
+                              </div>
+                              <div className="text-zinc-500 mt-1">
+                                Confidence: {((ewV3WaveTree.overall_confidence ?? 0) * 100).toFixed(1)}%
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
               </div>
@@ -2735,6 +2312,103 @@ export default function KLineChartOverlay({ symbol, onClose }: Props) {
           className="w-full h-full"
           style={{ background: '#0a0a0f' }}
         />
+
+        {/* ── Magnifier Lens ──────────────────────────────────────────── */}
+        {/* Canvas always mounted when magnifier is active so the ref is available
+            on the very first mousemove; visibility is controlled by the wrapper  */}
+        {magnifierActive && (() => {
+          const container = chartContainerRef.current
+          const cW = container?.clientWidth  ?? 900
+          const cH = container?.clientHeight ?? 500
+          const PAD = 18
+          let lx = 0, ly = 0
+          if (magnifierPos) {
+            lx = magnifierPos.x + PAD
+            if (lx + LENS_W > cW - 4) lx = magnifierPos.x - LENS_W - PAD
+            ly = magnifierPos.y - LENS_H / 2
+            if (ly < 4) ly = 4
+            if (ly + LENS_H > cH - 4) ly = cH - LENS_H - 4
+          }
+
+          return (
+            <div
+              className="absolute pointer-events-none z-50 transition-opacity duration-75"
+              style={{
+                left: lx, top: ly,
+                width: LENS_W, height: LENS_H,
+                opacity: magnifierPos ? 1 : 0,
+              }}
+            >
+              {/* Lens border + glow */}
+              <div className="absolute inset-0 rounded-xl border border-blue-400/50 shadow-[0_0_20px_rgba(59,130,246,0.25)]" />
+              {/* Zoom badge */}
+              <div className="absolute top-1.5 right-2 text-[9px] font-mono text-blue-300/60 select-none z-10">
+                {ZOOM.toFixed(1)}×
+              </div>
+              {/* Zoomed canvas — updated on every mousemove */}
+              <canvas
+                ref={magnifierCanvasRef}
+                width={LENS_W}
+                height={LENS_H}
+                className="rounded-xl block"
+              />
+            </div>
+          )
+        })()}
+
+        {/* v3 wave hover tooltip */}
+        {v3HoverSeg && ewVisible && (
+          <div
+            className="pointer-events-none absolute z-40 min-w-[180px] max-w-[240px] rounded-lg bg-zinc-900/95 border border-zinc-700/80 backdrop-blur-sm shadow-2xl shadow-black/60 text-xs overflow-hidden"
+            style={{
+              left: v3HoverPos.x + 16,
+              top:  Math.max(8, v3HoverPos.y - 80),
+            }}
+          >
+            {/* Header strip with degree color */}
+            <div
+              className="flex items-center justify-between px-3 py-1.5"
+              style={{ borderBottom: `1px solid ${v3HoverSeg.color}40`, background: `${v3HoverSeg.color}18` }}
+            >
+              <span className="font-bold text-white text-sm">Wave {v3HoverSeg.label}</span>
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ color: v3HoverSeg.color, background: `${v3HoverSeg.color}25` }}>
+                {v3HoverSeg.degree}
+              </span>
+            </div>
+            {/* Body */}
+            <div className="px-3 py-2 space-y-1">
+              <div className="flex justify-between items-center">
+                <span className="text-zinc-400">Type</span>
+                <span className="text-zinc-200 capitalize">{(v3HoverSeg.waveType || 'wave').replace(/_/g, ' ')}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-zinc-400">Direction</span>
+                <span className={v3HoverSeg.direction === 'up' ? 'text-emerald-400' : 'text-red-400'}>
+                  {v3HoverSeg.direction === 'up' ? '▲ Bullish' : '▼ Bearish'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-zinc-400">From → To</span>
+                <span className="text-zinc-200 font-mono text-[10px]">
+                  {v3HoverSeg.startPrice.toFixed(2)} → {v3HoverSeg.endPrice.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-zinc-400">Move</span>
+                <span className={`font-mono font-semibold ${v3HoverSeg.priceDelta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {v3HoverSeg.priceDelta >= 0 ? '+' : ''}{v3HoverSeg.priceDelta.toFixed(2)}
+                  {' '}({v3HoverSeg.pricePct >= 0 ? '+' : ''}{v3HoverSeg.pricePct.toFixed(1)}%)
+                </span>
+              </div>
+              {v3HoverSeg.confidence != null && (
+                <div className="flex justify-between items-center pt-0.5 border-t border-zinc-800">
+                  <span className="text-zinc-500">Confidence</span>
+                  <span className="text-zinc-300 font-mono">{(v3HoverSeg.confidence * 100).toFixed(0)}%</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Footer hint ──────────────────────────────────────────────── */}

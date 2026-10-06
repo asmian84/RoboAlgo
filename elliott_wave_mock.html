@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elliott Wave Analysis — Correct vs RoboAlgo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #131722; color: #d1d4dc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; overflow-x: hidden; }
+  .header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; border-bottom: 1px solid #2a2e39; }
+  .header h1 { font-size: 16px; font-weight: 600; color: #e0e3eb; }
+  .header .badge { background: #1e3a2f; color: #26a69a; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .symbol-tabs { display: flex; gap: 0; padding: 0 20px; border-bottom: 1px solid #2a2e39; background: #1a1e2e; }
+  .sym-tab { padding: 10px 20px; cursor: pointer; font-size: 13px; font-weight: 600; color: #787b86; border-bottom: 2px solid transparent; transition: all 0.2s; }
+  .sym-tab:hover { color: #d1d4dc; background: rgba(255,255,255,0.03); }
+  .sym-tab.active { color: #f0b90b; border-bottom-color: #f0b90b; }
+  .view-tabs { display: flex; gap: 0; padding: 0 20px; border-bottom: 1px solid #2a2e39; }
+  .view-tab { padding: 8px 16px; cursor: pointer; font-size: 12px; font-weight: 500; color: #787b86; border-bottom: 2px solid transparent; transition: all 0.2s; }
+  .view-tab:hover { color: #d1d4dc; }
+  .view-tab.active { color: #26a69a; border-bottom-color: #26a69a; }
+  .chart-container { position: relative; width: 100%; height: calc(100vh - 160px); min-height: 500px; }
+  canvas { display: block; }
+  .legend { position: absolute; top: 12px; right: 16px; background: rgba(19,23,34,0.95); border: 1px solid #2a2e39; border-radius: 8px; padding: 12px 16px; font-size: 11px; line-height: 1.7; max-width: 240px; z-index: 10; }
+  .legend-title { font-weight: 700; color: #e0e3eb; margin-bottom: 4px; font-size: 12px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; }
+  .legend-swatch { width: 18px; height: 3px; border-radius: 2px; flex-shrink: 0; }
+  .info-panel { position: absolute; bottom: 12px; left: 16px; right: 16px; display: flex; gap: 10px; z-index: 10; }
+  .info-card { background: rgba(19,23,34,0.95); border: 1px solid #2a2e39; border-radius: 6px; padding: 10px 14px; flex: 1; }
+  .info-card .label { font-size: 10px; color: #787b86; text-transform: uppercase; letter-spacing: 0.5px; }
+  .info-card .value { font-size: 14px; font-weight: 600; color: #e0e3eb; margin-top: 2px; }
+  .info-card .sub { font-size: 10px; color: #787b86; margin-top: 1px; }
+  .info-card.highlight .value { color: #f0b90b; }
+  .tooltip { position: absolute; display: none; background: rgba(19,23,34,0.95); border: 1px solid #f0b90b; border-radius: 6px; padding: 8px 12px; font-size: 11px; pointer-events: none; z-index: 100; max-width: 240px; line-height: 1.5; }
+  .bug-tag { display: inline-block; background: #3a1e1e; color: #ef5350; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Elliott Wave Analysis — Correct Count vs RoboAlgo (Broken)</h1>
+  <span class="badge">10 Bugs Identified</span>
+</div>
+<div class="symbol-tabs" id="symbolTabs">
+  <div class="sym-tab active" onclick="setSymbol('gcf')">GC=F Gold</div>
+  <div class="sym-tab" onclick="setSymbol('aapl')">AAPL Apple</div>
+  <div class="sym-tab" onclick="setSymbol('eonr')">EONR</div>
+</div>
+<div class="view-tabs" id="viewTabs">
+  <div class="view-tab active" onclick="setView('correct')">Correct Count</div>
+  <div class="view-tab" onclick="setView('roboalgo')">RoboAlgo (Broken)</div>
+  <div class="view-tab" onclick="setView('compare')">Side-by-Side</div>
+</div>
+<div class="chart-container">
+  <canvas id="chart"></canvas>
+  <div class="legend" id="legend"></div>
+  <div class="info-panel" id="infoPanel"></div>
+  <div class="tooltip" id="tooltip"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// DATA — Price pivots and wave structures for each symbol
+// ═══════════════════════════════════════════════════════════════════════
+
+const SYMBOLS = {
+  gcf: {
+    name: 'GC=F', fullName: 'Gold Futures', price: '$4,787', change: '-9.39%',
+    dateRange: ['2023-09-01','2027-01-01'],
+    priceRange: [1800, 6200],
+    pricePivots: [
+      {date:'2023-10-01',price:1950},{date:'2024-01-01',price:2100},{date:'2024-03-15',price:2277},
+      {date:'2024-04-15',price:2450},{date:'2024-06-01',price:2800},{date:'2024-07-01',price:2650},
+      {date:'2024-07-15',price:2550},{date:'2024-09-01',price:2800},{date:'2024-11-01',price:3200},
+      {date:'2025-01-01',price:3400},{date:'2025-03-01',price:3800},{date:'2025-05-01',price:4200},
+      {date:'2025-07-01',price:4000},{date:'2025-08-01',price:4400},{date:'2025-09-15',price:4800},
+      {date:'2025-10-15',price:4500},{date:'2025-11-01',price:4900},{date:'2025-12-01',price:5200},
+      {date:'2026-01-01',price:5100},{date:'2026-01-20',price:5400},{date:'2026-02-10',price:5586},
+      {date:'2026-02-20',price:5100},{date:'2026-03-01',price:5200},{date:'2026-03-15',price:4900},
+      {date:'2026-04-01',price:4850},{date:'2026-04-10',price:4787},
+    ],
+    correct: {
+      type: 'partial_up',
+      pivots: [
+        {date:'2024-03-15',price:2277,label:'0',desc:'Impulse start'},
+        {date:'2024-06-01',price:2800,label:'1',desc:'W1 end: +$523'},
+        {date:'2024-07-15',price:2550,label:'2',desc:'W2: 47.8% retrace'},
+        {date:'2026-02-10',price:5586,label:'3',desc:'W3 extended: +$3,036 (5.8× W1)'},
+        {date:'2026-04-10',price:4787,label:'4',desc:'W4 in progress: 26.3% retrace of W3'},
+      ],
+      projected: [{date:'2026-09-01',price:5900,label:'5?',desc:'W5 target: 0.618× W1 from W4'}],
+      fibZone: {from:'2026-02-10',to:'2026-06-01',top:5586,fib382:4427,fib500:4068},
+      annotations: [
+        {x:'2025-04-01',y:3800,text:'↗ Extended Wave 3',color:'#26a69a'},
+        {x:'2025-04-01',y:3650,text:'(5.8× Wave 1 — textbook extension)',color:'#787b86'},
+        {x:'2026-03-10',y:5300,text:'↘ Wave 4 correction',color:'#ef5350'},
+        {x:'2026-03-10',y:5170,text:'(~26% retrace of W3)',color:'#787b86'},
+      ],
+    },
+    roboalgo: {
+      type: 'complete_up',
+      pivots: [
+        {date:'2024-03-15',price:2277,label:'0',desc:'Start'},
+        {date:'2025-09-01',price:4200,label:'1',desc:''},
+        {date:'2025-10-01',price:3800,label:'2',desc:''},
+        {date:'2025-11-15',price:5400,label:'3',desc:'Not the longest!'},
+        {date:'2025-12-01',price:4600,label:'4',desc:''},
+        {date:'2026-02-10',price:5586,label:'5',desc:''},
+      ],
+      projected: [
+        {date:'2026-05-01',price:4300,label:'A',desc:''},
+        {date:'2026-07-01',price:5000,label:'B',desc:''},
+        {date:'2026-10-01',price:3900,label:'C',desc:''},
+      ],
+      errors: [
+        'W3 is NOT the longest wave (violates guideline)',
+        'Misses the massive $2,550→$5,586 extended 3rd',
+        'Cramped into small zone near chart top (Bug #7)',
+        'ABC projection based on wrong count',
+      ],
+    },
+    infoCorrect: [
+      {label:'Wave 3 Extension',value:'5.8× Wave 1',sub:'$2,550 → $5,586 (+119%)',hl:true},
+      {label:'Wave 4 Retrace',value:'~26% of W3',sub:'Classic Fibonacci zone'},
+      {label:'Current Position',value:'In Wave 4',sub:'Watching for W5 setup'},
+      {label:'Wave 5 Target',value:'$5,400–$6,200',sub:'0.618–1.0× W1 from W4 end'},
+    ],
+    infoBroken: [
+      {label:'Root Cause',value:'Bug #1: Line 449',sub:'Valid waves discarded, invalid kept',err:true},
+      {label:'Wave 3 Size',value:'Only 1.4× W1',sub:'Should be longest wave',err:true},
+      {label:'Also',value:'Bug #7: Cramped count',sub:'Recent-window analysis overrides',err:true},
+      {label:'Fix Status',value:'10 bugs documented',sub:'See ELLIOTT_WAVE_FIX_PROMPT.md'},
+    ],
+  },
+
+  aapl: {
+    name: 'AAPL', fullName: 'Apple Inc.', price: '$260.48', change: '-0.00%',
+    dateRange: ['2021-05-01','2026-08-01'],
+    priceRange: [90, 310],
+    pricePivots: [
+      {date:'2021-06-01',price:130},{date:'2021-09-01',price:150},{date:'2021-12-01',price:177},
+      {date:'2022-01-15',price:180},{date:'2022-03-01',price:165},{date:'2022-06-01',price:140},
+      {date:'2022-08-01',price:170},{date:'2022-10-01',price:140},{date:'2023-01-01',price:122},
+      {date:'2023-03-01',price:155},{date:'2023-06-01',price:185},{date:'2023-07-15',price:190},
+      {date:'2023-10-01',price:170},{date:'2023-11-01',price:165},{date:'2024-01-01',price:185},
+      {date:'2024-03-01',price:175},{date:'2024-06-01',price:210},{date:'2024-07-15',price:230},
+      {date:'2024-10-01',price:225},{date:'2024-12-01',price:240},{date:'2025-02-01',price:245},
+      {date:'2025-04-01',price:200},{date:'2025-05-01',price:210},{date:'2025-07-01',price:230},
+      {date:'2025-09-01',price:250},{date:'2025-11-01',price:260},{date:'2025-12-15',price:288},
+      {date:'2026-01-15',price:270},{date:'2026-02-15',price:275},{date:'2026-03-15',price:260},
+      {date:'2026-04-10',price:260},
+    ],
+    correct: {
+      type: 'partial_up',
+      pivots: [
+        {date:'2023-01-01',price:122,label:'0',desc:'Structural low (Jan 2023)'},
+        {date:'2023-07-15',price:190,label:'1',desc:'W1 end: +$68'},
+        {date:'2023-11-01',price:165,label:'2',desc:'W2: 36.8% retrace'},
+        {date:'2025-12-15',price:288,label:'3',desc:'W3 extended: +$123 (1.81× W1)'},
+        {date:'2026-04-10',price:260,label:'4',desc:'W4 in progress from ATH'},
+      ],
+      projected: [{date:'2026-08-01',price:300,label:'5?',desc:'W5 target: 0.618× W1 from W4'}],
+      fibZone: {from:'2025-12-15',to:'2026-07-01',top:288,fib382:241,fib500:226},
+      annotations: [
+        {x:'2024-10-01',y:155,text:'↗ Extended Wave 3',color:'#26a69a'},
+        {x:'2024-10-01',y:145,text:'($165 → $288 = 1.81× W1)',color:'#787b86'},
+        {x:'2026-02-15',y:295,text:'↘ W4 from ATH',color:'#ef5350'},
+      ],
+    },
+    roboalgo: {
+      type: 'complete_up',
+      pivots: [
+        {date:'2024-04-01',price:170,label:'0',desc:'Wrong start'},
+        {date:'2024-07-15',price:230,label:'1',desc:'W1 end = $230'},
+        {date:'2025-04-01',price:200,label:'2',desc:''},
+        {date:'2025-09-01',price:260,label:'3',desc:''},
+        {date:'2025-04-01',price:170,label:'4',desc:'⚠ W4=$170 < W1 end=$230!'},
+        {date:'2025-12-15',price:288,label:'5',desc:'W5 end'},
+      ],
+      projected: [
+        {date:'2026-04-01',price:240,label:'A',desc:''},
+        {date:'2026-06-01',price:265,label:'B',desc:''},
+        {date:'2026-09-01',price:220,label:'C',desc:''},
+      ],
+      errors: [
+        'RULE 3 VIOLATION: W4=$170 overlaps W1 end=$230',
+        'Starts at $170 — misses structural low at $122',
+        '$60 overlap should have been caught by validation',
+        'Bug #1: inverted logic kept this invalid count',
+      ],
+    },
+    infoCorrect: [
+      {label:'Wave 3 Extension',value:'1.81× Wave 1',sub:'$165 → $288 ATH (+$123)',hl:true},
+      {label:'Wave 4 Retrace',value:'~23% of W3',sub:'Shallow so far — healthy'},
+      {label:'Current Position',value:'In Wave 4',sub:'Pullback from ATH $288'},
+      {label:'Wave 5 Target',value:'$295–$310',sub:'0.618× W1 from W4 end'},
+    ],
+    infoBroken: [
+      {label:'Rule 3 Violation',value:'W4 overlaps W1',sub:'$170 < $230 = $60 overlap!',err:true},
+      {label:'Wrong Start',value:'$170 not $122',sub:'Misses the 2023 structural low',err:true},
+      {label:'Root Cause',value:'Bug #1 + Bug #3',sub:'Inverted validation + wrong extremum check',err:true},
+      {label:'Fix',value:'10 bugs documented',sub:'ELLIOTT_WAVE_FIX_PROMPT.md'},
+    ],
+  },
+
+  eonr: {
+    name: 'EONR', fullName: 'EONR (Penny Stock)', price: '$0.73', change: '-9.39%',
+    dateRange: ['2024-01-01','2027-01-01'],
+    priceRange: [0, 4.5],
+    pricePivots: [
+      {date:'2024-02-01',price:2.50},{date:'2024-03-01',price:3.20},{date:'2024-03-15',price:4.00},
+      {date:'2024-04-01',price:2.80},{date:'2024-04-15',price:3.00},{date:'2024-05-01',price:2.60},
+      {date:'2024-06-01',price:2.80},{date:'2024-07-01',price:2.20},{date:'2024-08-01',price:1.80},
+      {date:'2024-09-01',price:1.50},{date:'2024-10-01',price:1.80},{date:'2024-11-01',price:1.20},
+      {date:'2024-12-01',price:1.00},{date:'2025-01-01',price:0.80},{date:'2025-03-01',price:0.60},
+      {date:'2025-05-01',price:0.50},{date:'2025-07-01',price:0.65},{date:'2025-09-01',price:0.40},
+      {date:'2025-10-01',price:0.30},{date:'2025-11-01',price:0.27},{date:'2025-12-01',price:0.35},
+      {date:'2026-01-01',price:0.55},{date:'2026-02-01',price:0.45},{date:'2026-03-01',price:0.80},
+      {date:'2026-04-10',price:0.73},
+    ],
+    correct: {
+      type: 'complete_down',
+      pivots: [
+        {date:'2024-03-15',price:4.00,label:'0',desc:'True ATH — impulse starts here'},
+        {date:'2024-05-01',price:2.60,label:'1',desc:'W1: -$1.40 (-35%)'},
+        {date:'2024-06-01',price:2.80,label:'2',desc:'W2: 14.3% retrace (shallow)'},
+        {date:'2025-05-01',price:0.50,label:'3',desc:'W3 extended: -$2.30 (1.64× W1)'},
+        {date:'2025-07-01',price:0.65,label:'4',desc:'W4: 6.5% retrace of W3'},
+        {date:'2025-11-01',price:0.27,label:'5',desc:'W5 end: -93% from ATH'},
+      ],
+      projected: [
+        {date:'2026-03-01',price:0.80,label:'A',desc:'Corrective bounce'},
+        {date:'2026-05-01',price:0.50,label:'B',desc:'Retrace of A'},
+        {date:'2026-08-01',price:1.20,label:'C',desc:'C target ≈ 1.0× A'},
+      ],
+      annotations: [
+        {x:'2024-10-01',y:2.2,text:'↘ Extended Wave 3',color:'#ef5350'},
+        {x:'2024-10-01',y:2.0,text:'($2.80 → $0.50 = 1.64× W1)',color:'#787b86'},
+        {x:'2026-02-01',y:1.0,text:'↗ ABC correction (up)',color:'#26a69a'},
+        {x:'2026-02-01',y:0.85,text:'(After 93% decline — natural bounce)',color:'#787b86'},
+      ],
+    },
+    roboalgo: {
+      type: 'complete_down',
+      pivots: [
+        {date:'2024-04-15',price:3.00,label:'0',desc:'Wrong start — should be $4.00'},
+        {date:'2024-07-01',price:2.50,label:'1',desc:''},
+        {date:'2024-06-01',price:2.80,label:'2',desc:''},
+        {date:'2024-12-01',price:1.10,label:'3',desc:''},
+        {date:'2024-10-01',price:1.80,label:'4',desc:''},
+        {date:'2025-11-01',price:0.27,label:'5',desc:'W5 end'},
+      ],
+      projected: [
+        {date:'2026-02-01',price:1.20,label:'A',desc:''},
+        {date:'2026-03-01',price:0.80,label:'B',desc:''},
+        {date:'2026-05-01',price:1.40,label:'C',desc:''},
+        {date:'2026-06-01',price:0.60,label:'1',desc:'New bearish 1'},
+        {date:'2026-07-01',price:1.20,label:'2',desc:''},
+      ],
+      errors: [
+        'Starts at $3.00 — misses true ATH at $4.00 (Bug #8)',
+        'Projects ANOTHER bearish impulse after 93% decline!',
+        'After 93% drop, trend continuation is absurd (Bug #9)',
+        'Should project ABC correction upward instead',
+      ],
+    },
+    infoCorrect: [
+      {label:'Impulse Range',value:'$4.00 → $0.27',sub:'-93% complete bearish impulse',hl:true},
+      {label:'Wave 3 Extension',value:'1.64× Wave 1',sub:'$2.80 → $0.50 = extended W3'},
+      {label:'Current Position',value:'In ABC Correction',sub:'Post-impulse corrective bounce'},
+      {label:'C Target',value:'$1.00–$1.20',sub:'1.0× Wave A — reasonable bounce'},
+    ],
+    infoBroken: [
+      {label:'Wrong Start',value:'$3.00 not $4.00',sub:'Misses the ATH by $1.00',err:true},
+      {label:'Absurd Projection',value:'More downside?!',sub:'After 93% decline, really?',err:true},
+      {label:'Root Cause',value:'Bug #8 + Bug #9',sub:'Peak alignment + no magnitude check',err:true},
+      {label:'Fix',value:'10 bugs documented',sub:'ELLIOTT_WAVE_FIX_PROMPT.md'},
+    ],
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════
+let currentSymbol = 'gcf';
+let currentView = 'correct';
+
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+
+// ═══════════════════════════════════════════════════════════════════════
+// COORDINATE HELPERS
+// ═══════════════════════════════════════════════════════════════════════
+let _cl, _ct, _cw, _ch, _minP, _maxP, _minD, _maxD;
+
+function setupCoords(sym) {
+  const s = SYMBOLS[sym];
+  _minP = s.priceRange[0]; _maxP = s.priceRange[1];
+  _minD = new Date(s.dateRange[0]); _maxD = new Date(s.dateRange[1]);
+}
+
+function dateToX(dateStr) {
+  const d = new Date(dateStr);
+  return _cl + ((d - _minD) / (_maxD - _minD)) * _cw;
+}
+
+function priceToY(price) {
+  return _ct + _ch - ((price - _minP) / (_maxP - _minP)) * _ch;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// DRAWING PRIMITIVES
+// ═══════════════════════════════════════════════════════════════════════
+
+function drawGrid(sym) {
+  const s = SYMBOLS[sym];
+  ctx.strokeStyle = '#1e222d';
+  ctx.lineWidth = 0.5;
+  ctx.fillStyle = '#787b86';
+  ctx.font = '10px -apple-system, sans-serif';
+
+  // Price grid
+  const range = _maxP - _minP;
+  const step = range > 100 ? (range > 1000 ? 500 : 50) : (range > 10 ? 1 : 0.5);
+  for (let p = Math.ceil(_minP / step) * step; p <= _maxP; p += step) {
+    const y = priceToY(p);
+    ctx.beginPath(); ctx.moveTo(_cl, y); ctx.lineTo(_cl + _cw, y); ctx.stroke();
+    ctx.textAlign = 'right';
+    const label = p >= 100 ? '$' + p.toLocaleString() : '$' + p.toFixed(2);
+    ctx.fillText(label, _cl - 6, y + 3);
+  }
+
+  // Date grid
+  const months = [];
+  const d = new Date(_minD);
+  while (d <= _maxD) {
+    if (d.getMonth() % 6 === 0) months.push(new Date(d));
+    d.setMonth(d.getMonth() + 1);
+  }
+  ctx.textAlign = 'center';
+  for (const m of months) {
+    const x = _cl + ((m - _minD) / (_maxD - _minD)) * _cw;
+    ctx.beginPath(); ctx.moveTo(x, _ct); ctx.lineTo(x, _ct + _ch); ctx.stroke();
+    ctx.fillText(m.toISOString().substring(0, 7), x, _ct + _ch + 18);
+  }
+}
+
+function drawPriceCurve(sym) {
+  const pts = SYMBOLS[sym].pricePivots;
+  ctx.beginPath();
+  ctx.strokeStyle = '#4a5568';
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < pts.length; i++) {
+    const x = dateToX(pts[i].date), y = priceToY(pts[i].price);
+    if (i === 0) { ctx.moveTo(x, y); continue; }
+    const prev = pts[i - 1];
+    const px = dateToX(prev.date), py = priceToY(prev.price);
+    const mx = (px + x) / 2;
+    ctx.bezierCurveTo(mx, py, mx, y, x, y);
+  }
+  ctx.stroke();
+
+  // Area fill
+  const lastPt = pts[pts.length - 1];
+  ctx.lineTo(dateToX(lastPt.date), _ct + _ch);
+  ctx.lineTo(dateToX(pts[0].date), _ct + _ch);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, _ct, 0, _ct + _ch);
+  grad.addColorStop(0, 'rgba(74,85,104,0.12)');
+  grad.addColorStop(1, 'rgba(74,85,104,0.01)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+}
+
+function drawWaveLine(pivots, color, dashed, alpha) {
+  if (pivots.length < 2) return;
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.globalAlpha = alpha;
+  ctx.setLineDash(dashed ? [8, 5] : []);
+  for (let i = 0; i < pivots.length; i++) {
+    const x = dateToX(pivots[i].date), y = priceToY(pivots[i].price);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+}
+
+function drawCircleLabel(pt, color, above, alpha) {
+  const x = dateToX(pt.date), y = priceToY(pt.price);
+  const off = above ? -22 : 22;
+  ctx.globalAlpha = alpha;
+  // Circle
+  ctx.beginPath(); ctx.arc(x, y + off, 13, 0, Math.PI * 2);
+  ctx.fillStyle = color; ctx.fill();
+  ctx.strokeStyle = '#131722'; ctx.lineWidth = 2; ctx.stroke();
+  // Label
+  ctx.fillStyle = '#131722'; ctx.font = 'bold 11px -apple-system, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(pt.label, x, y + off);
+  // Price
+  ctx.fillStyle = '#d1d4dc'; ctx.globalAlpha = alpha * 0.7;
+  ctx.font = '9px -apple-system, sans-serif';
+  const priceStr = pt.price >= 100 ? '$' + pt.price.toLocaleString() : '$' + pt.price.toFixed(2);
+  ctx.fillText(priceStr, x, y + off + (above ? -17 : 17));
+  ctx.globalAlpha = 1;
+}
+
+function drawAnnotation(text, dateStr, price, color, alpha) {
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  ctx.font = '11px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, dateToX(dateStr), priceToY(price));
+  ctx.globalAlpha = 1;
+}
+
+function drawFibZone(zone, alpha) {
+  if (!zone) return;
+  const x1 = dateToX(zone.from), x2 = dateToX(zone.to);
+  const y382 = priceToY(zone.fib382), y500 = priceToY(zone.fib500);
+  ctx.globalAlpha = alpha * 0.08;
+  ctx.fillStyle = '#26a69a';
+  ctx.fillRect(x1, Math.min(y382, y500), x2 - x1, Math.abs(y500 - y382));
+  ctx.globalAlpha = alpha * 0.4;
+  ctx.strokeStyle = '#26a69a'; ctx.lineWidth = 0.5; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(x1, y382); ctx.lineTo(x2, y382); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x1, y500); ctx.lineTo(x2, y500); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font = '9px -apple-system, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('38.2%', x2 + 4, y382 + 3);
+  ctx.fillText('50.0%', x2 + 4, y500 + 3);
+  ctx.globalAlpha = 1;
+}
+
+function drawErrorX(pt, alpha) {
+  const x = dateToX(pt.date), y = priceToY(pt.price) - 42;
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = '#ef5350'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x-6,y-6); ctx.lineTo(x+6,y+6); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x+6,y-6); ctx.lineTo(x-6,y+6); ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// WAVE DRAWING — Correct
+// ═══════════════════════════════════════════════════════════════════════
+
+function drawCorrect(sym, alpha) {
+  const c = SYMBOLS[sym].correct;
+  const gold = '#f0b90b';
+  const isDown = c.type.includes('down');
+  const mainColor = isDown ? '#ef5350' : gold;
+
+  // Solid wave lines
+  drawWaveLine(c.pivots, mainColor, false, alpha);
+  // Projected
+  if (c.projected && c.projected.length) {
+    const projColor = isDown ? '#26a69a' : gold;
+    drawWaveLine([c.pivots[c.pivots.length - 1], ...c.projected], projColor, true, alpha * 0.5);
+    for (const p of c.projected) {
+      drawCircleLabel(p, projColor, !isDown, alpha * 0.5);
+    }
+  }
+  // Labels
+  for (let i = 0; i < c.pivots.length; i++) {
+    const p = c.pivots[i];
+    const isOdd = i % 2 === 1;
+    const above = isDown ? !isOdd : isOdd;
+    const color = (p.label === '3') ? '#26a69a' : (p.label === '0' ? '#787b86' : mainColor);
+    drawCircleLabel(p, color, above, alpha);
+  }
+  // Fib zone
+  drawFibZone(c.fibZone, alpha);
+  // Annotations
+  if (c.annotations) {
+    for (const a of c.annotations) {
+      drawAnnotation(a.text, a.x, a.y, a.color, alpha * 0.8);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// WAVE DRAWING — RoboAlgo (broken)
+// ═══════════════════════════════════════════════════════════════════════
+
+function drawRoboAlgo(sym, alpha) {
+  const r = SYMBOLS[sym].roboalgo;
+  const orange = '#ff9800';
+  const red = '#ef5350';
+
+  // Main wave
+  drawWaveLine(r.pivots, orange, false, alpha);
+  // Projected
+  if (r.projected && r.projected.length) {
+    drawWaveLine([r.pivots[r.pivots.length - 1], ...r.projected], red, true, alpha * 0.5);
+    for (const p of r.projected) {
+      drawCircleLabel(p, red, true, alpha * 0.5);
+    }
+  }
+  // Labels
+  for (let i = 0; i < r.pivots.length; i++) {
+    const p = r.pivots[i];
+    const above = i % 2 === 1;
+    drawCircleLabel(p, i === 0 ? '#787b86' : orange, above, alpha);
+  }
+  // Error annotations
+  if (currentView !== 'compare' && r.errors) {
+    const startY = priceToY((_maxP + _minP) * 0.38);
+    const midX = (_cl + _cl + _cw) / 2;
+    ctx.globalAlpha = alpha * 0.8;
+    for (let i = 0; i < r.errors.length; i++) {
+      ctx.fillStyle = i === 0 ? '#ef5350' : '#787b86';
+      ctx.font = (i === 0 ? 'bold ' : '') + '11px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText((i === 0 ? '⚠ ' : '  ') + r.errors[i], midX, startY + i * 18);
+    }
+    ctx.globalAlpha = 1;
+  }
+  // X marks in compare mode
+  if (currentView === 'compare') {
+    for (let i = 1; i < r.pivots.length; i++) {
+      drawErrorX(r.pivots[i], 0.5);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// MAIN DRAW
+// ═══════════════════════════════════════════════════════════════════════
+
+function resize() {
+  const c = canvas.parentElement;
+  canvas.width = c.clientWidth * 2;
+  canvas.height = c.clientHeight * 2;
+  canvas.style.width = c.clientWidth + 'px';
+  canvas.style.height = c.clientHeight + 'px';
+  ctx.setTransform(2, 0, 0, 2, 0, 0);
+  draw();
+}
+
+function draw() {
+  const w = canvas.width / 2, h = canvas.height / 2;
+  ctx.clearRect(0, 0, w, h);
+  const m = { top: 30, right: 160, bottom: 80, left: 65 };
+  _cl = m.left; _ct = m.top; _cw = w - m.left - m.right; _ch = h - m.top - m.bottom;
+  setupCoords(currentSymbol);
+
+  drawGrid(currentSymbol);
+  drawPriceCurve(currentSymbol);
+
+  if (currentView === 'correct' || currentView === 'compare') {
+    drawCorrect(currentSymbol, currentView === 'compare' ? 0.9 : 1.0);
+  }
+  if (currentView === 'roboalgo' || currentView === 'compare') {
+    drawRoboAlgo(currentSymbol, currentView === 'compare' ? 0.6 : 1.0);
+  }
+
+  updateLegend();
+  updateInfoPanel();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// LEGEND & INFO
+// ═══════════════════════════════════════════════════════════════════════
+
+function updateLegend() {
+  const s = SYMBOLS[currentSymbol];
+  const leg = document.getElementById('legend');
+  if (currentView === 'correct') {
+    const c = s.correct;
+    leg.innerHTML = `
+      <div class="legend-title" style="color:#26a69a">✓ Correct Count — ${s.name}</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#f0b90b"></div> Impulse waves</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#f0b90b;opacity:0.5"></div> Projected</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#26a69a"></div> Fib zone</div>
+      <br>
+      <div style="color:#787b86;line-height:1.6">
+        ${c.pivots.filter(p=>p.desc).map(p=>`<div><span style="color:#e0e3eb">${p.label}:</span> ${p.desc}</div>`).join('')}
+      </div>`;
+  } else if (currentView === 'roboalgo') {
+    leg.innerHTML = `
+      <div class="legend-title" style="color:#ef5350">✗ RoboAlgo — ${s.name}</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#ff9800"></div> Broken impulse</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#ef5350;opacity:0.5"></div> Wrong projection</div>
+      <br>
+      <div style="color:#787b86;line-height:1.6">
+        ${s.roboalgo.errors.map((e,i) => `<div>${i===0?'<span class="bug-tag">BUG</span> ':''}<span style="color:${i===0?'#ef5350':'#787b86'}">${e}</span></div>`).join('')}
+      </div>`;
+  } else {
+    leg.innerHTML = `
+      <div class="legend-title">Comparison — ${s.name}</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#f0b90b"></div> Correct (gold)</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#ff9800"></div> RoboAlgo (orange)</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#ef5350"></div> ✗ Wrong labels</div>`;
+  }
+}
+
+function updateInfoPanel() {
+  const s = SYMBOLS[currentSymbol];
+  const cards = currentView === 'roboalgo' ? s.infoBroken : s.infoCorrect;
+  const panel = document.getElementById('infoPanel');
+  panel.innerHTML = cards.map(c => `
+    <div class="info-card${c.hl?' highlight':''}${c.err?' style="border-color:#ef5350"':''}">
+      <div class="label">${c.label}</div>
+      <div class="value"${c.err?' style="color:#ef5350"':''}>${c.value}</div>
+      <div class="sub">${c.sub}</div>
+    </div>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════════════════════════════
+
+function setSymbol(sym) {
+  currentSymbol = sym;
+  document.querySelectorAll('.sym-tab').forEach(t => t.classList.remove('active'));
+  const tabs = document.querySelectorAll('.sym-tab');
+  const idx = sym === 'gcf' ? 0 : sym === 'aapl' ? 1 : 2;
+  tabs[idx].classList.add('active');
+  draw();
+}
+
+function setView(view) {
+  currentView = view;
+  document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+  const tabs = document.querySelectorAll('.view-tab');
+  tabs[view === 'correct' ? 0 : view === 'roboalgo' ? 1 : 2].classList.add('active');
+  draw();
+}
+
+// Tooltip
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const s = SYMBOLS[currentSymbol];
+  const pivots = currentView === 'roboalgo' ? s.roboalgo.pivots : s.correct.pivots;
+  let closest = null, closestDist = 30;
+  for (const pt of pivots) {
+    const px = dateToX(pt.date), py = priceToY(pt.price);
+    const d = Math.sqrt((mx-px)**2 + (my-py)**2);
+    if (d < closestDist) { closestDist = d; closest = pt; }
+  }
+  const tt = document.getElementById('tooltip');
+  if (closest) {
+    tt.style.display = 'block';
+    tt.style.left = (mx+14)+'px'; tt.style.top = (my-8)+'px';
+    const p = closest.price >= 100 ? '$'+closest.price.toLocaleString() : '$'+closest.price.toFixed(2);
+    tt.innerHTML = `<strong>${closest.label}</strong> — ${p}<br><span style="color:#787b86">${closest.date}</span>${closest.desc?'<br>'+closest.desc:''}`;
+  } else { tt.style.display = 'none'; }
+});
+canvas.addEventListener('mouseleave', () => { document.getElementById('tooltip').style.display = 'none'; });
+
+window.addEventListener('resize', resize);
+resize();
+</script>
+</body>
+</html>

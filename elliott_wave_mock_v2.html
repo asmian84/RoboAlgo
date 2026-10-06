@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Elliott Wave Analysis — Mock Comparison (5 Charts)</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d1117; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .header { padding: 16px 24px; border-bottom: 1px solid #30363d; display: flex; align-items: center; gap: 16px; }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .symbol-tabs { display: flex; gap: 4px; padding: 12px 24px; border-bottom: 1px solid #30363d; flex-wrap: wrap; }
+  .symbol-tab { padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;
+    background: #161b22; border: 1px solid #30363d; color: #8b949e; transition: all .15s; }
+  .symbol-tab:hover { border-color: #58a6ff; color: #c9d1d9; }
+  .symbol-tab.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .view-tabs { display: flex; gap: 4px; padding: 8px 24px; }
+  .view-tab { padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px;
+    background: transparent; border: 1px solid #30363d; color: #8b949e; }
+  .view-tab:hover { color: #c9d1d9; }
+  .view-tab.active { background: #238636; border-color: #238636; color: #fff; }
+  .chart-area { padding: 16px 24px; }
+  canvas { border-radius: 8px; border: 1px solid #30363d; display: block; }
+  .legend { padding: 8px 24px; display: flex; gap: 20px; font-size: 12px; color: #8b949e; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .notes { padding: 12px 24px; font-size: 12px; color: #8b949e; line-height: 1.6; max-width: 900px; }
+  .notes strong { color: #58a6ff; }
+  .grade { display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; margin-left: 8px; }
+  .grade-a { background: #238636; color: #fff; }
+  .grade-b { background: #1f6feb; color: #fff; }
+  .grade-c { background: #d29922; color: #000; }
+  .grade-d { background: #da3633; color: #fff; }
+  .grade-f { background: #8b0000; color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Elliott Wave Mock — Correct vs RoboAlgo (5 Charts)</h1>
+</div>
+
+<div class="symbol-tabs" id="symbolTabs"></div>
+<div class="view-tabs" id="viewTabs"></div>
+<div class="chart-area"><canvas id="chart" width="1100" height="480"></canvas></div>
+<div class="legend" id="legend"></div>
+<div class="notes" id="notes"></div>
+
+<script>
+const SYMBOLS = ['GC=F', 'CL=F', 'CAD=X', 'EONR', 'BTC-USD'];
+const VIEWS = ['Correct', 'RoboAlgo', 'Side-by-Side'];
+let activeSymbol = 'GC=F', activeView = 'Correct';
+
+// ── Chart data (simplified OHLC-like paths) ─────────────────────────────
+const CHARTS = {
+  'GC=F': {
+    title: 'GC=F · Gold Futures · Daily',
+    priceRange: [2100, 5800],
+    dateRange: ['Apr 2024', 'Apr 2026'],
+    // Approximate price path from the screenshot
+    path: [
+      2280, 2320, 2350, 2400, 2500, 2600, 2700, 2800, 2750, 2680, 2620, 2560, 2600,
+      2650, 2700, 2750, 2850, 2950, 3050, 3150, 3200, 3300, 3400, 3500, 3450, 3400,
+      3500, 3600, 3700, 3800, 3900, 4000, 4100, 4200, 4350, 4500, 4600, 4800, 5000,
+      5200, 5400, 5586, 5400, 5200, 5100, 5000, 4900, 4800, 4700, 4600, 4500, 4600,
+      4700, 4800, 4900, 5000, 5100, 5200, 5300, 5200, 5100, 5000, 4900, 4787
+    ],
+    correct: {
+      label: 'Extended W3 Impulse (In Progress)',
+      waves: [
+        { n: '1', from: [0, 2280], to: [7, 2800], color: '#fde047' },
+        { n: '2', from: [7, 2800], to: [11, 2560], color: '#fde047' },
+        { n: '3', from: [11, 2560], to: [41, 5586], color: '#fde047', ext: true },
+        { n: '4?', from: [41, 5586], to: [52, 4500], color: '#fde047', dashed: true },
+      ],
+      notes: `<strong>Correct count:</strong> W1 $2,280→$2,800 | W2 $2,800→$2,560 (50% retrace) | W3 $2,560→$5,586 (extended, 4.6× W1) | W4 in progress. W3 is clearly the dominant structure — it should be the longest wave by far. Rule 3: W4 must stay above $2,800.`
+    },
+    roboalgo: {
+      label: 'RoboAlgo: Extended W5 Impulse (Completed)',
+      grade: 'B+', gradeClass: 'grade-b',
+      waves: [
+        { n: '1', from: [0, 2280], to: [7, 2800], color: '#fde047' },
+        { n: '2', from: [7, 2800], to: [11, 2700], color: '#fde047' },
+        { n: '3', from: [11, 2700], to: [23, 3500], color: '#fde047' },
+        { n: '4', from: [23, 3500], to: [25, 3400], color: '#fde047' },
+        { n: '5', from: [25, 3400], to: [41, 5586], color: '#fde047' },
+      ],
+      notes: `<strong>RoboAlgo result:</strong> Full chart span ✓ — huge improvement from V1. Extended W5 (commodity-style, valid). <span class="grade grade-b">B+</span><br>
+      <strong>Issue:</strong> W3-W4 zone ($3,400-$3,500) is cramped — only $100 range. Most analysts would prefer W3 extended ($2,560→$5,586) with W4 still in progress. The engine finds a "completed" 5-wave instead of an in-progress extended-W3.`
+    }
+  },
+
+  'CL=F': {
+    title: 'CL=F · Crude Oil Futures · Daily',
+    priceRange: [50, 125],
+    dateRange: ['Feb 2025', 'Apr 2026'],
+    path: [
+      65, 67, 70, 72, 73, 71, 68, 66, 64, 62, 60, 58, 57, 56, 55,
+      58, 62, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 119,
+      115, 110, 105, 100, 97
+    ],
+    correct: {
+      label: 'Bullish Impulse from $55 Low',
+      waves: [
+        { n: '1', from: [0, 65], to: [4, 73], color: '#fde047' },
+        { n: '2', from: [4, 73], to: [9, 62], color: '#fde047' },
+        { n: '3', from: [9, 62], to: [28, 119], color: '#fde047', ext: true },
+        { n: '4?', from: [28, 119], to: [33, 97], color: '#fde047', dashed: true },
+      ],
+      notes: `<strong>Correct count:</strong> W1 $65→$73 | W2 $73→$62 (deep retrace) | W3 $62→$119 (extended, 7× W1) | W4 in progress at $97. Rule 3: W4 must stay above $73 (W1 end). Current $97 is well above — valid.`
+    },
+    roboalgo: {
+      label: 'RoboAlgo: "Impulse" (Actually Diagonal — Rule 3 Violation)',
+      grade: 'D', gradeClass: 'grade-d',
+      waves: [
+        { n: '1', from: [0, 65], to: [4, 73], color: '#ff6b6b' },
+        { n: '2', from: [4, 73], to: [9, 62], color: '#ff6b6b' },
+        { n: '3', from: [9, 62], to: [12, 80], color: '#ff6b6b' },
+        { n: '4', from: [12, 80], to: [14, 55], color: '#ff6b6b', violation: true },
+        { n: '5', from: [14, 55], to: [28, 119], color: '#ff6b6b' },
+      ],
+      notes: `<strong>RoboAlgo result:</strong> Shows "Impulse" but W4=$55 is far below W1 end=$73 — massive Rule 3 violation. <span class="grade grade-d">D</span><br>
+      <strong>Root cause:</strong> This is actually an ENDING_DIAGONAL (where W4/W1 overlap is required). The API maps diagonals to type:"impulse" via _IMPULSE_TYPES set, so the frontend labels it "Impulse" with plain 1-2-3-4-5 labels. Should show "(1)-(2)-(3)-(4)-(5)" and "Ending Diagonal".`
+    }
+  },
+
+  'CAD=X': {
+    title: 'CAD=X · USD/CAD · Daily',
+    priceRange: [1.33, 1.50],
+    dateRange: ['Apr 2024', 'Apr 2026'],
+    path: [
+      1.365, 1.37, 1.375, 1.38, 1.385, 1.39, 1.395, 1.40, 1.39, 1.38, 1.375, 1.37,
+      1.365, 1.36, 1.355, 1.35, 1.345, 1.34, 1.35, 1.36, 1.37, 1.38, 1.39, 1.40,
+      1.41, 1.42, 1.43, 1.44, 1.45, 1.46, 1.47, 1.48, 1.47, 1.46, 1.45, 1.44, 1.43,
+      1.42, 1.41, 1.415, 1.42, 1.425, 1.43, 1.435, 1.44, 1.43, 1.42, 1.41, 1.40,
+      1.39, 1.38, 1.385, 1.39, 1.40, 1.41
+    ],
+    correct: {
+      label: 'Bullish Impulse from $1.34 Low',
+      waves: [
+        { n: '1', from: [17, 1.34], to: [24, 1.41], color: '#fde047' },
+        { n: '2', from: [24, 1.41], to: [27, 1.38], color: '#fde047' },
+        { n: '3', from: [27, 1.38], to: [31, 1.48], color: '#fde047', ext: true },
+        { n: '4', from: [31, 1.48], to: [37, 1.42], color: '#fde047' },
+        { n: '5?', from: [37, 1.42], to: [44, 1.44], color: '#fde047', dashed: true },
+      ],
+      notes: `<strong>Correct count:</strong> W1 $1.34→$1.41 | W2 $1.41→$1.38 (43% retrace) | W3 $1.38→$1.48 (extended, 1.43× W1) | W4 $1.48→$1.42 (doesn't overlap W1 end $1.41 ✓) | W5 in progress. This is a clean impulse — Rule 3 holds.`
+    },
+    roboalgo: {
+      label: 'RoboAlgo: "Impulse" (Actually Diagonal — Rule 3 Violation)',
+      grade: 'D', gradeClass: 'grade-d',
+      waves: [
+        { n: '1', from: [6, 1.40], to: [7, 1.40], color: '#ff6b6b' },
+        { n: '2', from: [7, 1.40], to: [17, 1.34], color: '#ff6b6b' },
+        { n: '3', from: [17, 1.34], to: [24, 1.41], color: '#ff6b6b' },
+        { n: '4', from: [24, 1.41], to: [27, 1.38], color: '#ff6b6b', violation: true },
+        { n: '5', from: [27, 1.38], to: [31, 1.48], color: '#ff6b6b' },
+      ],
+      notes: `<strong>RoboAlgo result:</strong> W1 end ≈ $1.40, W4 ≈ $1.38 — W4 intrudes into W1 territory. Labeled "Impulse" but is actually a diagonal. <span class="grade grade-d">D</span><br>
+      <strong>Root cause:</strong> Same as CL=F — diagonal mapped to type:"impulse" in _IMPULSE_TYPES. The wave count structure itself is also unusual: W2 from $1.40→$1.34 is a very deep retrace (almost 100% of W1).`
+    }
+  },
+
+  'EONR': {
+    title: 'EONR · Eoneren · Daily',
+    priceRange: [0.0, 4.5],
+    dateRange: ['Apr 2024', 'Apr 2026'],
+    path: [
+      2.80, 2.90, 3.00, 2.85, 2.70, 2.60, 2.50, 2.40, 2.30, 2.20, 2.10, 2.00,
+      1.90, 1.80, 1.70, 1.60, 1.50, 1.40, 1.30, 1.20, 1.10, 1.00, 0.90, 0.80,
+      0.70, 0.65, 0.60, 0.55, 0.50, 0.45, 0.40, 0.35, 0.30, 0.27, 0.30, 0.35,
+      0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30, 1.10, 0.90,
+      0.80, 0.73
+    ],
+    correct: {
+      label: 'Bearish Impulse (Extended W3)',
+      waves: [
+        { n: '1', from: [0, 2.80], to: [5, 2.60], color: '#f87171' },
+        { n: '2', from: [5, 2.60], to: [2, 3.00], color: '#f87171' },
+        { n: '3', from: [2, 3.00], to: [33, 0.27], color: '#f87171', ext: true },
+        { n: '4', from: [33, 0.27], to: [44, 1.30], color: '#f87171' },
+        { n: '5?', from: [44, 1.30], to: [49, 0.73], color: '#f87171', dashed: true },
+      ],
+      notes: `<strong>Correct count:</strong> Bearish impulse from ~$3.00 (or $4.00 ATH if in data window) down to $0.27 ATL. W3 $3.00→$0.27 is the extended wave (massive decline). W4 bounce to $1.30, then W5 in progress heading lower. The $4.00 ATH spike may be outside the 780-bar data window.`
+    },
+    roboalgo: {
+      label: 'RoboAlgo: Cramped Pattern at Top',
+      grade: 'D', gradeClass: 'grade-d',
+      waves: [
+        { n: '1', from: [0, 2.80], to: [1, 2.90], color: '#ff6b6b' },
+        { n: '2', from: [1, 2.90], to: [2, 2.80], color: '#ff6b6b' },
+        { n: '3', from: [2, 2.80], to: [3, 2.85], color: '#ff6b6b' },
+        { n: '4', from: [3, 2.85], to: [4, 2.70], color: '#ff6b6b' },
+        { n: '5', from: [4, 2.70], to: [5, 2.60], color: '#ff6b6b' },
+      ],
+      notes: `<strong>RoboAlgo result:</strong> Tiny impulse cramped in $2.50-$2.90 zone at the top-left. Does NOT capture the dominant bearish structure $3.00→$0.27. <span class="grade grade-d">D</span><br>
+      <strong>Root cause:</strong> The bearish pivot-based finder may not be generating the correct bearish pivots. Also, a small diagonal at the top may be winning over the correct large-scale bearish impulse due to the diagonal being scored as "impulse" type.`
+    }
+  },
+
+  'BTC-USD': {
+    title: 'BTC-USD · Bitcoin · Daily',
+    priceRange: [0, 135000],
+    dateRange: ['2018', '2026'],
+    path: [
+      3500, 5000, 8000, 12000, 10000, 9000, 7000, 5000, 6000, 9000, 11000,
+      15000, 20000, 28000, 35000, 42000, 50000, 58000, 64000, 55000, 48000,
+      42000, 35000, 30000, 25000, 20000, 17000, 16000, 20000, 25000, 30000,
+      35000, 42000, 50000, 58000, 65000, 72000, 80000, 90000, 100000, 110000,
+      120000, 126198, 115000, 100000, 90000, 85000, 80000, 75000, 72000, 80000
+    ],
+    correct: {
+      label: 'Bullish Impulse (Extended W3)',
+      waves: [
+        { n: '1', from: [0, 3500], to: [6, 64000], color: '#fde047' },
+        { n: '2', from: [6, 64000], to: [12, 16000], color: '#fde047' },
+        { n: '3', from: [12, 16000], to: [42, 126198], color: '#fde047', ext: true },
+        { n: '4?', from: [42, 126198], to: [49, 72000], color: '#fde047', dashed: true },
+      ],
+      notes: `<strong>Correct count:</strong> W1 $3,500→$64,000 (2021 ATH) | W2 $64,000→$16,000 (2022 bear market, 75% retrace) | W3 $16,000→$126,198 (extended, 1.82× W1) | W4 in progress. This captures BTC's full macro structure from the 2018 low through the 2025 ATH.`
+    },
+    roboalgo: {
+      label: 'RoboAlgo: Single Line, Missing Intermediate Structure',
+      grade: 'C', gradeClass: 'grade-c',
+      waves: [
+        { n: '?', from: [0, 3500], to: [42, 126198], color: '#ff6b6b' },
+      ],
+      notes: `<strong>RoboAlgo result:</strong> Shows a single thick yellow line from $5,000 to $126,198 with "W1 start" and "W5 end" labels. The intermediate W2/W3/W4 structure is collapsed or missing — just one giant line. <span class="grade grade-c">C</span><br>
+      <strong>Root cause:</strong> At the macro scale, pivots may be too few (e.g., only start and end). The correct W2 at $16,000 (75% retrace of W1) should be captured by the 7% sub-primary threshold, but BTC's massive price range may need special handling.`
+    }
+  }
+};
+
+// ── Drawing ─────────────────────────────────────────────────────────────
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+
+function mapX(idx, total, pad = 60) { return pad + (idx / (total - 1)) * (canvas.width - pad * 2); }
+function mapY(price, lo, hi, padTop = 40, padBot = 40) {
+  return padTop + ((hi - price) / (hi - lo)) * (canvas.height - padTop - padBot);
+}
+
+function drawChart(sym, view) {
+  const data = CHARTS[sym];
+  const [pLo, pHi] = data.priceRange;
+  const path = data.path;
+  const n = path.length;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Background
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Grid
+  ctx.strokeStyle = '#21262d';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i <= 8; i++) {
+    const y = 40 + i * (canvas.height - 80) / 8;
+    ctx.beginPath(); ctx.moveTo(50, y); ctx.lineTo(canvas.width - 20, y); ctx.stroke();
+    const price = pHi - (i / 8) * (pHi - pLo);
+    ctx.fillStyle = '#484f58';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(price >= 1000 ? price.toLocaleString() : price.toFixed(price < 10 ? 2 : 0), 48, y + 3);
+  }
+
+  // Price path
+  ctx.strokeStyle = '#30363d';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = mapX(i, n); const y = mapY(path[i], pLo, pHi);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Candle-like fill
+  ctx.strokeStyle = '#21262d';
+  ctx.lineWidth = 0.3;
+  for (let i = 1; i < n; i++) {
+    const x = mapX(i, n); const y = mapY(path[i], pLo, pHi);
+    const py = mapY(path[i-1], pLo, pHi);
+    ctx.fillStyle = path[i] >= path[i-1] ? 'rgba(35,134,54,0.15)' : 'rgba(218,54,51,0.15)';
+    ctx.fillRect(x - 4, Math.min(y, py), 8, Math.abs(y - py) + 1);
+  }
+
+  // Title
+  ctx.fillStyle = '#e6edf3';
+  ctx.font = 'bold 14px -apple-system, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(data.title, 60, 25);
+
+  // Date range
+  ctx.fillStyle = '#484f58';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(data.dateRange[0], 60, canvas.height - 10);
+  ctx.textAlign = 'right';
+  ctx.fillText(data.dateRange[1], canvas.width - 20, canvas.height - 10);
+
+  // Draw waves
+  if (view === 'Correct') {
+    drawWaves(data.correct.waves, n, pLo, pHi, 0);
+    drawLabel(data.correct.label, '#fde047', 0);
+  } else if (view === 'RoboAlgo') {
+    drawWaves(data.roboalgo.waves, n, pLo, pHi, 0);
+    drawLabel(data.roboalgo.label + (data.roboalgo.grade ? '' : ''), data.roboalgo.waves[0]?.color || '#ff6b6b', 0);
+  } else {
+    drawWaves(data.correct.waves, n, pLo, pHi, -12);
+    drawWaves(data.roboalgo.waves, n, pLo, pHi, 12);
+    drawLabel('Green = Correct    Red = RoboAlgo', '#8b949e', 0);
+  }
+
+  // Notes
+  const notesEl = document.getElementById('notes');
+  if (view === 'Correct') notesEl.innerHTML = data.correct.notes;
+  else if (view === 'RoboAlgo') notesEl.innerHTML = data.roboalgo.notes;
+  else notesEl.innerHTML = data.correct.notes + '<br><br>' + data.roboalgo.notes;
+}
+
+function drawWaves(waves, totalPts, pLo, pHi, yOffset) {
+  for (const w of waves) {
+    const x1 = mapX(w.from[0], totalPts);
+    const y1 = mapY(w.from[1], pLo, pHi) + yOffset;
+    const x2 = mapX(w.to[0], totalPts);
+    const y2 = mapY(w.to[1], pLo, pHi) + yOffset;
+
+    // Line
+    ctx.strokeStyle = w.violation ? '#ff4444' : (w.color || '#fde047');
+    ctx.lineWidth = w.ext ? 4 : 3;
+    if (w.dashed) ctx.setLineDash([8, 4]);
+    else ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Violation X mark
+    if (w.violation) {
+      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+      ctx.strokeStyle = '#ff0000';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(mx - 8, my - 8); ctx.lineTo(mx + 8, my + 8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(mx + 8, my - 8); ctx.lineTo(mx - 8, my + 8); ctx.stroke();
+      ctx.fillStyle = '#ff4444';
+      ctx.font = 'bold 9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('RULE 3 VIOLATION', mx, my - 14);
+    }
+
+    // Extended wave glow
+    if (w.ext) {
+      ctx.strokeStyle = w.color ? w.color + '40' : '#fde04740';
+      ctx.lineWidth = 10;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+
+    // Wave label circle
+    ctx.fillStyle = w.violation ? '#ff4444' : (w.color || '#fde047');
+    ctx.beginPath(); ctx.arc(x2, y2, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#0d1117';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(w.n, x2, y2 + 4);
+
+    // Start circle for first wave
+    if (w === waves[0]) {
+      ctx.fillStyle = w.color || '#fde047';
+      ctx.beginPath(); ctx.arc(x1, y1, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#0d1117';
+      ctx.font = 'bold 9px sans-serif';
+      ctx.fillText('S', x1, y1 + 3);
+    }
+
+    // Price annotation
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    const priceStr = w.to[1] >= 1000 ? '$' + w.to[1].toLocaleString() : '$' + w.to[1].toFixed(w.to[1] < 10 ? 2 : 0);
+    ctx.fillText(priceStr, x2, y2 + (y2 < canvas.height / 2 ? -18 : 24));
+  }
+}
+
+function drawLabel(text, color, yOff) {
+  ctx.fillStyle = color;
+  ctx.font = '12px -apple-system, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(text, canvas.width - 30, 25 + yOff);
+}
+
+// ── UI ──────────────────────────────────────────────────────────────────
+function buildTabs() {
+  const st = document.getElementById('symbolTabs');
+  st.innerHTML = SYMBOLS.map(s =>
+    `<div class="symbol-tab ${s === activeSymbol ? 'active' : ''}" onclick="selectSymbol('${s}')">${s}</div>`
+  ).join('');
+
+  const vt = document.getElementById('viewTabs');
+  vt.innerHTML = VIEWS.map(v =>
+    `<div class="view-tab ${v === activeView ? 'active' : ''}" onclick="selectView('${v}')">${v}</div>`
+  ).join('');
+
+  const legendEl = document.getElementById('legend');
+  legendEl.innerHTML = `
+    <div class="legend-item"><div class="legend-dot" style="background:#fde047"></div> Correct / Impulse wave</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f87171"></div> Bearish impulse wave</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ff4444"></div> Rule violation</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#fde04740;border:1px solid #fde047"></div> Extended wave (glow)</div>
+    <div class="legend-item" style="border-left:2px dashed #fde047;padding-left:6px"> Projected / in-progress</div>
+  `;
+}
+
+function selectSymbol(s) { activeSymbol = s; buildTabs(); drawChart(s, activeView); }
+function selectView(v) { activeView = v; buildTabs(); drawChart(activeSymbol, v); }
+
+buildTabs();
+drawChart(activeSymbol, activeView);
+</script>
+</body>
+</html>

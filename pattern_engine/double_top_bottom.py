@@ -77,11 +77,17 @@ def _detect_double_top(df: pd.DataFrame, highs: list, lows: list) -> dict[str, A
                                  market_regime_score(df), momentum_score(df))
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=False)
 
+    fwd_idx = last_idx + 15
     overlay_lines = [
+        # Peak structure: top1 → neckline → top2
         [[int(h1["index"]), float(h1["price"])],       [int(trough["index"]), float(trough["price"])]],
         [[int(trough["index"]), float(trough["price"])],[int(h2["index"]), float(h2["price"])]],
+        # Completion leg: top2 → neckline
         [[int(h2["index"]), float(h2["price"])],        [last_idx, neck]],
-        [[int(h1["index"]), neck],                      [last_idx, neck]],
+        # Neckline: horizontal through trough, extended forward
+        [[int(h1["index"]), neck],                      [fwd_idx, neck]],
+        # Measured move: neckline → target (shows expected drop)
+        [[last_idx, neck],                              [last_idx, target]],
     ]
     result.update({
         "pattern_name": "Double Top", "status": status,
@@ -91,9 +97,9 @@ def _detect_double_top(df: pd.DataFrame, highs: list, lows: list) -> dict[str, A
         "points": [[int(h1["index"]), float(h1["price"])],
                    [int(h2["index"]), float(h2["price"])],
                    [int(trough["index"]), float(trough["price"])]],
-        "point_labels": ["P1", "P2", ""],
+        "point_labels": ["TOP 1", "TOP 2", "NECKLINE"],
         "overlay_lines": overlay_lines,
-        "overlay_line_roles": ["peak_down", "peak_up", "peak_down", "neckline"],
+        "overlay_line_roles": ["peak_down", "peak_up", "peak_down", "neckline", "measured_move"],
     })
     return result
 
@@ -140,11 +146,17 @@ def _detect_double_bottom(df: pd.DataFrame, highs: list, lows: list) -> dict[str
                                  market_regime_score(df), momentum_score(df))
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=True)
 
+    fwd_idx = last_idx + 15
     overlay_lines = [
+        # Bottom structure: bot1 → neckline → bot2
         [[int(l1["index"]), float(l1["price"])],   [int(peak["index"]), float(peak["price"])]],
         [[int(peak["index"]), float(peak["price"])],[int(l2["index"]), float(l2["price"])]],
+        # Completion leg: bot2 → neckline
         [[int(l2["index"]), float(l2["price"])],   [last_idx, neck]],
-        [[int(l1["index"]), neck],                  [last_idx, neck]],
+        # Neckline: horizontal through peak, extended forward
+        [[int(l1["index"]), neck],                  [fwd_idx, neck]],
+        # Measured move: neckline → target (shows expected rise)
+        [[last_idx, neck],                          [last_idx, target]],
     ]
     result.update({
         "pattern_name": "Double Bottom", "status": status,
@@ -154,9 +166,9 @@ def _detect_double_bottom(df: pd.DataFrame, highs: list, lows: list) -> dict[str
         "points": [[int(l1["index"]), float(l1["price"])],
                    [int(l2["index"]), float(l2["price"])],
                    [int(peak["index"]), float(peak["price"])]],
-        "point_labels": ["B1", "B2", ""],
+        "point_labels": ["BOT 1", "BOT 2", "NECKLINE"],
         "overlay_lines": overlay_lines,
-        "overlay_line_roles": ["bottom_up", "bottom_down", "bottom_up", "neckline"],
+        "overlay_line_roles": ["bottom_up", "bottom_down", "bottom_up", "neckline", "measured_move"],
     })
     return result
 
@@ -206,13 +218,17 @@ def _detect_triple_top(df: pd.DataFrame, highs: list, lows: list) -> dict[str, A
                                  market_regime_score(df), momentum_score(df))
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=False)
 
+    fwd_idx = last_idx + 15
     overlay_lines = [
         [[int(h1["index"]), float(h1["price"])], [int(t1["index"]), float(t1["price"])]],
         [[int(t1["index"]), float(t1["price"])], [int(h2["index"]), float(h2["price"])]],
         [[int(h2["index"]), float(h2["price"])], [int(t2["index"]), float(t2["price"])]],
         [[int(t2["index"]), float(t2["price"])], [int(h3["index"]), float(h3["price"])]],
         [[int(h3["index"]), float(h3["price"])], [last_idx, neck]],
-        [[int(h1["index"]), neck],               [last_idx, neck]],
+        # Neckline: horizontal, extended forward
+        [[int(h1["index"]), neck],               [fwd_idx, neck]],
+        # Measured move: neckline → target
+        [[last_idx, neck],                       [last_idx, target]],
     ]
     result.update({
         "pattern_name": "Triple Top", "status": status,
@@ -224,9 +240,9 @@ def _detect_triple_top(df: pd.DataFrame, highs: list, lows: list) -> dict[str, A
                    [int(h3["index"]), float(h3["price"])],
                    [int(t1["index"]), float(t1["price"])],
                    [int(t2["index"]), float(t2["price"])]],
-        "point_labels": ["P1", "P2", "P3", "", ""],
+        "point_labels": ["TOP 1", "TOP 2", "TOP 3", "NL1", "NL2"],
         "overlay_lines": overlay_lines,
-        "overlay_line_roles": ["peak_down", "peak_up", "peak_down", "peak_up", "peak_down", "neckline"],
+        "overlay_line_roles": ["peak_down", "peak_up", "peak_down", "peak_up", "peak_down", "neckline", "measured_move"],
     })
     return result
 
@@ -276,13 +292,17 @@ def _detect_triple_bottom(df: pd.DataFrame, highs: list, lows: list) -> dict[str
                                  market_regime_score(df), momentum_score(df))
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=True)
 
+    fwd_idx = last_idx + 15
     overlay_lines = [
         [[int(l1["index"]), float(l1["price"])], [int(p1["index"]), float(p1["price"])]],
         [[int(p1["index"]), float(p1["price"])], [int(l2["index"]), float(l2["price"])]],
         [[int(l2["index"]), float(l2["price"])], [int(p2["index"]), float(p2["price"])]],
         [[int(p2["index"]), float(p2["price"])], [int(l3["index"]), float(l3["price"])]],
         [[int(l3["index"]), float(l3["price"])], [last_idx, neck]],
-        [[int(l1["index"]), neck],               [last_idx, neck]],
+        # Neckline: horizontal, extended forward
+        [[int(l1["index"]), neck],               [fwd_idx, neck]],
+        # Measured move: neckline → target
+        [[last_idx, neck],                       [last_idx, target]],
     ]
     result.update({
         "pattern_name": "Triple Bottom", "status": status,
@@ -294,9 +314,9 @@ def _detect_triple_bottom(df: pd.DataFrame, highs: list, lows: list) -> dict[str
                    [int(l3["index"]), float(l3["price"])],
                    [int(p1["index"]), float(p1["price"])],
                    [int(p2["index"]), float(p2["price"])]],
-        "point_labels": ["B1", "B2", "B3", "", ""],
+        "point_labels": ["BOT 1", "BOT 2", "BOT 3", "NL1", "NL2"],
         "overlay_lines": overlay_lines,
-        "overlay_line_roles": ["bottom_up", "bottom_down", "bottom_up", "bottom_down", "bottom_up", "neckline"],
+        "overlay_line_roles": ["bottom_up", "bottom_down", "bottom_up", "bottom_down", "bottom_up", "neckline", "measured_move"],
     })
     return result
 

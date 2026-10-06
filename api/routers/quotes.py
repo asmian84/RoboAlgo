@@ -83,6 +83,33 @@ def get_quote(symbol: str):
         except Exception:
             pass
 
+    # ── Final fallback: market_data_service (yfinance batch download, cached) ─
+    # This path works without any API key and is rate-limit tolerant because
+    # it uses yfinance's batched `download()` rather than per-ticker fast_info.
+    if result is None:
+        try:
+            from data_engine.market_data_service import get_quote as mds_quote
+            mq = mds_quote(sym)
+            if mq and mq.get("price"):
+                price = float(mq["price"])
+                prev  = float(mq.get("previous_close") or 0)
+                change = float(mq.get("change") or (price - prev if prev else 0))
+                change_pct = float(mq.get("change_percent") or (change / prev * 100 if prev else 0))
+                result = {
+                    "symbol":     sym,
+                    "price":      round(price, 4),
+                    "open":       round(float(mq.get("open") or price), 4),
+                    "high":       round(float(mq.get("high") or price), 4),
+                    "low":        round(float(mq.get("low") or price), 4),
+                    "prev_close": round(prev, 4) if prev else None,
+                    "change":     round(change, 4),
+                    "change_pct": round(change_pct, 4),
+                    "timestamp":  int(_time.time()),
+                    "source":     mq.get("source", "mds"),
+                }
+        except Exception:
+            pass
+
     if result is None:
         return {"error": "No quote data available — configure FINNHUB_API_KEY for best results"}
 
@@ -271,19 +298,37 @@ def get_company(symbol: str):
 # ── Macro market ticker ────────────────────────────────────────────────────────
 # Global markets — indices, commodities, FX, crypto
 _MACRO_SYMS = [
+    # Indices
     ("^GSPTSE",  "S&P/TSX"),
     ("^DJI",     "Dow Jones"),
     ("^GSPC",    "S&P 500"),
     ("^IXIC",    "Nasdaq"),
+    ("^RUT",     "Russell 2K"),
+    ("^VIX",     "VIX"),
+    # Commodities — energy
     ("CL=F",     "WTI Crude"),
     ("BZ=F",     "Brent"),
+    ("NG=F",     "Nat Gas"),
+    # Commodities — metals
     ("GC=F",     "Gold"),
+    ("SI=F",     "Silver"),
+    ("PL=F",     "Platinum"),
+    ("HG=F",     "Copper"),
+    # Commodities — agriculture
+    ("ZW=F",     "Wheat"),
+    ("ZC=F",     "Corn"),
+    ("ZS=F",     "Soybeans"),
+    # FX
     ("CAD=X",    "USD/CAD"),
     ("EURUSD=X", "EUR/USD"),
+    ("GBPUSD=X", "GBP/USD"),
+    ("JPY=X",    "USD/JPY"),
+    # Crypto
     ("BTC-USD",  "Bitcoin"),
+    ("ETH-USD",  "Ethereum"),
 ]
 _macro_cache: dict = {"ts": 0.0, "data": []}
-_MACRO_TTL  = 30  # seconds — longer cache to avoid Yahoo rate limits with 10 symbols
+_MACRO_TTL  = 30  # seconds — longer cache to avoid Yahoo rate limits with 22 symbols
 
 
 @router.get("/macro")

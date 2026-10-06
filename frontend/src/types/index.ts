@@ -27,6 +27,7 @@ export interface IndicatorRow {
   bb_middle: number | null
   bb_lower: number | null
   bb_width: number | null
+  ma20: number | null
   ma50: number | null
   ma200: number | null
 }

@@ -2756,18 +2756,52 @@ function BacktestTab() {
   )
 }
 
+// ── Combined Analysis Tab (Score + Levels) ────────────────────────────────────
+
+function AnalysisTab() {
+  const [view, setView] = useState<'score' | 'levels'>('score')
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-1.5 border-b border-gray-800 pb-2">
+        <button
+          onClick={() => setView('score')}
+          className={`px-3 py-1.5 text-[11px] font-bold rounded transition-all ${
+            view === 'score'
+              ? 'bg-violet-900/30 text-violet-300 border-b-2 border-violet-500'
+              : 'text-gray-500 hover:text-gray-300'
+          }`}
+        >
+          ⚡ Score
+        </button>
+        <button
+          onClick={() => setView('levels')}
+          className={`px-3 py-1.5 text-[11px] font-bold rounded transition-all ${
+            view === 'levels'
+              ? 'bg-amber-900/30 text-amber-300 border-b-2 border-amber-500'
+              : 'text-gray-500 hover:text-gray-300'
+          }`}
+        >
+          ◈ Levels
+        </button>
+      </div>
+      {view === 'score' && <ScoreTab />}
+      {view === 'levels' && <LevelsTab />}
+    </div>
+  )
+}
+
 // ── Panel (embedded inside SignalsPage) ───────────────────────────────────────
 // GEX tab dropped — covered by existing Gamma Sniper in SignalsPage.
 
-type QuantTab = 'pounce' | 'levels' | 'confluence' | 'patterns' | 'backtest' | 'score' | 'tracker'
+type QuantTab = 'pounce' | 'analysis' | 'confluence' | 'patterns' | 'backtest' | 'tracker'
 
 const QUANT_TABS: { id: QuantTab; label: string; icon: string }[] = [
   { id: 'pounce',     label: 'Signals',    icon: '◎' },
-  { id: 'levels',     label: 'Levels',     icon: '◈' },
+  { id: 'analysis',   label: 'Analysis',   icon: '🔍' },
   { id: 'confluence', label: 'Confluence', icon: '◉' },
   { id: 'patterns',   label: 'Patterns',   icon: '📊' },
   { id: 'backtest',   label: 'Backtest',   icon: '📈' },
-  { id: 'score',      label: 'Score',      icon: '⚡' },
   { id: 'tracker',    label: 'Tracker',    icon: '□' },
 ]
 
@@ -2795,11 +2829,10 @@ export default function QuantPanel() {
       </div>
 
       {tab === 'pounce'     && <PounceTab />}
-      {tab === 'levels'     && <LevelsTab />}
+      {tab === 'analysis'   && <AnalysisTab />}
       {tab === 'confluence' && <ConfluenceFunnel />}
       {tab === 'patterns'   && <PatternScanPage />}
       {tab === 'backtest'   && <BacktestTab />}
-      {tab === 'score'      && <ScoreTab />}
       {tab === 'tracker'    && <TrackerTab />}
     </div>
   )

@@ -101,14 +101,31 @@ def _detect_descending(
     )
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=True)
 
-    first_idx = int(min(xh[0], xl[0]))
-    fwd_idx   = last_idx + 15
+    # ── Draw lines through ACTUAL swing pivots, extended forward ──────
+    fwd_idx = last_idx + 15
+    h0_idx, h0_p = int(highs[0]["index"]), float(highs[0]["price"])
+    h1_idx, h1_p = int(highs[-1]["index"]), float(highs[-1]["price"])
+    h_run = max(h1_idx - h0_idx, 1)
+    h_sl = (h1_p - h0_p) / h_run
+    h_fwd = h1_p + h_sl * (fwd_idx - h1_idx)
+
+    l0_idx, l0_p = int(lows[0]["index"]), float(lows[0]["price"])
+    l1_idx, l1_p = int(lows[-1]["index"]), float(lows[-1]["price"])
+    l_run = max(l1_idx - l0_idx, 1)
+    l_sl = (l1_p - l0_p) / l_run
+    l_fwd = l1_p + l_sl * (fwd_idx - l1_idx)
+
     overlay_lines = [
-        [[first_idx, float(h_slope * first_idx + h_int)], [last_idx, float(upper)]],
-        [[first_idx, float(l_slope * first_idx + l_int)], [last_idx, float(lower)]],
-        # Breakout extension projection
-        [[last_idx, float(upper)], [fwd_idx, float(h_slope * fwd_idx + h_int)]],
+        [[h0_idx, h0_p], [fwd_idx, round(h_fwd, 4)]],
+        [[l0_idx, l0_p], [fwd_idx, round(l_fwd, 4)]],
+        [[last_idx, round(breakout, 4)], [last_idx, round(target, 4)]],
     ]
+
+    all_pts = [[int(p["index"]), float(p["price"])] for p in highs] + \
+              [[int(p["index"]), float(p["price"])] for p in lows]
+    all_pts.sort(key=lambda x: x[0])
+    h_set = {(int(p["index"]), float(p["price"])) for p in highs}
+    pt_labels = ["H" if (pt[0], pt[1]) in h_set else "L" for pt in all_pts]
 
     result.update({
         "pattern_name":       "Descending Channel",
@@ -118,17 +135,16 @@ def _detect_descending(
         "projected_target":   round(target, 4),
         "confidence":         round(prob, 2),
         "probability":        round(prob, 2),
-        "direction":          "bullish",   # breakout direction = bullish reversal
-        "points": [[p["index"], p["price"]] for p in highs[-2:] + lows[-2:]],
-        "point_labels":       ["H1", "H2", "L1", "L2"],
+        "direction":          "bullish",
+        "points":             all_pts,
+        "point_labels":       pt_labels,
         "overlay_lines":      overlay_lines,
-        "overlay_line_roles": ["resistance", "support", "neckline_ext"],
-        # Muted red fill between the two channel trendlines
+        "overlay_line_roles": ["resistance", "support", "measured_move"],
         "fill_zone": {
             "upper":   0,
             "lower":   1,
             "color":   "#f87171",
-            "opacity": 0.20,
+            "opacity": 0.10,
         },
     })
     return result
@@ -146,14 +162,24 @@ def detect(symbol: str, price_data: pd.DataFrame) -> dict[str, Any]:
     best      = result
     best_prob = 0.0
 
-    for scale in [1.0, 2.0, 3.0, 5.0]:
+    total_bars = len(df)
+    for scale in [1.0, 2.0, 3.0, 5.0, 8.0, 12.0]:
         mm     = adaptive_mm * scale
         swings = detect_swings(df, minimum_move=mm)
-        highs  = swings["swing_highs"][-5:]
-        lows   = swings["swing_lows"][-5:]
+        n_pivots = 5 if scale <= 3.0 else 999
+        highs  = swings["swing_highs"][-n_pivots:]
+        lows   = swings["swing_lows"][-n_pivots:]
         r = _detect_descending(df, highs, lows)
-        if float(r.get("confidence", 0.0)) > best_prob:
-            best_prob = float(r["confidence"])
+        conf = float(r.get("confidence", 0.0))
+        if conf > 0:
+            all_idx = [p["index"] for p in highs + lows]
+            if all_idx:
+                span = (max(all_idx) - min(all_idx)) / max(total_bars, 1)
+                conf += span * 15
+                r["confidence"] = round(min(conf, 99.0), 2)
+                r["probability"] = r["confidence"]
+        if conf > best_prob:
+            best_prob = conf
             best      = r
 
     return best

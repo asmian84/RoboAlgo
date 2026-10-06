@@ -16,6 +16,11 @@ service = PatternService()
 _scan_cache: dict[str, tuple[list, float]] = {}
 _SCAN_TTL: float = 300.0  # 5 minutes per TF slot
 
+# ── Elliott Wave result cache — avoid re-running expensive detection ──────
+# Key: "SYMBOL:tf:bars"  Value: (response_dict, timestamp)
+_ew_cache: dict[str, tuple[dict, float]] = {}
+_EW_CACHE_TTL: float = 300.0  # 5 min — wave counts don't change intraday
+
 # Map URL timeframe strings to resolution_minutes (0 = daily from DB)
 _TF_RESOLUTION: dict[str, int] = {
     "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "60m": 60,
@@ -167,6 +172,176 @@ SUPPORTED_PATTERNS = [
 ]
 
 
+def _ew_scan_one(sym: str, resolution_minutes: int = 0) -> list[dict]:
+    """Run Elliott Wave detection for one symbol and return scan-format entries.
+
+    Converts the rich EW result into zero or more pattern entries that look
+    identical to the entries produced by `service.detect_for_symbol()` so they
+    can be merged into the main scan list and rendered by the same UI.
+
+    Scan criteria (one entry per actionable condition):
+      - Impulse complete         → expecting ABC correction     (status READY)
+      - ABC complete             → new impulse imminent         (status BREAKOUT)
+      - W4 retrace in progress   → W5 extension setup           (status FORMING)
+      - W2 retrace in progress   → W3 (strongest) setup         (status FORMING)
+      - In W3                    → ride the trend               (status FORMING)
+    """
+    try:
+        # Re-use EW cache if available — avoids re-running heavy detection
+        cache_key = f"{sym}::{resolution_minutes}:780"
+        cached = _ew_cache.get(cache_key)
+        if cached and (time.time() - cached[1]) < _EW_CACHE_TTL:
+            resp = cached[0]
+        else:
+            # Build a minimal DataFrame and run detection
+            from pattern_engine.service import _fetch_intraday_via_yfinance
+            from pattern_engine.elliott_wave import detect_elliott_waves
+            from database.connection import get_session
+            from database.models import Instrument, PriceData
+            from sqlalchemy import select
+            import pandas as pd
+
+            df = None
+            if resolution_minutes > 0:
+                df = _fetch_intraday_via_yfinance(sym, resolution_minutes)
+            else:
+                with get_session() as session:
+                    instrument = session.execute(
+                        select(Instrument).where(Instrument.symbol == sym)
+                    ).scalar_one_or_none()
+                    if instrument:
+                        rows = session.execute(
+                            select(
+                                PriceData.date, PriceData.open, PriceData.high,
+                                PriceData.low, PriceData.close, PriceData.volume,
+                            )
+                            .where(PriceData.instrument_id == instrument.id)
+                            .order_by(PriceData.date.desc())
+                            .limit(780)
+                        ).all()
+                        if rows:
+                            df = pd.DataFrame(
+                                [{"date": r.date, "open": float(r.open), "high": float(r.high),
+                                  "low": float(r.low), "close": float(r.close),
+                                  "volume": int(r.volume or 0)} for r in reversed(rows)]
+                            )
+            if df is None or df.empty:
+                return []
+
+            result = detect_elliott_waves(sym, df, resolution_minutes=resolution_minutes)
+            resp = {"result": result}
+            _ew_cache[cache_key] = (resp, time.time())
+
+        result = resp.get("result") or resp  # handle both wrapped and raw
+
+    except Exception:
+        return []
+
+    # ── Extract key fields ──────────────────────────────────────────────
+    today       = datetime.utcnow().date().isoformat()
+    cp          = result.get("current_position") or {}
+    best_count  = result.get("best_count")   # serialized dict
+    waves_list  = result.get("waves", [])    # WaveCount objects
+
+    if not cp and not best_count:
+        return []
+
+    phase       = cp.get("phase", "")
+    wave_num    = cp.get("wave_number", 0)
+    direction   = cp.get("direction", "up")
+    confidence  = cp.get("confidence", 0.0)
+    strength    = cp.get("strength", "moderate")
+    action      = cp.get("action", "")
+    is_up       = direction == "up"
+    bull_bear   = "bullish" if is_up else "bearish"
+
+    # Try to derive price levels from best_count waves
+    entry_price = target = invalidation = None
+    if best_count and best_count.get("waves"):
+        bw = best_count["waves"]
+        if bw:
+            last_wave = bw[-1]
+            entry_price = last_wave.get("end_price")
+        if len(bw) >= 5:
+            w1_size = abs(bw[0].get("end_price", 0) - bw[0].get("start_price", 0))
+            w5_end  = bw[4].get("end_price", entry_price or 0)
+            impulse_range = abs(w5_end - bw[0].get("start_price", w5_end))
+            # Target: next impulse ~= prior impulse from correction low/high
+            target        = round(w5_end + (1 if is_up else -1) * impulse_range, 2)
+            invalidation  = round(w5_end - (1 if is_up else -1) * impulse_range * 0.382, 2)
+
+    entries: list[dict] = []
+
+    def _entry(name: str, status: str, conf: float, bull: str, tgt=None, inv=None, lvl=None) -> dict:
+        return {
+            "symbol":             sym,
+            "date":               today,
+            "tf":                 "daily" if resolution_minutes == 0 else f"{resolution_minutes}m",
+            "pattern_name":       name,
+            "pattern_category":   "elliott",
+            "direction":          bull,
+            "status":             status,
+            "confidence":         round(float(conf), 2),
+            "breakout_level":     lvl or entry_price,
+            "target":             tgt or target,
+            "invalidation_level": inv or invalidation,
+            "phase":              phase,
+            "phase_label":        action,
+            "events":             [],
+        }
+
+    # ── Classify and emit entries ───────────────────────────────────────
+    if phase == "impulse":
+        if wave_num == 5:
+            # W5 in progress → approaching impulse completion → watch for reversal
+            entries.append(_entry(
+                "EW Wave 5 — Final Push", "FORMING",
+                min(confidence, 72), bull_bear,
+            ))
+        elif wave_num == 4:
+            # W4 retrace → W5 extension setup
+            entries.append(_entry(
+                "EW Wave 4 — Retrace Setup", "FORMING",
+                min(confidence, 68), bull_bear,
+            ))
+        elif wave_num == 3:
+            # In W3 — strongest wave, trend continuation
+            entries.append(_entry(
+                "EW Wave 3 — Trend Acceleration", "FORMING",
+                min(confidence, 75), bull_bear,
+            ))
+        elif wave_num == 2:
+            # W2 retrace → best R/R entry for W3
+            entries.append(_entry(
+                "EW Wave 2 — Entry Setup", "READY",
+                min(confidence, 78), bull_bear,
+            ))
+
+    elif phase == "correction":
+        sub = cp.get("sub_phase", "")
+        wave_lbl = cp.get("wave_in_progress", "")
+        if "complete" in action.lower() or "C" in wave_lbl:
+            # ABC complete → new impulse imminent
+            entries.append(_entry(
+                "EW Correction Complete — New Impulse", "BREAKOUT",
+                min(confidence, 82), bull_bear,
+            ))
+        elif "B" in wave_lbl:
+            # In wave B → C leg (final correction leg) coming
+            entries.append(_entry(
+                "EW Wave B — C Leg Expected", "FORMING",
+                min(confidence, 65), "bearish" if is_up else "bullish",
+            ))
+        else:
+            # Correction in progress (A leg or early)
+            entries.append(_entry(
+                "EW Impulse Complete — ABC Correction", "READY",
+                min(confidence, 70), "bearish" if is_up else "bullish",
+            ))
+
+    return entries
+
+
 @router.get("/scan")
 def scan_all_patterns(
     invalidate: bool = False,
@@ -234,10 +409,18 @@ def scan_all_patterns(
         return out
 
     results: list[dict] = []
+    # Run traditional pattern detection + EW detection in parallel pools
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {pool.submit(_detect_one, sym): sym for sym in symbols}
         for future in as_completed(futures):
             results.extend(future.result())
+
+    # EW scan runs daily only (EW detection is heavy; intraday EW is noisy)
+    if resolution_minutes == 0:
+        with ThreadPoolExecutor(max_workers=4) as ew_pool:
+            ew_futures = {ew_pool.submit(_ew_scan_one, sym, 0): sym for sym in symbols}
+            for future in as_completed(ew_futures):
+                results.extend(future.result())
 
     results.sort(key=lambda x: x.get("confidence", 0) or 0, reverse=True)
 
@@ -403,6 +586,179 @@ def get_mtf_pattern_summary(symbol: str):
                 "cached":         False,
             }
     return {"symbol": sym, "tfs": result}
+
+
+@router.get("/{symbol}/chart-overlay")
+def get_chart_overlay(
+    symbol: str,
+    bars: int = Query(default=780, ge=30, le=3000),
+    tf: str = Query(default="", description="Timeframe: 1m 5m 15m 30m 1h (omit for daily)"),
+):
+    """Return OHLCV bars AND detected patterns from the SAME DataFrame.
+
+    This guarantees perfect pattern-candle alignment because both the
+    chart data and the pattern overlay points come from identical bars.
+    Pattern points use INTEGER indices into the returned bars array.
+    """
+    from fastapi import HTTPException
+
+    resolution_minutes = _TF_RESOLUTION.get(tf.lower().strip(), 0)
+    sym = symbol.upper()
+
+    # ── Load bars using the SAME logic as PatternService ─────────────────
+    df = None
+    if resolution_minutes > 0:
+        from pattern_engine.service import _fetch_intraday_via_yfinance
+        df = _fetch_intraday_via_yfinance(sym, resolution_minutes)
+    else:
+        from database.connection import get_session
+        from database.models import Instrument, PriceData
+        from sqlalchemy import select
+        with get_session() as session:
+            instrument = session.execute(
+                select(Instrument).where(Instrument.symbol == sym)
+            ).scalar_one_or_none()
+            if instrument:
+                rows = session.execute(
+                    select(
+                        PriceData.date, PriceData.open, PriceData.high,
+                        PriceData.low, PriceData.close, PriceData.volume,
+                    )
+                    .where(PriceData.instrument_id == instrument.id)
+                    .order_by(PriceData.date.desc())
+                    .limit(bars + 50)
+                ).all()
+                if rows:
+                    import pandas as pd
+                    df = pd.DataFrame(rows, columns=["date", "open", "high", "low", "close", "volume"])
+                    df["date"] = df["date"].astype(str)
+                    df = df.sort_values("date").reset_index(drop=True)
+
+        if df is None or (hasattr(df, 'empty') and df.empty) or len(df) < 20:
+            from pattern_engine.service import _fetch_daily_via_yfinance
+            df = _fetch_daily_via_yfinance(sym, limit=bars + 50)
+
+    if df is None or len(df) < 20:
+        raise HTTPException(status_code=404, detail=f"No data for {symbol}")
+
+    df = df.tail(bars).reset_index(drop=True)
+
+    # ── Run detection on these exact bars ─────────────────────────────────
+    from pattern_engine.chart_patterns import detect_all as detect_all_chart
+    raw_patterns = detect_all_chart(sym, df, resolution_minutes)
+    try:
+        from pattern_engine.harmonic_patterns import detect as detect_harmonic
+        raw_patterns.extend(detect_harmonic(sym, df))
+    except Exception:
+        pass
+    try:
+        from pattern_engine.wyckoff_structures import detect as detect_wyckoff
+        wyckoff_result = detect_wyckoff(sym, df)
+        if isinstance(wyckoff_result, list):
+            raw_patterns.extend(wyckoff_result)
+        elif isinstance(wyckoff_result, dict):
+            raw_patterns.append(wyckoff_result)
+    except Exception:
+        pass
+    try:
+        from pattern_engine.measured_move import detect as detect_mm
+        raw_patterns.extend(detect_mm(sym, df))
+    except Exception:
+        pass
+
+    ACTIVE = {"FORMING", "READY", "BREAKOUT", "COMPLETED"}
+    last_idx = len(df) - 1
+    active = [
+        p for p in raw_patterns
+        if p.get("status") in ACTIVE
+        and p.get("points")
+        and len(p.get("points", [])) >= 2
+    ]
+
+    # ── Relevance scoring: prefer patterns involving current candles ──
+    # A pattern whose overlay lines reach to/past last_idx is far more
+    # useful than one that only connects historical bars.
+    def _min_max_index(p: dict) -> tuple[int, int]:
+        """Get the leftmost and rightmost bar index from points + overlay_lines."""
+        mn, mx = last_idx, 0
+        for pt in p.get("points", []):
+            if isinstance(pt, (list, tuple)) and len(pt) >= 1:
+                v = int(pt[0]) if isinstance(pt[0], (int, float)) else 0
+                mn = min(mn, v)
+                mx = max(mx, v)
+        for line in p.get("overlay_lines", []):
+            if isinstance(line, (list, tuple)):
+                for pt in line:
+                    if isinstance(pt, (list, tuple)) and len(pt) >= 1:
+                        v = int(pt[0]) if isinstance(pt[0], (int, float)) else 0
+                        mn = min(mn, v)
+                        mx = max(mx, v)
+        return mn, mx
+
+    def _relevance_score(p: dict) -> float:
+        """Combined score: 40% recency + 30% span + 30% confidence.
+
+        Patterns spanning the entire chart AND reaching current candles
+        score highest.  A full-chart descending channel (200 bars, reaching
+        current price) beats a 20-bar triangle with higher confidence.
+        """
+        mn, mx = _min_max_index(p)
+        recency = min(mx / max(last_idx, 1), 1.0)
+        span = (mx - mn) / max(last_idx, 1)  # 0..1: fraction of chart covered
+        conf = float(p.get("confidence", p.get("probability", 0)) or 0) / 100.0
+        return recency * 0.40 + span * 0.30 + conf * 0.30
+
+    active.sort(key=_relevance_score, reverse=True)
+    active = active[:5]
+
+    # ── Serialize bars ────────────────────────────────────────────────────
+    bar_list = []
+    for i, row in df.iterrows():
+        d = str(row["date"])
+        try:
+            from datetime import datetime as _dt
+            if "T" in d or " " in d:
+                ts_ms = int(_dt.fromisoformat(d.replace("Z", "+00:00")).timestamp() * 1000)
+            else:
+                ts_ms = int(_dt.strptime(d, "%Y-%m-%d").timestamp() * 1000)
+        except Exception:
+            ts_ms = 0
+        bar_list.append({
+            "timestamp": ts_ms,
+            "open": round(float(row["open"]), 4),
+            "high": round(float(row["high"]), 4),
+            "low": round(float(row["low"]), 4),
+            "close": round(float(row["close"]), 4),
+            "volume": int(row.get("volume", 0) or 0),
+        })
+
+    # ── Serialize patterns with RAW integer indices ──────────────────────
+    pattern_list = []
+    for p in active:
+        pattern_list.append({
+            "pattern_name": p.get("pattern_name"),
+            "pattern_category": p.get("pattern_category", "chart"),
+            "status": p.get("status"),
+            "direction": p.get("direction", "neutral"),
+            "confidence": round(float(p.get("confidence", p.get("probability", 0)) or 0), 2),
+            "breakout_level": p.get("breakout_level"),
+            "projected_target": p.get("target", p.get("projected_target")),
+            "invalidation_level": p.get("invalidation_level"),
+            "points": p.get("points", []),
+            "point_labels": p.get("point_labels"),
+            "overlay_lines": p.get("overlay_lines", []),
+            "overlay_line_roles": p.get("overlay_line_roles", []),
+            "fill_zone": p.get("fill_zone"),
+            "event_points": p.get("event_points", []),
+            "prz_low": p.get("prz_low"),
+            "prz_high": p.get("prz_high"),
+        })
+
+    return {
+        "symbol": sym,
+        "bars": bar_list,
+        "patterns": pattern_list,
+    }
 
 
 @router.get("/{symbol}")
@@ -571,3 +927,291 @@ def get_patterns_for_symbol(
             }
         )
     return out
+
+
+@router.get("/{symbol}/elliott-waves")
+def get_elliott_waves(
+    symbol: str,
+    bars: int = Query(default=780, ge=50, le=3000),
+    tf: str = Query(default="", description="Timeframe: 1m 5m 15m 30m 1h 1w 1mo (omit for daily)"),
+    nocache: bool = Query(default=False, description="Skip cache and force fresh detection"),
+):
+    """Multi-degree Elliott Wave analysis with pivot detection and Fibonacci scoring.
+
+    Returns:
+    - Wave counts at primary, intermediate, and minor degrees
+    - Current wave position assessment with trade bias
+    - Serialized wave data with bar indices for chart rendering
+    """
+    from fastapi import HTTPException
+    import logging as _logging
+    _log = _logging.getLogger("roboalgo.ew")
+
+    tf_lower = tf.lower().strip()
+    sym = symbol.upper()
+
+    # ── Cache check — return instantly if we have a recent result ────────
+    cache_key = f"{sym}:{tf_lower}:{bars}"
+    if not nocache:
+        cached = _ew_cache.get(cache_key)
+        if cached and (time.time() - cached[1]) < _EW_CACHE_TTL:
+            _log.debug("EW cache hit for %s", cache_key)
+            return cached[0]
+
+    _t0 = time.time()
+    resolution_minutes = _TF_RESOLUTION.get(tf_lower, 0)
+    is_weekly = tf_lower in ("1w", "weekly")
+    is_monthly = tf_lower in ("1mo", "monthly")
+
+    # Load bars — same logic as chart-overlay for consistency
+    df = None
+    if resolution_minutes > 0:
+        from pattern_engine.service import _fetch_intraday_via_yfinance
+        df = _fetch_intraday_via_yfinance(sym, resolution_minutes)
+    else:
+        # For weekly/monthly we need MORE daily bars to resample from
+        fetch_limit = bars + 50
+        if is_weekly:
+            fetch_limit = max(bars * 7, 3000)  # ~bars weeks of daily data
+        elif is_monthly:
+            fetch_limit = max(bars * 22, 5000)
+
+        from database.connection import get_session
+        from database.models import Instrument, PriceData
+        from sqlalchemy import select
+        with get_session() as session:
+            instrument = session.execute(
+                select(Instrument).where(Instrument.symbol == sym)
+            ).scalar_one_or_none()
+            if instrument:
+                rows = session.execute(
+                    select(
+                        PriceData.date, PriceData.open, PriceData.high,
+                        PriceData.low, PriceData.close, PriceData.volume,
+                    )
+                    .where(PriceData.instrument_id == instrument.id)
+                    .order_by(PriceData.date.desc())
+                    .limit(fetch_limit)
+                ).all()
+                if rows:
+                    import pandas as pd
+                    df = pd.DataFrame(rows, columns=["date", "open", "high", "low", "close", "volume"])
+                    df["date"] = df["date"].astype(str)
+                    df = df.sort_values("date").reset_index(drop=True)
+
+        if df is None or (hasattr(df, 'empty') and df.empty) or len(df) < 50:
+            try:
+                from api.routers.prices import _fetch_any
+                prices_df, _ = _fetch_any(sym, limit=fetch_limit)
+                if not prices_df.empty and len(prices_df) >= 50:
+                    prices_df = prices_df.reset_index()
+                    prices_df.columns = [c.lower() for c in prices_df.columns]
+                    df = prices_df
+            except Exception:
+                pass
+
+        if df is None or (hasattr(df, 'empty') and df.empty) or len(df) < 50:
+            from pattern_engine.service import _fetch_daily_via_yfinance
+            df = _fetch_daily_via_yfinance(sym, limit=fetch_limit)
+
+    if df is None or len(df) < 50:
+        raise HTTPException(status_code=404, detail=f"Insufficient data for {symbol}")
+
+    # Resample to weekly or monthly if requested
+    if is_weekly or is_monthly:
+        import pandas as pd
+        df["date"] = pd.to_datetime(df["date"])
+        freq = "W" if is_weekly else "ME"
+        resampled = df.set_index("date").resample(freq).agg({
+            "open": "first", "high": "max", "low": "min",
+            "close": "last", "volume": "sum",
+        }).dropna(subset=["open", "close"]).reset_index()
+        resampled["date"] = resampled["date"].astype(str)
+        df = resampled
+        # For weekly/monthly, use a different resolution for EW pivot sizing
+        resolution_minutes = 10080 if is_weekly else 43200  # week=10080min, month=43200min
+
+    df = df.tail(bars).reset_index(drop=True)
+    # Drop rows with NaN in OHLC (critical for EW detection)
+    df = df.dropna(subset=["open", "high", "low", "close"]).reset_index(drop=True)
+    df["volume"] = df.get("volume", 0).fillna(0)
+
+    # Run Elliott Wave detection
+    from pattern_engine.elliott_wave import detect_elliott_waves, serialize_all_waves
+    result = detect_elliott_waves(sym, df, resolution_minutes=resolution_minutes)
+
+    # Serialize bars for chart alignment
+    bar_list = []
+    for i, row in df.iterrows():
+        d = str(row["date"])
+        try:
+            from datetime import datetime as _dt
+            if "T" in d or " " in d:
+                ts_ms = int(_dt.fromisoformat(d.replace("Z", "+00:00")).timestamp() * 1000)
+            else:
+                ts_ms = int(_dt.strptime(d, "%Y-%m-%d").timestamp() * 1000)
+        except Exception:
+            ts_ms = 0
+        bar_list.append({
+            "timestamp": ts_ms,
+            "open": round(float(row["open"]), 4),
+            "high": round(float(row["high"]), 4),
+            "low": round(float(row["low"]), 4),
+            "close": round(float(row["close"]), 4),
+            "volume": int(row.get("volume", 0) or 0),
+        })
+
+    # Find CONNECTED impulse → correction pair (the full EW cycle)
+    from pattern_engine.elliott_wave import WaveType, WaveDirection, _serialize_wave_count as _ser, compute_ew_channels
+    all_waves = result["waves"]
+    total_bars = len(bar_list)
+
+    best_impulse = None
+    linked_correction = None
+
+    impulse_all = [wc for wc in all_waves if wc.wave_type == WaveType.IMPULSE]
+
+    if is_weekly or is_monthly:
+        # ── MACRO SELECTION (weekly/monthly) ──
+        # For macro charts, prefer the WIDEST-SPANNING impulse that ALSO
+        # terminates near the structural high (ATH for bullish, ATL bearish).
+        # An impulse whose Wave 5 ends at the actual chart high is much more
+        # useful than one that stops short — that's where price actually went.
+        # Score = span_pct * 0.40 + wave_count * 0.20 + conf * 0.15 + extreme_proximity * 0.25
+        # Anchor points: the actual high/low of the visible chart range
+        global_high = max((b.get("high", 0) or 0) for b in bar_list) if bar_list else 0
+        global_low  = min((b.get("low", 1e9) or 1e9) for b in bar_list) if bar_list else 1e9
+        price_range = max(global_high - global_low, 1e-9)
+
+        def _macro_score(wc):
+            span = wc.waves[-1].end.idx - wc.waves[0].start.idx
+            span_pct = span / max(total_bars, 1)
+            nw_norm = len(wc.waves) / 5.0
+            conf_norm = wc.confidence / 100.0
+
+            # Anchor proximity: how well does this count span between global
+            # extremes? Bullish impulse should START near global low and END
+            # near global high. Use price-range normalization, not absolute.
+            start_price = wc.waves[0].start.price
+            end_price = wc.waves[-1].end.price
+            if wc.direction == WaveDirection.UP:
+                start_anchor = max(0.0, 1.0 - abs(start_price - global_low) / price_range)
+                end_anchor   = max(0.0, 1.0 - abs(end_price - global_high) / price_range)
+            else:
+                start_anchor = max(0.0, 1.0 - abs(start_price - global_high) / price_range)
+                end_anchor   = max(0.0, 1.0 - abs(end_price - global_low) / price_range)
+            # Cube end_anchor — exact ATH/ATL termination wins decisively over
+            # "close to extreme." A wave 5 ending precisely at the chart high
+            # is the structurally meaningful count, not one stopping 5% short.
+            anchor_score = (start_anchor + end_anchor ** 3) / 2.0
+
+            # Hard bonus: structure terminating within 1% of global extreme
+            # is the canonical count the user can SEE on the chart. This
+            # tiebreaker is decisive when two counts have similar span/conf.
+            if wc.direction == WaveDirection.UP:
+                hits_extreme = abs(end_price - global_high) / max(global_high, 1e-9) < 0.01
+            else:
+                hits_extreme = abs(end_price - global_low) / max(global_low, 1e-9) < 0.01
+            extreme_bonus = 0.15 if hits_extreme else 0.0
+
+            # W3 prominence: prefer counts where W3 reaches a significant
+            # price level. In a strong bull market, W3 should be at a major
+            # structural peak (e.g. BTC $108K before the $126K ATH), not a
+            # minor intermediate high. For DOWN impulse, lower W3 = more prominent.
+            w3_price = wc.waves[2].end.price if len(wc.waves) > 2 else end_price
+            if wc.direction == WaveDirection.UP:
+                w3_prominence = (w3_price - global_low) / max(price_range, 1e-9)
+            else:
+                w3_prominence = (global_high - w3_price) / max(price_range, 1e-9)
+            w3_prominence = max(0.0, min(1.0, w3_prominence))
+
+            return (span_pct * 0.18 + nw_norm * 0.08 + conf_norm * 0.09
+                    + anchor_score * 0.55 + w3_prominence * 0.10 + extreme_bonus)
+
+        if impulse_all:
+            impulse_all.sort(key=_macro_score, reverse=True)
+            best_impulse = impulse_all[0]
+    else:
+        # ── MICRO SELECTION (intraday/daily) ──
+        # Prefer recency: partial impulse at the current bar is most useful.
+        # Priority: recent partial > recent complete > older partial > any
+
+        # Tier 1: partial impulse at the current bar
+        recent_5pct = max(total_bars - int(total_bars * 0.05), total_bars - 20)
+        for wc in impulse_all:
+            if not wc.is_complete and wc.waves[-1].end.idx >= recent_5pct:
+                if best_impulse is None or len(wc.waves) > len(best_impulse.waves) or \
+                   (len(wc.waves) == len(best_impulse.waves) and wc.confidence > best_impulse.confidence):
+                    best_impulse = wc
+
+        # Tier 2: complete impulse ending very recently
+        if best_impulse is None:
+            recent_10pct = max(total_bars - int(total_bars * 0.10), total_bars - 50)
+            for wc in impulse_all:
+                if wc.is_complete and wc.waves[-1].end.idx >= recent_10pct:
+                    if best_impulse is None or wc.confidence > best_impulse.confidence:
+                        best_impulse = wc
+
+        # Tier 3: partial impulse ending somewhat recently
+        if best_impulse is None:
+            recent_15pct = max(total_bars - int(total_bars * 0.15), total_bars - 80)
+            for wc in impulse_all:
+                if not wc.is_complete and wc.waves[-1].end.idx >= recent_15pct:
+                    if best_impulse is None or len(wc.waves) > len(best_impulse.waves):
+                        best_impulse = wc
+
+        # Tier 4: complete impulse in recent half
+        if best_impulse is None:
+            recent_half = max(int(total_bars * 0.50), total_bars - 200)
+            candidates = [wc for wc in impulse_all if wc.is_complete and wc.waves[-1].end.idx >= recent_half]
+            if candidates:
+                candidates.sort(key=lambda wc: wc.waves[-1].end.idx * 0.6 + wc.confidence * 0.4, reverse=True)
+                best_impulse = candidates[0]
+
+        # Tier 5: any impulse (fallback)
+        if best_impulse is None and impulse_all:
+            impulse_all.sort(key=lambda wc: wc.confidence, reverse=True)
+            best_impulse = impulse_all[0]
+
+    # Find linked correction starting near impulse end
+    if best_impulse:
+        imp_end_idx = best_impulse.waves[-1].end.idx
+        proximity = max(5, int(total_bars * 0.03))  # 3% of bars or at least 5
+        for cwc in all_waves:
+            if cwc.wave_type in (WaveType.CORRECTIVE, WaveType.TRIANGLE, WaveType.DOUBLE_CORRECTION):
+                corr_start_idx = cwc.waves[0].start.idx
+                if abs(corr_start_idx - imp_end_idx) <= proximity:
+                    linked_correction = cwc
+                    break
+
+    import math
+    def _sanitize(obj):
+        """Replace NaN/Inf with None for JSON serialization."""
+        if isinstance(obj, float):
+            return None if (math.isnan(obj) or math.isinf(obj)) else obj
+        if isinstance(obj, dict):
+            return {k: _sanitize(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_sanitize(v) for v in obj]
+        return obj
+
+    # Compute EW channels for the best impulse + linked correction
+    channels = compute_ew_channels(best_impulse, linked_correction)
+
+    response = _sanitize({
+        "symbol": sym,
+        "bars": bar_list,
+        "wave_counts": serialize_all_waves(result["waves"]),
+        "current_position": result["current_position"],
+        "best_count": result["best_count"],
+        "best_impulse": _ser(best_impulse) if best_impulse else None,
+        "linked_correction": _ser(linked_correction) if linked_correction else None,
+        "channels": channels,
+    })
+
+    # Cache the result and log timing
+    _ew_cache[cache_key] = (response, time.time())
+    _log.info("EW %s computed in %.1fs (%d counts, %d bars)",
+              cache_key, time.time() - _t0,
+              len(response.get("wave_counts", [])), len(bar_list))
+    return response

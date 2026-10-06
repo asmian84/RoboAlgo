@@ -417,6 +417,7 @@ def detect(symbol: str, price_data: pd.DataFrame) -> dict[str, Any]:
             [pb_idx,    pb_px],
             [last_idx,  seat_h],
         ],
+        "point_labels": ["IMPULSE LOW", "IMPULSE HIGH", "SEAT LOW", "SEAT HIGH"],
         # Full chair geometry for solid trendline overlay
         "overlay_lines": overlay_lines,
         # Per-segment role labels for frontend styling

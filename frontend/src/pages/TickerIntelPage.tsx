@@ -12,7 +12,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useConfluenceScore, usePatterns, usePriceLevels } from '../api/hooks'
+import { useConfluenceScore, usePatterns, usePriceLevels, useGex } from '../api/hooks'
 import type { PatternEntry, PriceLevelCluster, PriceLevelZones } from '../types'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -516,6 +516,111 @@ function PriceLevelZonePanel({
   )
 }
 
+// ── Dealer Positioning (GEX/VEX) ──────────────────────────────────────────────
+
+interface DealerPositioningPanelProps {
+  symbol: string
+  isLoading?: boolean
+  isError?: boolean
+  gammaFlip: number | null
+  gexRegime: string | null         // POSITIVE | NEGATIVE | NEUTRAL
+  positioningBias: string | null   // BULLISH | BEARISH | NEUTRAL
+  dexRegime: string | null         // LONG_DELTA | SHORT_DELTA | NEUTRAL
+  dealerBias: string | null        // LONG | SHORT | NEUTRAL
+}
+
+function badge(label: string, color: string) {
+  return (
+    <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide"
+          style={{ color, background: color + '22', border: `1px solid ${color}44` }}>
+      {label}
+    </span>
+  )
+}
+
+function DealerPositioningPanel({
+  symbol, isLoading, isError, gammaFlip, gexRegime, positioningBias, dexRegime, dealerBias,
+}: DealerPositioningPanelProps) {
+  const [expanded, setExpanded] = useState(true)
+
+  // Colors
+  const regimeColor  = gexRegime === 'NEGATIVE' ? '#ef4444' : gexRegime === 'POSITIVE' ? '#f59e0b' : '#9ca3af'
+  const biasColor    = positioningBias === 'BULLISH' ? '#22c55e' : positioningBias === 'BEARISH' ? '#ef4444' : '#9ca3af'
+  const dexColor     = dexRegime === 'LONG_DELTA' ? '#22c55e' : dexRegime === 'SHORT_DELTA' ? '#ef4444' : '#9ca3af'
+  const dealerColor  = dealerBias === 'LONG' ? '#22c55e' : dealerBias === 'SHORT' ? '#ef4444' : '#9ca3af'
+
+  const hasData = gammaFlip != null || gexRegime || positioningBias || dealerBias
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-800/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-gray-300 uppercase tracking-widest">⚡ GEX · Dealer Positioning</span>
+          {!isLoading && !isError && hasData && gammaFlip != null && (
+            <span className="text-[10px] font-mono text-gray-500">flip ${gammaFlip.toFixed(0)}</span>
+          )}
+          {isLoading && <span className="text-[10px] text-gray-600 animate-pulse">loading…</span>}
+        </div>
+        <span className="text-gray-600 text-xs transition-transform" style={{ display: 'inline-block', transform: expanded ? 'rotate(180deg)' : '' }}>▼</span>
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-4 pt-1 border-t border-gray-800/50 space-y-2">
+          {isLoading && (
+            <div className="flex items-center gap-2 py-3">
+              <div className="w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs text-gray-500">Fetching options flow…</span>
+            </div>
+          )}
+
+          {isError && (
+            <p className="text-[11px] text-gray-600 py-2 italic">
+              Options data unavailable for {symbol} — no listed options or market closed
+            </p>
+          )}
+
+          {!isLoading && !isError && (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 pt-1">
+              {/* Gamma Flip */}
+              <div>
+                <p className="text-[9px] text-gray-600 uppercase tracking-widest mb-1">Gamma Flip</p>
+                <span className="text-sm font-mono font-bold text-gray-100">
+                  {gammaFlip != null ? `$${gammaFlip.toFixed(2)}` : '—'}
+                </span>
+              </div>
+
+              {/* GEX Regime */}
+              <div>
+                <p className="text-[9px] text-gray-600 uppercase tracking-widest mb-1">GEX Regime</p>
+                {gexRegime ? badge(gexRegime, regimeColor) : <span className="text-xs text-gray-600">—</span>}
+              </div>
+
+              {/* Positioning Bias */}
+              <div>
+                <p className="text-[9px] text-gray-600 uppercase tracking-widest mb-1">Positioning Bias</p>
+                {positioningBias ? badge(positioningBias, biasColor) : <span className="text-xs text-gray-600">—</span>}
+              </div>
+
+              {/* DEX Regime */}
+              <div>
+                <p className="text-[9px] text-gray-600 uppercase tracking-widest mb-1">Delta Exposure</p>
+                {dexRegime ? badge(dexRegime.replace('_', ' '), dexColor) : <span className="text-xs text-gray-600">—</span>}
+              </div>
+            </div>
+          )}
+
+          {!isLoading && !isError && !hasData && (
+            <p className="text-xs text-gray-600 py-1 italic">No dealer positioning data detected</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── View: Novice ───────────────────────────────────────────────────────────────
 
 function ShortETFBadge({ etf, name, leverage, onClick }: { etf: string; name: string; leverage: string; onClick: () => void }) {
@@ -667,7 +772,8 @@ function NoviceView({
 
 function IntermediateView({
   symbol, direction, tier, confluence, stages, entry, addPrice, scale, target, stop,
-  patterns, priceLevels, shortETF, etfList, onUpgrade, onPaperTrade, onShortETF,
+  patterns, priceLevels, gexIsLoading, gexIsError, gammaFlip, gexRegime, positioningBias, dexRegime, dealerBias,
+  shortETF, etfList, onUpgrade, onPaperTrade, onShortETF,
 }: {
   symbol: string
   direction: 'bullish' | 'bearish' | 'neutral'
@@ -681,6 +787,13 @@ function IntermediateView({
   stop: number
   patterns: PatternEntry[]
   priceLevels?: { zones: PriceLevelZones; current_price: number; atr_pct: number }
+  gexIsLoading?: boolean
+  gexIsError?: boolean
+  gammaFlip: number | null
+  gexRegime: string | null
+  positioningBias: string | null
+  dexRegime: string | null
+  dealerBias: string | null
   shortETF: { etf: string; name: string; leverage: string } | null
   etfList: ETFOption[]
   onUpgrade: () => void
@@ -728,6 +841,18 @@ function IntermediateView({
           </div>
         ))}
       </div>
+
+      {/* Dealer Positioning */}
+      <DealerPositioningPanel
+        symbol={symbol}
+        isLoading={gexIsLoading}
+        isError={gexIsError}
+        gammaFlip={gammaFlip}
+        gexRegime={gexRegime}
+        positioningBias={positioningBias}
+        dexRegime={dexRegime}
+        dealerBias={dealerBias}
+      />
 
       {/* Trade levels */}
       {entry > 0 && (
@@ -822,6 +947,7 @@ function IntermediateView({
 function ExpertView({
   symbol, direction, tier, confluence, stages, scores, entry, addPrice, scale, target, stop,
   patterns, isComp, isBreakout, volRegime, expectedMove, decisionTrace, priceLevels,
+  gexIsLoading, gexIsError, gammaFlip, gexRegime, positioningBias, dexRegime, dealerBias,
   shortETF, etfList, onPaperTrade, onShortETF, isGated,
 }: {
   symbol: string
@@ -842,6 +968,13 @@ function ExpertView({
   expectedMove: number
   decisionTrace: string
   priceLevels?: { zones: PriceLevelZones; current_price: number; atr_pct: number; levels: PriceLevelCluster[] }
+  gexIsLoading?: boolean
+  gexIsError?: boolean
+  gammaFlip: number | null
+  gexRegime: string | null
+  positioningBias: string | null
+  dexRegime: string | null
+  dealerBias: string | null
   shortETF: { etf: string; name: string; leverage: string } | null
   etfList: ETFOption[]
   onPaperTrade: () => void
@@ -934,6 +1067,18 @@ function ExpertView({
 
         {/* Right col */}
         <div className="flex flex-col gap-4">
+          {/* Dealer Positioning */}
+          <DealerPositioningPanel
+            symbol={symbol}
+            isLoading={gexIsLoading}
+            isError={gexIsError}
+            gammaFlip={gammaFlip}
+            gexRegime={gexRegime}
+            positioningBias={positioningBias}
+            dexRegime={dexRegime}
+            dealerBias={dealerBias}
+          />
+
           {/* Trade levels */}
           {entry > 0 && (
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -1134,6 +1279,7 @@ export default function TickerIntelPage() {
   const { data: confluence, isLoading: confLoading, isError: confError } = useConfluenceScore(symbol)
   const { data: patterns,   isLoading: patLoading                       } = usePatterns(symbol)
   const { data: priceLevels }                                             = usePriceLevels(symbol)
+  const { data: gex, isLoading: gexLoading, isError: gexError }          = useGex(symbol)
 
   const isLoading = (confLoading || patLoading) && !!symbol
 
@@ -1403,6 +1549,13 @@ export default function TickerIntelPage() {
               stop={stop}
               patterns={patterns ?? []}
               priceLevels={priceLevels}
+              gexIsLoading={gexLoading}
+              gexIsError={gexError}
+              gammaFlip={gex?.gamma_flip ?? null}
+              gexRegime={gex?.gex_regime ?? null}
+              positioningBias={gex?.positioning_bias ?? null}
+              dexRegime={gex?.dex_regime ?? null}
+              dealerBias={gex?.dealer_bias ?? null}
               shortETF={shortETF}
               etfList={etfList}
               onUpgrade={() => changeMode('expert')}
@@ -1431,6 +1584,13 @@ export default function TickerIntelPage() {
               expectedMove={confluence?.expected_move_pct ?? 0}
               decisionTrace={confluence?.decision_trace ?? ''}
               priceLevels={priceLevels}
+              gexIsLoading={gexLoading}
+              gexIsError={gexError}
+              gammaFlip={gex?.gamma_flip ?? null}
+              gexRegime={gex?.gex_regime ?? null}
+              positioningBias={gex?.positioning_bias ?? null}
+              dexRegime={gex?.dex_regime ?? null}
+              dealerBias={gex?.dealer_bias ?? null}
               shortETF={shortETF}
               etfList={etfList}
               onPaperTrade={handlePaperTrade}

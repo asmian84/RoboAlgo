@@ -368,10 +368,10 @@ class LevelEngine:
         Returns empty list (silently) if options data is unavailable.
         """
         try:
-            from data_engine.yahoo_options_fetcher import OptionsChainFetcher
+            from data_engine.yahoo_options_fetcher import fetch_options_chain
             from options_engine.gamma_exposure import GammaExposureEngine
 
-            chain = OptionsChainFetcher().fetch(symbol)
+            chain = fetch_options_chain(symbol)
             if chain is None:
                 return []
 

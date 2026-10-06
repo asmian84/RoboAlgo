@@ -102,7 +102,8 @@ def _detect_hs(df: pd.DataFrame, highs: list, lows: list) -> dict[str, Any]:
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=False)
 
     neck_left_pt  = float(neck_slope * t1["index"] + neck_int)
-    neck_right_pt = float(neck_slope * t2["index"] + neck_int)
+    fwd_idx = last_idx + 15
+    neck_fwd = float(neck_slope * fwd_idx + neck_int)
 
     overlay_lines = [
         # LS → trough1
@@ -115,14 +116,15 @@ def _detect_hs(df: pd.DataFrame, highs: list, lows: list) -> dict[str, Any]:
         [[int(t2["index"]), float(t2["price"])],  [int(rs["index"]), float(rs["price"])]],
         # RS → neckline (completion — right side breakdown leg)
         [[int(rs["index"]), float(rs["price"])],  [last_idx, float(neckline_now)]],
-        # Neckline (between troughs)
-        [[int(t1["index"]), neck_left_pt],         [int(t2["index"]), neck_right_pt]],
-        # Neckline extension to right edge
-        [[int(t2["index"]), neck_right_pt],        [last_idx, float(neckline_now)]],
+        # Neckline: through actual troughs, extended well forward
+        [[int(t1["index"]), float(t1["price"])],   [fwd_idx, round(neck_fwd, 4)]],
+        # Measured move: neckline → target at last bar (shows expected drop)
+        [[last_idx, float(neckline_now)],          [last_idx, target]],
     ]
     overlay_line_roles = [
-        "ls_down", "head_up", "head_down", "rs_up", "rs_down", "neckline", "neckline_ext",
+        "ls_down", "head_up", "head_down", "rs_up", "rs_down", "neckline", "measured_move",
     ]
+    fill_zone = None  # H&S defined by zigzag structure, not a fill region
 
     result.update({
         "pattern_name":       "Head & Shoulders",
@@ -140,9 +142,10 @@ def _detect_hs(df: pd.DataFrame, highs: list, lows: list) -> dict[str, Any]:
             [int(t1["index"]), float(t1["price"])],
             [int(t2["index"]), float(t2["price"])],
         ],
-        "point_labels":       ["LS", "H", "RS", "", ""],
+        "point_labels":       ["LS", "HEAD", "RS", "NL1", "NL2"],
         "overlay_lines":      overlay_lines,
         "overlay_line_roles": overlay_line_roles,
+        "fill_zone":          fill_zone,
     })
     return result
 
@@ -214,8 +217,8 @@ def _detect_ihs(df: pd.DataFrame, highs: list, lows: list) -> dict[str, Any]:
     )
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=True)
 
-    neck_left_pt  = float(neck_slope * t1["index"] + neck_int)
-    neck_right_pt = float(neck_slope * t2["index"] + neck_int)
+    fwd_idx = last_idx + 15
+    neck_fwd = float(neck_slope * fwd_idx + neck_int)
 
     overlay_lines = [
         [[int(ls["index"]), float(ls["price"])],  [int(t1["index"]), float(t1["price"])]],
@@ -224,12 +227,15 @@ def _detect_ihs(df: pd.DataFrame, highs: list, lows: list) -> dict[str, Any]:
         [[int(t2["index"]), float(t2["price"])],  [int(rs["index"]), float(rs["price"])]],
         # RS → neckline (completion — right side breakout leg)
         [[int(rs["index"]), float(rs["price"])],  [last_idx, float(neckline_now)]],
-        [[int(t1["index"]), neck_left_pt],         [int(t2["index"]), neck_right_pt]],
-        [[int(t2["index"]), neck_right_pt],        [last_idx, float(neckline_now)]],
+        # Neckline: through actual peaks, extended well forward
+        [[int(t1["index"]), float(t1["price"])],   [fwd_idx, round(neck_fwd, 4)]],
+        # Measured move: neckline → target at last bar (shows expected rise)
+        [[last_idx, float(neckline_now)],          [last_idx, target]],
     ]
     overlay_line_roles = [
-        "ls_up", "head_down", "head_up", "rs_down", "rs_up", "neckline", "neckline_ext",
+        "ls_up", "head_down", "head_up", "rs_down", "rs_up", "neckline", "measured_move",
     ]
+    fill_zone = None  # Inv H&S defined by zigzag structure, not a fill region
 
     result.update({
         "pattern_name":       "Inv. Head & Shoulders",
@@ -247,9 +253,10 @@ def _detect_ihs(df: pd.DataFrame, highs: list, lows: list) -> dict[str, Any]:
             [int(t1["index"]), float(t1["price"])],
             [int(t2["index"]), float(t2["price"])],
         ],
-        "point_labels":       ["LS", "H", "RS", "", ""],
+        "point_labels":       ["LS", "HEAD", "RS", "NL1", "NL2"],
         "overlay_lines":      overlay_lines,
         "overlay_line_roles": overlay_line_roles,
+        "fill_zone":          fill_zone,
     })
     return result
 

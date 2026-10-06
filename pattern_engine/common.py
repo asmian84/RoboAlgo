@@ -19,7 +19,12 @@ def base_result(pattern_name: str) -> dict[str, Any]:
         "invalidation_level": None,
         "projected_target": None,
         "probability": 0.0,
+        "confidence": 0.0,
         "points": [],
+        "point_labels": None,
+        "overlay_lines": [],
+        "overlay_line_roles": [],
+        "fill_zone": None,
     }
 
 

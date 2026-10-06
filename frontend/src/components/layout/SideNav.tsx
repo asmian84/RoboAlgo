@@ -109,12 +109,10 @@ function MacroTickerPanel() {
 // ── Nav items ─────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { path: '/command', label: 'CMD',     icon: '⌘' },
-  { path: '/edge',    label: 'EDGE',    icon: '◆' },
-  { path: '/chart',   label: 'CHART',   icon: '↗' },
-  { path: '/signals', label: 'SIGNALS', icon: '◎' },
-  { path: '/paper',   label: 'PAPER',   icon: '□' },
   { path: '/trades',  label: 'TRADES',  icon: '⚡' },
+  { path: '/chart',   label: 'CHART',   icon: '↗' },
+  { path: '/paper',   label: 'PAPER',   icon: '□' },
+  { path: '/tv',      label: 'TV',      icon: 'T' },
 ] as const
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -309,38 +307,7 @@ export default function SideNav({ safety, currentSymbol: _currentSymbol }: Props
       {/* ── Macro ticker panel ── */}
       <MacroTickerPanel />
 
-      {/* ── Data source indicator ── */}
-      {dataSrc && (
-        <div
-          className="mx-2 mb-1 px-2 py-1.5 rounded-lg border cursor-pointer"
-          style={{ backgroundColor: '#0f172a', borderColor: '#1e293b' }}
-          onClick={() => {
-            navigate('/settings')
-            setMobileOpen(false)
-          }}
-          title="Data sources — click to configure"
-        >
-          <div className="text-[8px] text-gray-600 uppercase tracking-widest mb-1">Data Providers</div>
-          <div className="flex items-center justify-between">
-            <span className="text-[9px] text-gray-500">MTF</span>
-            <span className="text-[9px] font-bold" style={{ color: dataSrc.mtf === 'alphavantage' ? '#34d399' : '#60a5fa' }}>
-              {dataSrc.mtf === 'alphavantage'
-                ? `AlphaVantage · ${dataSrc.tier === 'premium' ? '75/m' : dataSrc.tier === 'professional' ? '600/m' : '5/m'}`
-                : 'Yahoo Finance'}
-            </span>
-          </div>
-          <div className="flex items-center justify-between mt-0.5">
-            <span className="text-[9px] text-gray-500">Daily</span>
-            <span className="text-[9px] font-bold" style={{ color: dataSrc.daily === 'alphavantage' ? '#34d399' : '#60a5fa' }}>
-              {dataSrc.daily === 'alphavantage' ? 'AlphaVantage' : 'Yahoo Finance'}
-            </span>
-          </div>
-          <div className="flex items-center justify-between mt-0.5">
-            <span className="text-[9px] text-gray-500">Universe</span>
-            <span className="text-[9px] font-bold" style={{ color: '#818cf8' }}>FinnHub</span>
-          </div>
-        </div>
-      )}
+      {/* Data providers panel removed — settings accessible via gear icon */}
 
       {/* ── Bottom: clock · alerts · settings · user ── */}
       <div className="py-2 px-2 border-t border-gray-800/60 shrink-0 space-y-2">

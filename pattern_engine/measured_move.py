@@ -32,8 +32,8 @@ _RETRACE_MAX = 0.70
 # Swing detection half-window (bars each side)
 _SWING_WINDOW = 5
 
-# How many bars of lookback to scan for setups
-_LOOKBACK = 100
+# How many bars of lookback to scan for setups (use full chart window)
+_LOOKBACK = 300
 
 # Price proximity buffer to classify status (0.5 %)
 _PROXIMITY = 0.005
@@ -59,6 +59,7 @@ def _make(
         "invalidation_level": invalidation_level,
         "target": target,
         "points": points or [],
+        "point_labels": ["A", "B", "C"] if points and len(points) == 3 else [],
     }
 
 

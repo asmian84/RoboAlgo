@@ -5,6 +5,9 @@ Bear Flag:
   - Consolidation that drifts UPWARD (parallel channel with positive slope)
   - Breakdown below lower channel boundary = bearish signal
   - Target = breakdown − pole_height
+
+Multi-scale: tries multiple pole window sizes (35, 80, 150) to catch
+both short-term and long-term bear flags.  Larger flags get a span bonus.
 """
 
 from __future__ import annotations
@@ -27,16 +30,36 @@ from structure_engine.swing_detector import compute_adaptive_minimum_move, detec
 
 
 def detect(symbol: str, price_data: pd.DataFrame) -> dict[str, Any]:
-    result = base_result("Bear Flag")
+    """Multi-scale bear flag detection."""
     if price_data is None or len(price_data) < 60:
-        return result
+        return base_result("Bear Flag")
 
     df = price_data.sort_values("date").reset_index(drop=True).copy()
     adaptive_mm = compute_adaptive_minimum_move(df)
+    total_bars = len(df)
+
+    best = base_result("Bear Flag")
+    best_conf = 0.0
+
+    for pole_size, max_pole_bars in [(35, 16), (80, 40), (150, 80)]:
+        if total_bars < pole_size + 25:
+            continue
+        r = _detect_bear_flag_at_scale(df, adaptive_mm, pole_size, max_pole_bars, total_bars)
+        conf = float(r.get("confidence", 0.0))
+        if conf > best_conf:
+            best_conf = conf
+            best = r
+
+    return best
+
+
+def _detect_bear_flag_at_scale(
+    df: pd.DataFrame, adaptive_mm: float, pole_size: int, max_pole_bars: int, total_bars: int,
+) -> dict[str, Any]:
+    result = base_result("Bear Flag")
     close = df["close"].astype(float)
 
-    # Look for pole in the last 35 bars
-    pole_window = close.tail(35).reset_index(drop=True)
+    pole_window = close.tail(pole_size).reset_index(drop=True)
     high_idx = int(pole_window.idxmax())
     low_idx  = int(pole_window.idxmin())
 
@@ -48,7 +71,7 @@ def detect(symbol: str, price_data: pd.DataFrame) -> dict[str, Any]:
         float(pole_window.iloc[high_idx]), 1e-9
     )
     min_pole = max(3.0 * adaptive_mm, 0.03)
-    if pole_move < min_pole or low_idx - high_idx > 16:
+    if pole_move < min_pole or low_idx - high_idx > max_pole_bars:
         return result
 
     pole_height = float(pole_window.iloc[high_idx]) - float(pole_window.iloc[low_idx])
@@ -97,6 +120,9 @@ def detect(symbol: str, price_data: pd.DataFrame) -> dict[str, Any]:
         regime=market_regime_score(df),
         momentum=momentum_score(df),
     )
+    # Span bonus: larger flags are more significant
+    span = (last_idx - (len(close) - len(pole_window) + high_idx)) / max(total_bars, 1)
+    probability = min(probability + span * 15, 99.0)
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=False)
 
     first_idx = int(min(xh[0], xl[0]))
@@ -108,13 +134,29 @@ def detect(symbol: str, price_data: pd.DataFrame) -> dict[str, Any]:
     pole_top_price     = float(pole_window.iloc[high_idx])
     pole_bottom_price  = float(pole_window.iloc[low_idx])
 
+    # ── Draw flag channel through ACTUAL swing pivots, extended forward ──
+    fwd_idx = last_idx + 10
+    fh0 = highs[0]; fh1 = highs[-1]
+    gh0, gh1 = global_start + int(fh0["index"]), global_start + int(fh1["index"])
+    h_run = max(gh1 - gh0, 1)
+    h_sl = (float(fh1["price"]) - float(fh0["price"])) / h_run
+    h_fwd = float(fh1["price"]) + h_sl * (fwd_idx - gh1)
+
+    fl0 = lows[0]; fl1 = lows[-1]
+    gl0, gl1 = global_start + int(fl0["index"]), global_start + int(fl1["index"])
+    l_run = max(gl1 - gl0, 1)
+    l_sl = (float(fl1["price"]) - float(fl0["price"])) / l_run
+    l_fwd = float(fl1["price"]) + l_sl * (fwd_idx - gl1)
+
     overlay_lines = [
-        # Flagpole (bearish: price drops sharply)
+        # Flagpole: thick bold line (bearish drop)
         [[pole_top_global, pole_top_price], [pole_bottom_global, pole_bottom_price]],
-        # Flag channel: upper trendline
-        [[g_first, float(h_slope * first_idx + h_int)], [last_idx, upper_now]],
-        # Flag channel: lower trendline
-        [[g_first, float(l_slope * first_idx + l_int)], [last_idx, lower_now]],
+        # Flag channel: through actual swing highs, extended forward
+        [[gh0, float(fh0["price"])], [fwd_idx, round(h_fwd, 4)]],
+        # Flag channel: through actual swing lows, extended forward
+        [[gl0, float(fl0["price"])], [fwd_idx, round(l_fwd, 4)]],
+        # Measured move: breakout → target (pole projection downward)
+        [[last_idx, round(breakout, 4)], [last_idx, round(target, 4)]],
     ]
 
     result.update({
@@ -127,7 +169,9 @@ def detect(symbol: str, price_data: pd.DataFrame) -> dict[str, Any]:
         "probability":        round(probability, 2),
         "direction":          "bearish",
         "points": [[global_start + p["index"], p["price"]] for p in highs[-2:] + lows[-2:]],
+        "point_labels":       ["FLAG H1", "FLAG H2", "FLAG L1", "FLAG L2"],
         "overlay_lines":      overlay_lines,
-        "overlay_line_roles": ["pole", "resistance", "support"],
+        "overlay_line_roles": ["pole", "resistance", "support", "measured_move"],
+        "fill_zone": {"upper": 1, "lower": 2, "color": "#FF3B30", "opacity": 0.15},
     })
     return result

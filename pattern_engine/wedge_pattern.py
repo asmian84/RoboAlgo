@@ -88,7 +88,6 @@ def _detect_rising_wedge(df: pd.DataFrame, highs: list, lows: list) -> dict[str,
     if height / mean_price < _MIN_HEIGHT_RATIO:
         return result
 
-    # Wedge span: from oldest pivot to last bar
     first_idx = int(min(rh[0]["index"], rl[0]["index"]))
 
     breakout    = float(support)
@@ -105,14 +104,37 @@ def _detect_rising_wedge(df: pd.DataFrame, highs: list, lows: list) -> dict[str,
     )
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=False)
 
+    # ── Draw lines through ACTUAL swing pivots, extended forward ──────
+    fwd_idx = last_idx + 15
+    # Upper line: first swing high → last swing high → extended forward
+    h0_idx, h0_p = int(rh[0]["index"]), float(rh[0]["price"])
+    h1_idx, h1_p = int(rh[-1]["index"]), float(rh[-1]["price"])
+    h_run = max(h1_idx - h0_idx, 1)
+    h_sl  = (h1_p - h0_p) / h_run
+    h_fwd = h1_p + h_sl * (fwd_idx - h1_idx)
+
+    # Lower line: first swing low → last swing low → extended forward
+    l0_idx, l0_p = int(rl[0]["index"]), float(rl[0]["price"])
+    l1_idx, l1_p = int(rl[-1]["index"]), float(rl[-1]["price"])
+    l_run = max(l1_idx - l0_idx, 1)
+    l_sl  = (l1_p - l0_p) / l_run
+    l_fwd = l1_p + l_sl * (fwd_idx - l1_idx)
+
     overlay_lines = [
-        # Upper resistance trendline
-        [[first_idx, float(h_slope * first_idx + h_int)], [last_idx, float(resistance)]],
-        # Lower support trendline
-        [[first_idx, float(l_slope * first_idx + l_int)], [last_idx, float(support)]],
-        # Breakdown extension (dashed)
-        [[last_idx, float(support)], [last_idx + 20, float(l_slope * (last_idx + 20) + l_int)]],
+        # Upper resistance: through actual swing highs, extended forward
+        [[h0_idx, h0_p], [fwd_idx, round(h_fwd, 4)]],
+        # Lower support: through actual swing lows, extended forward
+        [[l0_idx, l0_p], [fwd_idx, round(l_fwd, 4)]],
+        # Measured move: breakout → target (shows expected drop)
+        [[last_idx, round(breakout, 4)], [last_idx, round(target, 4)]],
     ]
+
+    # Points: all swing pivots for circle markers
+    all_pts = [[int(p["index"]), float(p["price"])] for p in rh] + \
+              [[int(p["index"]), float(p["price"])] for p in rl]
+    all_pts.sort(key=lambda x: x[0])
+    pt_labels = [f"H{i+1}" if any(p["index"] == pt[0] and p["price"] == pt[1] for p in rh)
+                 else f"L{i+1}" for i, pt in enumerate(all_pts)]
 
     result.update({
         "pattern_name":       "Rising Wedge",
@@ -123,21 +145,15 @@ def _detect_rising_wedge(df: pd.DataFrame, highs: list, lows: list) -> dict[str,
         "confidence":         round(prob, 2),
         "probability":        round(prob, 2),
         "direction":          "bearish",
-        "points": [
-            [int(rh[0]["index"]),  float(rh[0]["price"])],
-            [int(rh[-1]["index"]), float(rh[-1]["price"])],
-            [int(rl[0]["index"]),  float(rl[0]["price"])],
-            [int(rl[-1]["index"]), float(rl[-1]["price"])],
-        ],
-        "point_labels":       ["H1", "H2", "L1", "L2"],
+        "points":             all_pts,
+        "point_labels":       pt_labels,
         "overlay_lines":      overlay_lines,
-        "overlay_line_roles": ["resistance", "support", "neckline_ext"],
-        # Red fill — bearish squeeze
+        "overlay_line_roles": ["resistance", "support", "measured_move"],
         "fill_zone": {
             "upper":   0,
             "lower":   1,
             "color":   "#ef4444",
-            "opacity": 0.20,
+            "opacity": 0.10,
         },
     })
     return result
@@ -197,14 +213,31 @@ def _detect_falling_wedge(df: pd.DataFrame, highs: list, lows: list) -> dict[str
     )
     status = status_from_levels(df["close"], breakout, invalidation, target, bullish=True)
 
+    # ── Draw lines through ACTUAL swing pivots, extended forward ──────
+    fwd_idx = last_idx + 15
+    h0_idx, h0_p = int(rh[0]["index"]), float(rh[0]["price"])
+    h1_idx, h1_p = int(rh[-1]["index"]), float(rh[-1]["price"])
+    h_run = max(h1_idx - h0_idx, 1)
+    h_sl  = (h1_p - h0_p) / h_run
+    h_fwd = h1_p + h_sl * (fwd_idx - h1_idx)
+
+    l0_idx, l0_p = int(rl[0]["index"]), float(rl[0]["price"])
+    l1_idx, l1_p = int(rl[-1]["index"]), float(rl[-1]["price"])
+    l_run = max(l1_idx - l0_idx, 1)
+    l_sl  = (l1_p - l0_p) / l_run
+    l_fwd = l1_p + l_sl * (fwd_idx - l1_idx)
+
     overlay_lines = [
-        # Upper resistance trendline
-        [[first_idx, float(h_slope * first_idx + h_int)], [last_idx, float(resistance)]],
-        # Lower support trendline
-        [[first_idx, float(l_slope * first_idx + l_int)], [last_idx, float(support)]],
-        # Breakout extension (dashed)
-        [[last_idx, float(resistance)], [last_idx + 20, float(h_slope * (last_idx + 20) + h_int)]],
+        [[h0_idx, h0_p], [fwd_idx, round(h_fwd, 4)]],
+        [[l0_idx, l0_p], [fwd_idx, round(l_fwd, 4)]],
+        [[last_idx, round(breakout, 4)], [last_idx, round(target, 4)]],
     ]
+
+    all_pts = [[int(p["index"]), float(p["price"])] for p in rh] + \
+              [[int(p["index"]), float(p["price"])] for p in rl]
+    all_pts.sort(key=lambda x: x[0])
+    pt_labels = [f"H{i+1}" if any(p["index"] == pt[0] and p["price"] == pt[1] for p in rh)
+                 else f"L{i+1}" for i, pt in enumerate(all_pts)]
 
     result.update({
         "pattern_name":       "Falling Wedge",
@@ -215,38 +248,61 @@ def _detect_falling_wedge(df: pd.DataFrame, highs: list, lows: list) -> dict[str
         "confidence":         round(prob, 2),
         "probability":        round(prob, 2),
         "direction":          "bullish",
-        "points": [
-            [int(rh[0]["index"]),  float(rh[0]["price"])],
-            [int(rh[-1]["index"]), float(rh[-1]["price"])],
-            [int(rl[0]["index"]),  float(rl[0]["price"])],
-            [int(rl[-1]["index"]), float(rl[-1]["price"])],
-        ],
-        "point_labels":       ["H1", "H2", "L1", "L2"],
+        "points":             all_pts,
+        "point_labels":       pt_labels,
         "overlay_lines":      overlay_lines,
-        "overlay_line_roles": ["resistance", "support", "neckline_ext"],
-        # Green/teal fill — bullish compression
+        "overlay_line_roles": ["resistance", "support", "measured_move"],
         "fill_zone": {
             "upper":   0,
             "lower":   1,
             "color":   "#22c55e",
-            "opacity": 0.20,
+            "opacity": 0.10,
         },
     })
     return result
 
 
 def detect(symbol: str, price_data: pd.DataFrame) -> list[dict[str, Any]]:
-    """Return [Rising Wedge, Falling Wedge] detections."""
+    """Return [Rising Wedge, Falling Wedge] detections.
+
+    Multi-scale scan: tries progressively larger minimum-move scales so both
+    short-term and full-chart wedges are caught.  Span bonus rewards
+    patterns that encompass the entire chart window.
+    """
     if price_data is None or len(price_data) < 50:
         return [base_result("Rising Wedge"), base_result("Falling Wedge")]
 
     df = price_data.sort_values("date").reset_index(drop=True).copy()
     adaptive_mm = compute_adaptive_minimum_move(df)
-    swings = detect_swings(df, minimum_move=adaptive_mm)
-    highs  = swings["swing_highs"]
-    lows   = swings["swing_lows"]
+    total_bars = len(df)
 
-    return [
-        _detect_rising_wedge(df, highs, lows),
-        _detect_falling_wedge(df, highs, lows),
-    ]
+    best_rising  = base_result("Rising Wedge")
+    best_falling = base_result("Falling Wedge")
+
+    for scale in [1.0, 2.0, 3.0, 5.0, 8.0, 12.0]:
+        mm = adaptive_mm * scale
+        swings = detect_swings(df, minimum_move=mm)
+        highs = swings["swing_highs"]
+        lows  = swings["swing_lows"]
+
+        for detect_fn, best_key in [
+            (_detect_rising_wedge, 'rising'),
+            (_detect_falling_wedge, 'falling'),
+        ]:
+            r = detect_fn(df, highs, lows)
+            conf = float(r.get("confidence", 0.0))
+            if conf > 0:
+                all_idx = [p["index"] for p in highs + lows]
+                if all_idx:
+                    span = (max(all_idx) - min(all_idx)) / max(total_bars, 1)
+                    conf += span * 15
+                    r["confidence"] = round(min(conf, 99.0), 2)
+                    r["probability"] = r["confidence"]
+            best_ref = best_rising if best_key == 'rising' else best_falling
+            if conf > float(best_ref.get("confidence", 0.0)):
+                if best_key == 'rising':
+                    best_rising = r
+                else:
+                    best_falling = r
+
+    return [best_rising, best_falling]

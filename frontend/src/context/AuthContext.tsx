@@ -1,47 +1,34 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import type { Session, User } from '@supabase/supabase-js'
-import { supabase } from '../lib/supabase'
+import { createContext, useContext, type ReactNode } from 'react'
+
+// Supabase temporarily disabled — auth is bypassed locally.
+// To reconnect: restore the original Supabase-backed implementation.
+const FAKE_USER = { email: 'local@dev' } as { email: string }
+const FAKE_SESSION = { user: FAKE_USER } as { user: typeof FAKE_USER }
 
 interface AuthContextValue {
-  session: Session | null
-  user:    User    | null
+  session: typeof FAKE_SESSION | null
+  user: typeof FAKE_USER | null
   loading: boolean
   signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue>({
-  session: null,
-  user:    null,
-  loading: true,
+  session: FAKE_SESSION,
+  user: FAKE_USER,
+  loading: false,
   signOut: async () => {},
 })
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setLoading(false)
-    })
-
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      setLoading(false)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [])
-
-  const signOut = async () => {
-    await supabase.auth.signOut()
-  }
-
   return (
-    <AuthContext.Provider value={{ session, user: session?.user ?? null, loading, signOut }}>
+    <AuthContext.Provider
+      value={{
+        session: FAKE_SESSION,
+        user: FAKE_USER,
+        loading: false,
+        signOut: async () => {},
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

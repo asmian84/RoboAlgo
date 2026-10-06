@@ -22,6 +22,7 @@ from api.routers import (
     quant_scanner,
     trade_signals,
     settings,
+    tradingview,
 )
 
 app = FastAPI(title="RoboAlgo API", version="1.0.0")
@@ -30,6 +31,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
+        "http://localhost:5174",
         "https://roboalgo.app",
         "https://www.roboalgo.app",
     ],
@@ -84,6 +86,7 @@ app.include_router(penny_sniper.router,      prefix="/api/penny-sniper",      ta
 app.include_router(quant_scanner.router,     prefix="/api/quant",             tags=["quant_scanner"])
 app.include_router(trade_signals.router,     prefix="/api/trade-signals",     tags=["trade_signals"])
 app.include_router(settings.router,          prefix="/api/settings",          tags=["settings"])
+app.include_router(tradingview.router,       prefix="/api/tv",                tags=["tradingview"])
 
 
 @app.get("/api/health")
@@ -139,6 +142,82 @@ async def startup_scheduler():
     _scheduler_thread = threading.Thread(target=_pipeline_scheduler, daemon=True)
     _scheduler_thread.start()
     logger.info("Pipeline scheduler started - will run every 5 minutes")
+
+    # ── Aggressive cache pre-warming ──────────────────────────────────────
+    # The site's purpose is to scan and find trades.  Data should always be
+    # accumulating in the background so scans are instant from cache.
+    #
+    # Phase 1 (immediate):  50 priority symbols (daily only)
+    # Phase 2 (after 5s):   Full curated universe ~617 (daily + hourly + 15m)
+    # Phase 3 (after 3s):   ALL exchange tickers ~7000 (daily, batched)
+    # Phase 4 (continuous):  Refresh every 5 min (daily+1h all, 15m curated)
+    def _cache_warmup_loop():
+        import time as _time
+        try:
+            from trade_signal_engine.data_cache import update_cache, get_cache_age
+            from trade_signal_engine.universe import OPTIONS_FOCUS, _BROAD_UNIVERSE
+
+            # Phase 1: curated high-priority symbols ASAP (daily only)
+            priority = list(dict.fromkeys(OPTIONS_FOCUS))[:50]
+            if priority:
+                print(f"[CACHE] Phase 1: warming {len(priority)} priority symbols...")
+                update_cache(priority, timeframes=["1d"], batch_size=50)
+                print(f"[CACHE] Phase 1 done.")
+
+            # Phase 2: full curated universe (daily + hourly + 15m for MA breakout filter)
+            _time.sleep(5)
+            curated_list = list(dict.fromkeys(OPTIONS_FOCUS + _BROAD_UNIVERSE))
+            print(f"[CACHE] Phase 2: warming {len(curated_list)} curated symbols (daily + hourly + 15m)...")
+            update_cache(curated_list, timeframes=["1d", "1h", "15m"], batch_size=200)
+            print(f"[CACHE] Phase 2 done. Curated cache is hot.")
+
+            # Phase 3: full exchange universe (daily only, batched)
+            _time.sleep(3)  # let yfinance cool down
+            all_tickers = []
+            try:
+                from trade_signal_engine.universe import _get_all_exchange_tickers
+                all_tickers = _get_all_exchange_tickers()
+                # Remove symbols already cached in phase 2
+                curated_set = set(curated_list)
+                remaining = [t for t in all_tickers if t not in curated_set]
+                total = len(remaining)
+                print(f"[CACHE] Phase 3: warming {total} exchange tickers (daily)...")
+                batch_size = 200
+                num_batches = (total + batch_size - 1) // batch_size
+                for i in range(0, total, batch_size):
+                    batch = remaining[i : i + batch_size]
+                    batch_num = i // batch_size + 1
+                    print(f"[CACHE] Phase 3: batch {batch_num}/{num_batches} ({min(i + batch_size, total)}/{total})...")
+                    try:
+                        update_cache(batch, timeframes=["1d"], batch_size=batch_size)
+                    except Exception as e:
+                        print(f"[CACHE] Phase 3 batch {batch_num} error: {e}")
+                    if i + batch_size < total:
+                        _time.sleep(3)
+                print(f"[CACHE] Phase 3 done. {total} exchange symbols cached.")
+            except Exception as e:
+                print(f"[CACHE] Phase 3 skipped (_get_all_exchange_tickers failed): {e}")
+
+            # Build the combined refresh list (curated + exchange)
+            full_refresh_list = list(dict.fromkeys(curated_list + all_tickers))
+
+            # Phase 4: continuous refresh loop — keep cache perpetually warm
+            while _scheduler_running:
+                _time.sleep(300)  # every 5 min
+                age = get_cache_age()
+                if age > 240:  # >4 min — refresh
+                    print(f"[CACHE] Phase 4 refresh: {len(full_refresh_list)} symbols (age: {age:.0f}s)")
+                    update_cache(full_refresh_list, timeframes=["1d", "1h"], batch_size=200)
+                    # Also refresh 15m for curated universe (needed for MA breakout filter)
+                    print(f"[CACHE] Phase 4 refresh: {len(curated_list)} curated symbols (15m)...")
+                    update_cache(curated_list, timeframes=["15m"], batch_size=200)
+                    print(f"[CACHE] Phase 4 refresh done.")
+
+        except Exception as e:
+            print(f"[CACHE] Warmup error: {e}")
+            import traceback; traceback.print_exc()
+
+    threading.Thread(target=_cache_warmup_loop, daemon=True).start()
 
 
 @app.on_event("shutdown")

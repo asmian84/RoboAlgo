@@ -584,65 +584,142 @@ def scan_universe(
 
 def _detect_market_regime() -> dict[str, Any]:
     """
-    Detect macro market regime from SPY to determine bull/bear bias.
-    Returns {"regime": str, "bias": str, "hedges": list[str]}
+    Detect macro market regime from SPY + crypto cross-asset signals.
+
+    SPY MA20/MA50 remains the primary vote (it drives the equity universe).
+    Crypto signals — BTC/ETH trend, BTC-vs-SPY correlation break, BTC perp
+    funding, USDT/USDC supply flow — are treated as *modifiers* that can:
+      - Confirm a SPY signal → high-conviction hedges when bearish
+      - Downgrade a SPY BULL to NEUTRAL when crypto diverges or positioning
+        is stretched (equity moves after risk sentiment turns)
+      - Add crypto-specific inverse hedges (BITI) when bearish is confirmed
+
+    Returns:
+      {
+        "regime":    "BULL"|"BEAR"|"CORRECTION"|"RANGE"|"UNKNOWN" (+ optional "_VOLATILE"),
+        "bias":      "LONG"|"SHORT"|"NEUTRAL",
+        "hedges":    list[str] — inverse ETFs / safe havens to add when bearish,
+        "spy_trend": "UP"|"DOWN"|"NEUTRAL",
+        "crypto":    dict — full crypto risk read (see crypto_fetcher.compute_crypto_risk_read),
+        "modifiers": list[str] — human-readable notes about crypto adjustments applied,
+      }
     """
-    result = {"regime": "UNKNOWN", "bias": "NEUTRAL", "hedges": [], "spy_trend": "NEUTRAL",
-              "spy_price": 0.0, "ma20": 0.0, "ma50": 0.0}
+    result: dict[str, Any] = {
+        "regime": "UNKNOWN",
+        "bias": "NEUTRAL",
+        "hedges": [],
+        "spy_trend": "NEUTRAL",
+        # spy_price/ma20/ma50 feed the trade-signal event log
+        # (frontend/src/pages/TradesPage.tsx) and were added on main.
+        "spy_price": 0.0,
+        "ma20": 0.0,
+        "ma50": 0.0,
+        # crypto/modifiers are the cross-asset overlay added on the audit branch.
+        "crypto": {},
+        "modifiers": [],
+    }
     try:
         from trade_signal_engine.collector import _fetch_daily_bars
         spy = _fetch_daily_bars("SPY", bars=60)
-        if spy is not None and len(spy) >= 20:
-            import numpy as np
-            closes = spy["close"].values
-            ma20 = float(np.mean(closes[-20:])) if len(closes) >= 20 else float(np.mean(closes))
-            ma50 = float(np.mean(closes[-50:])) if len(closes) >= 50 else float(np.mean(closes))
-            price = float(closes[-1])
-            result["spy_price"] = round(price, 2)
-            result["ma20"] = round(ma20, 2)
-            result["ma50"] = round(ma50, 2)
+        if spy is None or len(spy) < 20:
+            return result
 
-            # Trend direction
-            if price > ma20 > ma50:
-                result["regime"] = "BULL"
-                result["bias"] = "LONG"
-                result["spy_trend"] = "UP"
-            elif price < ma20 < ma50:
-                result["regime"] = "BEAR"
-                result["bias"] = "SHORT"
-                result["spy_trend"] = "DOWN"
-                # Auto-include inverse/hedge ETFs
-                result["hedges"] = [
-                    "SQQQ", "SPXS", "SDOW", "TZA", "SOXS", "LABD",
-                    "FAZ", "TECS", "DUST", "UVXY", "VIXY", "VXX",
-                    "SH", "PSQ", "DOG", "RWM",  # 1x inverse
-                    "TLT", "GLD", "SLV",          # safe havens
-                ]
-            elif price < ma50:
-                result["regime"] = "CORRECTION"
-                result["bias"] = "SHORT"
-                result["spy_trend"] = "DOWN"
-                result["hedges"] = [
-                    "SQQQ", "SPXS", "UVXY", "VXX", "SH", "TLT", "GLD",
-                ]
-            else:
-                result["regime"] = "RANGE"
+        import numpy as np
+        closes = spy["close"].values
+        ma20 = float(np.mean(closes[-20:])) if len(closes) >= 20 else float(np.mean(closes))
+        ma50 = float(np.mean(closes[-50:])) if len(closes) >= 50 else float(np.mean(closes))
+        price = float(closes[-1])
+        result["spy_price"] = round(price, 2)
+        result["ma20"] = round(ma20, 2)
+        result["ma50"] = round(ma50, 2)
+
+        # ── SPY-only base decision (unchanged behavior)
+        if price > ma20 > ma50:
+            result["regime"] = "BULL"
+            result["bias"] = "LONG"
+            result["spy_trend"] = "UP"
+        elif price < ma20 < ma50:
+            result["regime"] = "BEAR"
+            result["bias"] = "SHORT"
+            result["spy_trend"] = "DOWN"
+            result["hedges"] = [
+                "SQQQ", "SPXS", "SDOW", "TZA", "SOXS", "LABD",
+                "FAZ", "TECS", "DUST", "UVXY", "VIXY", "VXX",
+                "SH", "PSQ", "DOG", "RWM",
+                "TLT", "GLD", "SLV",
+            ]
+        elif price < ma50:
+            result["regime"] = "CORRECTION"
+            result["bias"] = "SHORT"
+            result["spy_trend"] = "DOWN"
+            result["hedges"] = ["SQQQ", "SPXS", "UVXY", "VXX", "SH", "TLT", "GLD"]
+        else:
+            result["regime"] = "RANGE"
+            result["bias"] = "NEUTRAL"
+            result["spy_trend"] = "NEUTRAL"
+
+        # ── Volatility expansion (unchanged)
+        highs = spy["high"].values
+        lows = spy["low"].values
+        tr = highs[-14:] - lows[-14:]
+        atr_recent = float(np.mean(tr[-5:]))
+        atr_avg = float(np.mean(tr))
+        if atr_recent > atr_avg * 1.5:
+            result["regime"] += "_VOLATILE"
+            if "UVXY" not in result["hedges"]:
+                result["hedges"].extend(["UVXY", "VXX", "VIXY"])
+
+        # ── Crypto cross-asset overlay (new)
+        try:
+            from data_engine.crypto_fetcher import compute_crypto_risk_read
+            crypto = compute_crypto_risk_read(spy_closes=np.asarray(closes, dtype=float))
+            result["crypto"] = crypto
+
+            risk = crypto.get("risk_signal", "NEUTRAL")
+            btc_trend = crypto.get("btc_trend", "NEUTRAL")
+
+            # Rule 1: SPY BULL + crypto DIVERGE/STRETCHED → downgrade to NEUTRAL
+            # Rationale: positioning stretched or risk sentiment turning ahead
+            # of equity price action. Don't add hedges, but stop taking longs.
+            if result["bias"] == "LONG" and risk in ("DIVERGE", "STRETCHED"):
                 result["bias"] = "NEUTRAL"
-                result["spy_trend"] = "NEUTRAL"
+                result["modifiers"].append(f"downgraded LONG→NEUTRAL: crypto {risk.lower()}")
 
-            # Check for recent volatility expansion (VIX proxy via ATR)
-            highs = spy["high"].values
-            lows = spy["low"].values
-            tr = highs[-14:] - lows[-14:]
-            atr_recent = float(np.mean(tr[-5:]))
-            atr_avg = float(np.mean(tr))
-            if atr_recent > atr_avg * 1.5:
-                result["regime"] += "_VOLATILE"
-                if "UVXY" not in result["hedges"]:
-                    result["hedges"].extend(["UVXY", "VXX", "VIXY"])
+            # Rule 2: SPY BEAR + crypto CONFIRM_SHORT → add crypto-hedges
+            if result["bias"] == "SHORT" and risk == "CONFIRM_SHORT":
+                for h in ("BITI", "BITS"):  # inverse-BTC ETFs
+                    if h not in result["hedges"]:
+                        result["hedges"].append(h)
+                result["modifiers"].append("high-conviction bear: added crypto inverse ETFs")
 
+            # Rule 3: SPY RANGE + crypto CONFIRM_SHORT → nudge to CORRECTION-lite
+            # Crypto often leads sentiment; if equities are drifting but crypto
+            # is confirming shorts, prep some hedges.
+            if result["bias"] == "NEUTRAL" and risk == "CONFIRM_SHORT":
+                result["modifiers"].append("crypto confirming short — adding light hedges")
+                for h in ("UVXY", "SH", "GLD"):
+                    if h not in result["hedges"]:
+                        result["hedges"].append(h)
+
+            # Rule 4: correlation break — always worth flagging
+            if crypto.get("correlation_broken"):
+                result["modifiers"].append("BTC-SPY correlation broken (regime shift risk)")
+
+            logger.info(
+                "Market regime: %s, bias: %s, SPY=%.2f MA20=%.2f MA50=%.2f | "
+                "BTC=%s ETH=%s funding=%s stables=%s risk=%s%s",
+                result["regime"], result["bias"], price, ma20, ma50,
+                btc_trend, crypto.get("eth_trend"),
+                crypto.get("funding_state"), crypto.get("stablecoin_flow"),
+                risk,
+                f" [{'; '.join(result['modifiers'])}]" if result["modifiers"] else "",
+            )
+        except Exception as ce:
+            # Crypto layer is optional — never break the base regime signal
+            logger.warning("Crypto regime overlay failed (using SPY-only): %s", ce)
             logger.info("Market regime: %s, bias: %s, SPY=%.2f MA20=%.2f MA50=%.2f",
                         result["regime"], result["bias"], price, ma20, ma50)
+
     except Exception as e:
         logger.warning("Market regime detection failed: %s", e)
     return result

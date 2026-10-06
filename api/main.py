@@ -21,8 +21,13 @@ from api.routers import (
     rocket_scanner, gamma_tracker, sniper_entry, sniper_gamma, penny_sniper,
     quant_scanner,
     trade_signals,
+    crypto_signals,
+    lab,
+    trading_control,
     settings,
     tradingview,
+    finder,
+    paper_account,
 )
 
 app = FastAPI(title="RoboAlgo API", version="1.0.0")
@@ -85,8 +90,13 @@ app.include_router(sniper_gamma.router,      prefix="/api/sniper-gamma",      ta
 app.include_router(penny_sniper.router,      prefix="/api/penny-sniper",      tags=["penny_sniper"])
 app.include_router(quant_scanner.router,     prefix="/api/quant",             tags=["quant_scanner"])
 app.include_router(trade_signals.router,     prefix="/api/trade-signals",     tags=["trade_signals"])
+app.include_router(crypto_signals.router,    prefix="/api/crypto-signals",    tags=["crypto_signals"])
+app.include_router(lab.router,               prefix="/api/lab",               tags=["lab"])
+app.include_router(finder.router,            prefix="/api/finder",            tags=["finder"])
+app.include_router(trading_control.router, prefix="/api/auto-trader", tags=["auto_trader"])
 app.include_router(settings.router,          prefix="/api/settings",          tags=["settings"])
 app.include_router(tradingview.router,       prefix="/api/tv",                tags=["tradingview"])
+app.include_router(paper_account.router,     prefix="/api/paper-account",     tags=["paper_account"])
 
 
 @app.get("/api/health")
@@ -100,6 +110,7 @@ def health_check():
 # and other derived data consistently fresh, without blocking the API.
 
 import logging
+import os
 import threading
 import time
 from datetime import datetime
@@ -135,13 +146,37 @@ def _pipeline_scheduler():
 
 @app.on_event("startup")
 async def startup_scheduler():
-    """Start the background pipeline scheduler on server startup."""
+    """Optionally start the in-process pipeline scheduler.
+
+    OFF by default, and that default is deliberate. This thread POSTs to
+    /api/pipeline/run every five minutes, which regenerates features for ~239
+    instruments inside this process. Uvicorn runs one worker here, so for
+    roughly two minutes out of every five the API answered nothing at all —
+    every page in the app intermittently failed with a network error, which
+    looked like a frontend bug and was not.
+
+    Scheduling belongs in Celery beat (infrastructure/scheduler.py), which
+    already owns the pipeline stages and runs them in a worker process where a
+    two-minute job blocks nothing. Set ROBOALGO_INPROCESS_SCHEDULER=1 only if
+    you are deliberately running without a Celery worker and accept that the
+    API will stall periodically.
+    """
     global _scheduler_thread, _scheduler_running
+
+    if os.getenv("ROBOALGO_INPROCESS_SCHEDULER") != "1":
+        logger.info(
+            "In-process pipeline scheduler disabled (default). Celery beat owns "
+            "scheduling; set ROBOALGO_INPROCESS_SCHEDULER=1 to re-enable."
+        )
+        return
 
     _scheduler_running = True
     _scheduler_thread = threading.Thread(target=_pipeline_scheduler, daemon=True)
     _scheduler_thread.start()
-    logger.info("Pipeline scheduler started - will run every 5 minutes")
+    logger.warning(
+        "In-process pipeline scheduler ENABLED - this API will stall for ~2 "
+        "minutes out of every 5 while the pipeline runs."
+    )
 
     # ── Aggressive cache pre-warming ──────────────────────────────────────
     # The site's purpose is to scan and find trades.  Data should always be

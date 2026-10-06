@@ -39,6 +39,27 @@ MIN_COMP_DURATION    = 3      # minimum compression bars required before valid b
 MIN_TRIGGERS         = 2      # minimum triggers needed to classify as breakout
 
 
+def _float_or(value, default: float) -> float:
+    """Coerce to float, treating None and NaN as the default.
+
+    `dict.get(key, default)` does not help when a joined DataFrame has the key
+    present with a NaN value, and `value or default` does not either, because
+    NaN is truthy.
+    """
+    if value is None:
+        return default
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return default
+    return default if out != out else out  # NaN != NaN
+
+
+def _int_or(value, default: int) -> int:
+    """Same as _float_or, but returns an int. int(NaN) raises ValueError."""
+    return int(_float_or(value, float(default)))
+
+
 class BreakoutEngine:
     """
     Detects breakout events from range compressions.
@@ -207,8 +228,15 @@ class BreakoutEngine:
             is_comp       = bool(row.get("is_compressed", False))
             r_high        = row.get("range_high")
             r_low         = row.get("range_low")
-            comp_duration = int(row.get("compression_duration", 0))
-            comp_score    = float(row.get("compression_score", 0) or 0)
+            # These columns come from a left-join against compression data, so
+            # a bar with no compression row has the key PRESENT and NaN. A
+            # dict.get default only covers a MISSING key, and `NaN or 0`
+            # evaluates to NaN because NaN is truthy — so both of these needed
+            # an explicit NaN check. Without it int(NaN) raised on the first
+            # bar of every symbol, which _process_instrument's caller swallowed
+            # as a warning: the breakout table had 0 rows since inception.
+            comp_duration = _int_or(row.get("compression_duration"), 0)
+            comp_score    = _float_or(row.get("compression_score"), 0.0)
 
             # Carry forward last known range when exiting compression
             if is_comp and not pd.isna(r_high) and not pd.isna(r_low):

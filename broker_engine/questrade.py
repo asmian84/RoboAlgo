@@ -231,11 +231,13 @@ class QuestradeBroker(BrokerBase):
     def place_bracket_order(
         self, symbol: str, qty: int, side: str,
         limit_price: float, take_profit: float, stop_loss: float,
+        client_order_id: Optional[str] = None,
     ) -> OrderResult:
         """
         Questrade doesn't natively support bracket orders.
         Simulated: entry limit + separate stop and limit-profit orders.
         """
+        logger.debug("client_order_id not supported by %s", self.name)
         # Place entry
         entry = self.place_limit_order(symbol, qty, side, limit_price)
         # Companion exit orders (submitted immediately; attach manually)

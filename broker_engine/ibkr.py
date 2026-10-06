@@ -177,7 +177,9 @@ class IBKRBroker(BrokerBase):
     def place_bracket_order(
         self, symbol: str, qty: int, side: str,
         limit_price: float, take_profit: float, stop_loss: float,
+        client_order_id: Optional[str] = None,
     ) -> OrderResult:
+        logger.debug("client_order_id not supported by %s", self.name)
         from ib_insync import Stock, BracketOrder
         ib = self._connect()
         contract = Stock(symbol.upper(), "SMART", "USD")

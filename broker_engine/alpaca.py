@@ -182,6 +182,7 @@ class AlpacaBroker(BrokerBase):
     def place_bracket_order(
         self, symbol: str, qty: int, side: str,
         limit_price: float, take_profit: float, stop_loss: float,
+        client_order_id: Optional[str] = None,
     ) -> OrderResult:
         """
         Bracket order: entry limit + auto take-profit limit + auto stop-loss.
@@ -192,7 +193,7 @@ class AlpacaBroker(BrokerBase):
         )
         from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
         client = self._get_client()
-        req = LimitOrderRequest(
+        req_kwargs = dict(
             symbol=symbol.upper(),
             qty=qty,
             side=OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL,
@@ -202,8 +203,19 @@ class AlpacaBroker(BrokerBase):
             take_profit=TakeProfitRequest(limit_price=round(take_profit, 2)),
             stop_loss=StopLossRequest(stop_price=round(stop_loss, 2)),
         )
+        if client_order_id:
+            req_kwargs["client_order_id"] = client_order_id
+        req = LimitOrderRequest(**req_kwargs)
         order = client.submit_order(req)
         return self._map_order(order)
+
+    def get_order_by_client_id(self, client_order_id: str) -> Optional[OrderResult]:
+        try:
+            client = self._get_client()
+            order = client.get_order_by_client_id(client_order_id)
+            return self._map_order(order)
+        except Exception:
+            return None
 
     def cancel_order(self, order_id: str) -> bool:
         client = self._get_client()
@@ -277,4 +289,5 @@ class AlpacaBroker(BrokerBase):
             filled_qty=int(float(order.filled_qty or 0)),
             submitted_at=order.submitted_at,
             broker="alpaca",
+            client_order_id=getattr(order, "client_order_id", None),
         )

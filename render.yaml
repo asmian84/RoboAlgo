@@ -13,6 +13,32 @@ services:
         fromDatabase:
           name: postgres_db
           property: connectionString
+      - key: ROBOALGO_REDIS_URL
+        fromService:
+          name: roboalgo-redis
+          type: redis
+          property: connectionString
+      # Required for the auto-trader control guard. Without it every
+      # risk-increasing endpoint (/start, /config, /cycle/run) returns 503.
+      # Risk-reducing endpoints (/stop, /kill on=true) stay open regardless,
+      # so an operator can always halt the system.
+      - key: ROBOALGO_CONTROL_TOKEN
+        sync: false
+      # Read-path market data. The /api/av and /api/finder routers query
+      # AlphaVantage directly to serve live scans, so the web service needs
+      # the key too — see the note on roboalgo-worker for what happens
+      # without it.
+      - key: ALPHAVANTAGE_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      # Free tier — see the note on roboalgo-worker.
+      - key: ALPHAVANTAGE_RPM
+        value: "5"
+      # Deliberately NOT given ALPACA credentials: this service has no
+      # authentication layer and never places orders. Consequence:
+      # /status reports is_paper: null. Paper-vs-live is enforced in the
+      # worker by config.assert_mode_safe(), not by this display.
     disk:
       name: data
       mountPath: /data
@@ -33,6 +59,80 @@ services:
     ipAllowList:
       - source: 0.0.0.0/0
         description: Allow all
+
+  # Redis (Celery broker/result backend)
+  - type: redis
+    name: roboalgo-redis
+    ipAllowList: []
+
+  # Celery Worker
+  - type: worker
+    name: roboalgo-worker
+    env: python
+    plan: standard
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A infrastructure.celery_app worker --loglevel=info --queues=pipeline,symbols,trading --concurrency=2
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: postgres_db
+          property: connectionString
+      - key: ROBOALGO_REDIS_URL
+        fromService:
+          name: roboalgo-redis
+          type: redis
+          property: connectionString
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_PAPER
+        sync: false
+      - key: ROBOALGO_CONTROL_TOKEN
+        sync: false
+      # Market data credentials. This service runs the `pipeline` queue, so it
+      # is the process that actually ingests prices — without these it has no
+      # Finnhub key at all and AlphaVantage silently falls back to the
+      # hardcoded free-tier default in data_engine/alphavantage_fetcher.py,
+      # leaving yfinance as the only working source in production.
+      - key: ALPHAVANTAGE_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      # Requests per minute allowed by the AlphaVantage plan. Not a secret, but
+      # it MUST match the plan or the code throttles itself wrongly in one
+      # direction or the other. The key currently in .env is free tier —
+      # verified by AV rejecting TIME_SERIES_DAILY_ADJUSTED with "this is a
+      # premium endpoint" — so 5 is correct. Raise this only when the plan is
+      # actually upgraded; 30+ also flips _IS_PREMIUM and doubles the thread
+      # pool in data_engine/alphavantage_fetcher.py.
+      - key: ALPHAVANTAGE_RPM
+        value: "5"
+
+  # Celery Beat
+  - type: worker
+    name: roboalgo-beat
+    env: python
+    plan: standard
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A infrastructure.scheduler beat --loglevel=info
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: postgres_db
+          property: connectionString
+      - key: ROBOALGO_REDIS_URL
+        fromService:
+          name: roboalgo-redis
+          type: redis
+          property: connectionString
+      # Least privilege: beat only enqueues scheduled tasks — it never calls a
+      # broker and never serves the control API, so it carries no broker
+      # credentials and no control token. Those live on roboalgo-worker only.
 
 envVars:
   - key: VITE_API_BASE_URL

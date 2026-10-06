@@ -15,8 +15,13 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchored to the repo root on purpose. An unanchored `lib/` matches at any
+# depth, which silently swallowed frontend/src/lib/ — so the Supabase client
+# (frontend/src/lib/supabase.ts) could never be committed, and every "green"
+# frontend build depended on an untracked, git-invisible file. A clean clone
+# then failed on `Cannot find module '../lib/supabase'`.
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -29,7 +34,10 @@ ENV/
 env/
 
 # Frontend
-node_modules/
+# No trailing slash: "node_modules/" only matches real directories, so a
+# node_modules SYMLINK (used to share one install between git worktrees) slips
+# through and gets committed as an absolute path that breaks every other checkout.
+node_modules
 npm-debug.log
 yarn-error.log
 dist/
@@ -49,3 +57,6 @@ dist/
 
 # git worktrees
 .worktrees/
+
+# Auto-trader local config (never commit — may reflect live-mode intent/keys)
+auto_trader_config.json

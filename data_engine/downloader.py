@@ -50,8 +50,43 @@ def _get_finnhub():
     return _finnhub_client
 
 
+# Finnhub moved daily candles behind a paid tier, so a key that works for quotes
+# can still 403 on every candle request. Without this, a 235-symbol run makes 235
+# guaranteed-failing API calls before falling back to yfinance each time. After a
+# couple of auth failures we stop asking for the rest of the process's life.
+_FINNHUB_AUTH_FAILURES = 0
+_FINNHUB_AUTH_FAILURE_LIMIT = 3
+_FINNHUB_DISABLED = False
+
+
+def _finnhub_unavailable() -> bool:
+    return _FINNHUB_DISABLED
+
+
+def _note_finnhub_failure(exc: Exception) -> None:
+    """Disable Finnhub for this process after repeated auth/permission errors.
+
+    Only auth-shaped failures count. A single symbol 404-ing or rate-limiting is
+    normal and must not disable a working key.
+    """
+    global _FINNHUB_AUTH_FAILURES, _FINNHUB_DISABLED
+    text = str(exc)
+    if not any(code in text for code in ("403", "401")):
+        return
+    _FINNHUB_AUTH_FAILURES += 1
+    if _FINNHUB_AUTH_FAILURES >= _FINNHUB_AUTH_FAILURE_LIMIT and not _FINNHUB_DISABLED:
+        _FINNHUB_DISABLED = True
+        logger.warning(
+            "Finnhub returned auth errors %d times (key lacks candle access); "
+            "skipping Finnhub for the rest of this run and using yfinance directly.",
+            _FINNHUB_AUTH_FAILURES,
+        )
+
+
 def _download_finnhub(symbol: str, start_date: str) -> pd.DataFrame | None:
     """Download OHLCV daily candles from Finnhub."""
+    if _FINNHUB_DISABLED:
+        return None
     client = _get_finnhub()
     if client is None:
         return None
@@ -73,7 +108,10 @@ def _download_finnhub(symbol: str, start_date: str) -> pd.DataFrame | None:
         logger.info(f"Finnhub: {len(df)} rows for {symbol}")
         return df
     except Exception as e:
-        logger.warning(f"Finnhub error for {symbol}: {e}")
+        _note_finnhub_failure(e)
+        # Once disabled we have already explained why; don't repeat per symbol.
+        if not _FINNHUB_DISABLED:
+            logger.warning(f"Finnhub error for {symbol}: {e}")
         return None
 
 

@@ -13,12 +13,15 @@ repeated network/DB hits for chart navigation between tabs.
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 
 from data_engine.loader import DataLoader
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 loader = DataLoader()
@@ -115,18 +118,29 @@ def _compute_indicators(prices: pd.DataFrame) -> pd.DataFrame:
     return df[ind_cols]
 
 
-def _yfinance_fetch(symbol: str, limit: int = 500, yf_interval: str = "1d") -> tuple[pd.DataFrame, pd.DataFrame]:
+def _yfinance_fetch(
+    symbol: str,
+    limit: int = 500,
+    yf_interval: str = "1d",
+    period_override: str | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Fetch OHLCV from yfinance for any bar resolution (1d / 1wk / 1mo).
     Returns (prices_df, indicators_df) both indexed by timezone-naive date.
     Returns (empty, empty) if the symbol is unknown or has no data.
+
+    period_override lets a caller ask for deeper history than the default —
+    used when replacing a stale DB series, where dropping to the 2y default
+    would silently throw away years of chart history.
     """
     try:
         import yfinance as yf
 
         # 2 years is enough for daily charting (MA200 + all TF views up to 2Y)
         # Weekly/monthly use max to give meaningful multi-year bar charts
-        if yf_interval == "1wk":
+        if period_override:
+            period = period_override
+        elif yf_interval == "1wk":
             period = "10y"
         elif yf_interval == "1mo":
             period = "max"
@@ -254,23 +268,59 @@ def _fmp_fetch(symbol: str, limit: int = 500) -> tuple[pd.DataFrame, pd.DataFram
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+# Daily bars go stale over weekends and holidays, so "yesterday" is not a usable
+# threshold. 5 calendar days covers a Fri close + a Mon holiday and still catches
+# an ingestion pipeline that has actually stopped.
+_MAX_DB_AGE_DAYS = 5
+
+
+def _db_age_days(prices: pd.DataFrame) -> int | None:
+    """Calendar days between the newest DB bar and today, or None if unknown."""
+    if prices.empty:
+        return None
+    try:
+        last = pd.Timestamp(prices.index[-1]).normalize()
+        return int((pd.Timestamp.now().normalize() - last).days)
+    except Exception:
+        return None
+
+
 def _fetch_any(symbol: str, limit: int = 500) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Data fetching priority: DB → yfinance → FMP → Alpha Vantage.
+    Data fetching priority: DB → yfinance → FMP → Alpha Vantage (fallback).
+
+    The DB tier is only trusted when it is FRESH. It previously short-circuited
+    on `not prices.empty` alone, so once the ingestion pipeline stopped, this
+    endpoint kept happily serving months-old bars and never fell through — the
+    chart showed a stale series next to a live quote header.
 
     limit=0 is treated identically to limit=500 here — the caller (df_to_records)
     handles the row cap.
     """
-    # 1. Database — pre-computed, sub-millisecond
-    prices = loader.get_prices(symbol)
-    if not prices.empty:
+    # 1. Database — pre-computed, sub-millisecond, but only if it is current
+    db_prices = loader.get_prices(symbol)
+    age = _db_age_days(db_prices)
+
+    if not db_prices.empty and age is not None and age <= _MAX_DB_AGE_DAYS:
         indicators = loader.get_indicators(symbol)
         if indicators.empty:
-            indicators = _compute_indicators(prices)
-        return prices, indicators
+            indicators = _compute_indicators(db_prices)
+        return db_prices, indicators
 
-    # 2. yfinance — 2 years of daily bars, ~200ms
-    prices, indicators = _yfinance_fetch(symbol, limit)
+    if not db_prices.empty:
+        logger.warning(
+            "prices: DB series for %s is %s days stale (last bar %s) — "
+            "falling through to yfinance",
+            symbol, age, db_prices.index[-1],
+        )
+
+    # 2. yfinance. When we are REPLACING a stale DB series, ask for full history:
+    #    the DB had years of bars and silently dropping to the 2y default would
+    #    gut the chart. Splicing fresh bars onto the stale ones is deliberately
+    #    avoided — the two sources adjust for splits/dividends differently, so a
+    #    join would put a fake price step in the middle of the series.
+    period_override = "max" if not db_prices.empty else None
+    prices, indicators = _yfinance_fetch(symbol, limit, period_override=period_override)
     if not prices.empty:
         return prices, indicators
 
@@ -281,7 +331,18 @@ def _fetch_any(symbol: str, limit: int = 500) -> tuple[pd.DataFrame, pd.DataFram
 
     # 4. Alpha Vantage — last resort
     prices, indicators = _alphavantage_fetch(symbol, limit)
-    return prices, indicators
+    if not prices.empty:
+        return prices, indicators
+
+    # 4. Everything live failed. Stale data beats a 404 — serve it rather than
+    #    breaking the chart, having already logged the staleness above.
+    if not db_prices.empty:
+        indicators = loader.get_indicators(symbol)
+        if indicators.empty:
+            indicators = _compute_indicators(db_prices)
+        return db_prices, indicators
+
+    return pd.DataFrame(), pd.DataFrame()
 
 
 @router.get("/prices/{symbol}")

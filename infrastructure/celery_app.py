@@ -35,9 +35,20 @@ app.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
-    # Timezone
-    timezone="UTC",
-    enable_utc=True,
+    # Timezone — market local, deliberately not UTC.
+    #
+    # Every schedule in this system is anchored to the US session (run after
+    # the close, trade during regular hours), and the US session moves against
+    # UTC twice a year. The beat schedule was written in UTC with a comment
+    # claiming it ran "after US market close": 18:30 UTC is 14:30 ET in summer
+    # and 13:30 ET in winter, so it fired 90 minutes to 2.5 hours BEFORE the
+    # 16:00 ET close and wrote a partial session as that day's daily bar.
+    #
+    # Expressing schedules in America/New_York makes the crontabs mean what
+    # they say and tracks DST on its own. Nothing here uses eta=, so this
+    # affects beat scheduling only.
+    timezone="America/New_York",
+    enable_utc=False,
     # Reliability
     task_acks_late=True,
     worker_prefetch_multiplier=1,
@@ -117,6 +128,43 @@ def run_pipeline_stage(self, stage_number: int, **kwargs) -> dict:
     except Exception as exc:
         logger.error("Stage %d failed: %s", stage_number, exc)
         raise self.retry(exc=exc)
+
+
+@app.task(bind=True, name="run_range_engines", max_retries=2)
+def run_range_engines(self, symbol: str | None = None) -> dict:
+    """Recompute range compression and breakout signals, in that order.
+
+    These two are not in `stage_map` and never were, which meant nothing
+    scheduled them: beat ran stages 1-11 and stopped. `range_compressions` and
+    `breakout_signals` are exactly the two tables the Finder reads, so the
+    screener served frozen results indefinitely while prices and indicators
+    updated around it — no error, just a date that never moved.
+
+    They are one task rather than two beat entries because breakout left-joins
+    compression and skips bars whose compression columns are NaN. Run breakout
+    first, or before compression has finished, and it silently produces nothing
+    for the new bars. A single task makes that ordering structural instead of a
+    guess about how long the previous entry takes.
+    """
+    from range_engine.breakout import BreakoutEngine
+    from range_engine.compression import RangeCompressionEngine
+
+    try:
+        compressions = RangeCompressionEngine().compute_and_store(symbol)
+        breakouts = BreakoutEngine().compute_and_store(symbol)
+    except Exception as exc:
+        logger.error("Range engines failed: %s", exc)
+        raise self.retry(exc=exc)
+
+    logger.info(
+        "Range engines completed: %d compressions, %d breakout signals",
+        compressions, breakouts,
+    )
+    return {
+        "compressions": compressions,
+        "breakouts": breakouts,
+        "status": "ok",
+    }
 
 
 @app.task(bind=True, name="run_symbol_stage", max_retries=3)

@@ -24,6 +24,17 @@ services:
       # so an operator can always halt the system.
       - key: ROBOALGO_CONTROL_TOKEN
         sync: false
+      # Read-path market data. The /api/av and /api/finder routers query
+      # AlphaVantage directly to serve live scans, so the web service needs
+      # the key too — see the note on roboalgo-worker for what happens
+      # without it.
+      - key: ALPHAVANTAGE_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      # Free tier — see the note on roboalgo-worker.
+      - key: ALPHAVANTAGE_RPM
+        value: "5"
       # Deliberately NOT given ALPACA credentials: this service has no
       # authentication layer and never places orders. Consequence:
       # /status reports is_paper: null. Paper-vs-live is enforced in the
@@ -81,6 +92,24 @@ services:
         sync: false
       - key: ROBOALGO_CONTROL_TOKEN
         sync: false
+      # Market data credentials. This service runs the `pipeline` queue, so it
+      # is the process that actually ingests prices — without these it has no
+      # Finnhub key at all and AlphaVantage silently falls back to the
+      # hardcoded free-tier default in data_engine/alphavantage_fetcher.py,
+      # leaving yfinance as the only working source in production.
+      - key: ALPHAVANTAGE_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      # Requests per minute allowed by the AlphaVantage plan. Not a secret, but
+      # it MUST match the plan or the code throttles itself wrongly in one
+      # direction or the other. The key currently in .env is free tier —
+      # verified by AV rejecting TIME_SERIES_DAILY_ADJUSTED with "this is a
+      # premium endpoint" — so 5 is correct. Raise this only when the plan is
+      # actually upgraded; 30+ also flips _IS_PREMIUM and doubles the thread
+      # pool in data_engine/alphavantage_fetcher.py.
+      - key: ALPHAVANTAGE_RPM
+        value: "5"
 
   # Celery Beat
   - type: worker

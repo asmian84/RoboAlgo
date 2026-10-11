@@ -4,6 +4,7 @@ import { useCommandCenter } from '../../api/hooks'
 import SideNav from './SideNav'
 import MacroTickerBar from './MacroTickerBar'
 import CommandPalette from '../terminal/CommandPalette'
+import { MacroProvider } from '../../context/MacroContext'
 
 interface Props {
   children: React.ReactNode
@@ -40,7 +41,7 @@ export default function TerminalLayout({ children }: Props) {
   }, [activeSymbol, navigate])
 
   return (
-    <>
+    <MacroProvider>
       <CommandPalette isOpen={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
       <div className="flex h-screen overflow-hidden bg-gray-950 text-gray-100">
@@ -52,6 +53,6 @@ export default function TerminalLayout({ children }: Props) {
           <main className="flex-1 min-h-0 overflow-auto bg-gray-950 p-2">{children}</main>
         </div>
       </div>
-    </>
+    </MacroProvider>
   )
 }

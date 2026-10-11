@@ -25,8 +25,19 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_AV_KEY  = os.getenv("ALPHAVANTAGE_API_KEY", "H1F3HH0CLFRSVU51")
+# No hardcoded fallback. There used to be a literal key here, which meant a
+# deployment that forgot ALPHAVANTAGE_API_KEY did not fail — it quietly ran on
+# a committed free-tier key at 5 req/min and looked like a slow network. A
+# missing key should be visible. That key is in this repo's git history and in
+# settings.json, so treat it as public and rotate it.
+_AV_KEY  = os.getenv("ALPHAVANTAGE_API_KEY", "")
 _AV_BASE = "https://www.alphavantage.co/query"
+
+if not _AV_KEY:
+    logger.warning(
+        "ALPHAVANTAGE_API_KEY is not set — every AlphaVantage request will be "
+        "rejected. Price ingestion will fall through to yfinance only."
+    )
 
 # ── Rate limiting ──────────────────────────────────────────────────────────
 # AV Free = 5 req/min → delay 0.25s/call
@@ -250,7 +261,24 @@ def fetch_daily_ohlcv(
 
     ts = data.get("Time Series (Daily)", {})
     if not ts:
-        logger.debug("No price data for %s", symbol)
+        # AlphaVantage answers HTTP 200 for refusals and puts the reason in
+        # "Information" / "Note" / "Error Message". Logging this at debug as
+        # "no price data" made a permanent, fixable fault ("this is a premium
+        # endpoint") indistinguishable from a symbol that genuinely has no
+        # bars, and every caller just saw an empty DataFrame.
+        #
+        # TIME_SERIES_DAILY_ADJUSTED above is premium-only. On a free key this
+        # function cannot succeed for ANY symbol, however many times it is
+        # called. Surface that instead of swallowing it.
+        reason = (
+            data.get("Information")
+            or data.get("Note")
+            or data.get("Error Message")
+        )
+        if reason:
+            logger.warning("AlphaVantage refused %s: %s", symbol, reason)
+        else:
+            logger.debug("No price data for %s", symbol)
         return pd.DataFrame()
 
     rows = []

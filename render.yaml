@@ -2,7 +2,7 @@ services:
   # FastAPI Backend
   - type: web
     name: roboalgo-api
-    env: python
+    runtime: python
     plan: standard
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
@@ -45,20 +45,46 @@ services:
       sizeGB: 10
 
   # React Frontend
-  - type: static_site
+  #
+  # Render has no `static_site` type: a static site is `type: web` with
+  # `runtime: static`.
+  #
+  # The browser calls the API through relative `/api/...` URLs. About 20 call
+  # sites (Finder, Paper, Settings, Chart, SideNav) hardcode that prefix and
+  # bypass the axios baseURL in src/api/client.ts, so on a static host they would
+  # hit this site instead of the API. `/api/*` is therefore proxied to the API
+  # service, which is what the dev proxy in frontend/vite.config.ts does locally.
+  # Order matters: the first matching rule wins, so the SPA fallback goes last.
+  #
+  # VITE_API_BASE_URL is deliberately NOT set. It would only redirect the
+  # hooks.ts calls, and the old value (https://roboalgo-api.onrender.com) lacked
+  # the `/api` suffix those paths need. It would also split traffic across two
+  # origins, and the API's CORS list only allows localhost and roboalgo.app.
+  #
+  # Unverified: that Render's rewrite proxy tolerates the >25 s scans
+  # (/api/finder/scan/wide). Check once deployed.
+  - type: web
     name: roboalgo-web
+    runtime: static
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: frontend/dist
     routes:
-      - path: /*
+      - type: rewrite
+        source: /api/*
+        destination: https://roboalgo-api.onrender.com/api/*
+      - type: rewrite
+        source: /*
         destination: /index.html
-
-  # PostgreSQL Database
-  - type: pserv
-    name: postgres_db
-    ipAllowList:
-      - source: 0.0.0.0/0
-        description: Allow all
+    envVars:
+      # frontend/src/lib/supabase.ts calls createClient() at import time, and
+      # supabase-js throws "supabaseUrl is required" on an empty value. Without
+      # these two the bundle fails during evaluation and the page is blank.
+      # Vite inlines them at BUILD time, so changing them needs a redeploy.
+      # Never set VITE_DEV_SKIP_AUTH here: it bypasses authentication.
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
 
   # Redis (Celery broker/result backend)
   - type: redis
@@ -68,7 +94,7 @@ services:
   # Celery Worker
   - type: worker
     name: roboalgo-worker
-    env: python
+    runtime: python
     plan: standard
     buildCommand: pip install -r requirements.txt
     startCommand: celery -A infrastructure.celery_app worker --loglevel=info --queues=pipeline,symbols,trading --concurrency=2
@@ -114,7 +140,7 @@ services:
   # Celery Beat
   - type: worker
     name: roboalgo-beat
-    env: python
+    runtime: python
     plan: standard
     buildCommand: pip install -r requirements.txt
     startCommand: celery -A infrastructure.scheduler beat --loglevel=info
@@ -134,6 +160,19 @@ services:
       # broker and never serves the control API, so it carries no broker
       # credentials and no control token. Those live on roboalgo-worker only.
 
-envVars:
-  - key: VITE_API_BASE_URL
-    value: https://roboalgo-api.onrender.com
+# PostgreSQL. This replaces a `type: pserv` entry, which is a private service and
+# creates no database, leaving every `fromDatabase: postgres_db` reference above
+# unresolvable.
+#
+# DECIDE BEFORE SYNCING:
+#   * `plan` is deliberately unset. The schema states no default, and a free-plan
+#     database expires. Set it to match the instance you actually run.
+#   * If a database named postgres_db already exists (created by hand in the
+#     dashboard), read the sync preview first: this must not create a second,
+#     empty database and repoint DATABASE_URL at it.
+#   * ipAllowList is empty, meaning no external access. The services reach the
+#     database over Render's private network via connectionString. The old entry
+#     allowed 0.0.0.0/0. Add your own IP here if you need psql from a laptop.
+databases:
+  - name: postgres_db
+    ipAllowList: []

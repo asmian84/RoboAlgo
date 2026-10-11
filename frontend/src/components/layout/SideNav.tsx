@@ -1,47 +1,34 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import axios from 'axios'
 import type { MarketSafetyData } from '../../types'
 import { useAlerts, AlertModal } from '../alerts/AlertManager'
 import { useLiveQuote, useMarketBreadth } from '../../api/hooks'
 import { useAuth } from '../../context/AuthContext'
-
-const API = '/api'
+import { useMacro } from '../../context/MacroContext'
 
 // ── Macro ticker panel (cycling single-instrument view) ───────────────────────
 
-interface MacroItem { symbol: string; name: string; price: number; change: number; pct: number }
-
 function MacroTickerPanel() {
-  const [items,   setItems]   = useState<MacroItem[]>([])
+  const { items } = useMacro()
   const [idx,     setIdx]     = useState(0)
   const [visible, setVisible] = useState(true)
   const [flash,   setFlash]   = useState<'up' | 'down' | null>(null)
   const prevRef = useRef<Record<string, number>>({})
   const idxRef  = useRef(0)
 
-  const fetchMacro = useCallback(async () => {
-    try {
-      const res  = await axios.get<{ items: MacroItem[] }>(`${API}/macro`)
-      const next = res.data.items
-      const cur  = next[idxRef.current]
-      if (cur) {
-        const prev = prevRef.current[cur.symbol]
-        if (prev !== undefined && prev !== cur.price) {
-          setFlash(cur.price > prev ? 'up' : 'down')
-          setTimeout(() => setFlash(null), 800)
-        }
-        prevRef.current[cur.symbol] = cur.price
-      }
-      setItems(next)
-    } catch { /* silent */ }
-  }, [])
-
+  // Flash when the instrument currently on show moved since the previous poll.
   useEffect(() => {
-    fetchMacro()
-    const id = setInterval(fetchMacro, 5000)
-    return () => clearInterval(id)
-  }, [fetchMacro])
+    const cur = items[idxRef.current]
+    if (!cur) return undefined
+    const prev = prevRef.current[cur.symbol]
+    prevRef.current[cur.symbol] = cur.price
+    if (prev !== undefined && prev !== cur.price) {
+      setFlash(cur.price > prev ? 'up' : 'down')
+      const t = setTimeout(() => setFlash(null), 800)
+      return () => clearTimeout(t)
+    }
+    return undefined
+  }, [items])
 
   // Cycle every 5 s with fade
   useEffect(() => {

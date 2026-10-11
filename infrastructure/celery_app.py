@@ -58,9 +58,21 @@ app.conf.update(
     task_default_retry_delay=30,
     task_max_retries=3,
     # Task routing
+    # Keys are the REGISTERED task names (`name=` in each @app.task), not dotted
+    # module paths. Celery matches routes against the registered name, and these
+    # tasks all register flat names, so the previous
+    # "infrastructure.celery_app.run_pipeline_stage"-style keys never matched.
+    # Everything then fell through to the default `celery` queue, which the
+    # worker does not consume (`--queues=pipeline,symbols,trading`), so any
+    # .delay()/send_task() dispatch queued forever with no error. Scheduled beat
+    # entries survived only because each carries an explicit options={"queue":...}.
     task_routes={
-        "infrastructure.celery_app.run_pipeline_stage": {"queue": "pipeline"},
-        "infrastructure.celery_app.run_symbol_stage": {"queue": "symbols"},
+        "run_pipeline_stage": {"queue": "pipeline"},
+        "run_range_engines": {"queue": "pipeline"},
+        "run_full_pipeline": {"queue": "pipeline"},
+        # Orchestrator: fans out run_symbol_stage tasks, which land on `symbols`.
+        "run_parallel_symbols": {"queue": "pipeline"},
+        "run_symbol_stage": {"queue": "symbols"},
         "auto_trader_cycle": {"queue": "trading"},
     },
 )

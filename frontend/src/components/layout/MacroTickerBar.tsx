@@ -1,39 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import axios from 'axios'
-
-interface MacroItem { symbol: string; name: string; price: number; change: number; pct: number }
-
-const API = '/api'
+import { useEffect, useRef, useState } from 'react'
+import { useMacro } from '../../context/MacroContext'
 
 export default function MacroTickerBar() {
-  const [items, setItems] = useState<MacroItem[]>([])
+  const { items } = useMacro()
   const [flash, setFlash] = useState<Record<string, 'up' | 'down'>>({})
   const prevRef = useRef<Record<string, number>>({})
 
-  const fetchMacro = useCallback(async () => {
-    try {
-      const res  = await axios.get<{ items: MacroItem[] }>(`${API}/macro`)
-      const next = res.data.items
-      const newFlash: Record<string, 'up' | 'down'> = {}
-      next.forEach(it => {
-        const prev = prevRef.current[it.symbol]
-        if (prev !== undefined && prev !== it.price)
-          newFlash[it.symbol] = it.price > prev ? 'up' : 'down'
-        prevRef.current[it.symbol] = it.price
-      })
-      setItems(next)
-      if (Object.keys(newFlash).length) {
-        setFlash(newFlash)
-        setTimeout(() => setFlash({}), 700)
-      }
-    } catch { /* silent */ }
-  }, [])
-
+  // Flash a tile when its price moved since the previous poll.
   useEffect(() => {
-    fetchMacro()
-    const id = setInterval(fetchMacro, 5000)
-    return () => clearInterval(id)
-  }, [fetchMacro])
+    const newFlash: Record<string, 'up' | 'down'> = {}
+    items.forEach(it => {
+      const prev = prevRef.current[it.symbol]
+      if (prev !== undefined && prev !== it.price)
+        newFlash[it.symbol] = it.price > prev ? 'up' : 'down'
+      prevRef.current[it.symbol] = it.price
+    })
+    if (Object.keys(newFlash).length) {
+      setFlash(newFlash)
+      const t = setTimeout(() => setFlash({}), 700)
+      return () => clearTimeout(t)
+    }
+    return undefined
+  }, [items])
 
   if (!items.length) return (
     <div className="h-12 border-b border-gray-800 bg-gray-950 flex items-center justify-center">

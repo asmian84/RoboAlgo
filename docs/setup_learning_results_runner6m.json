@@ -1,0 +1,3596 @@
+{
+ "objective": "runner6m",
+ "label": "fwd_max_6m >= 1.0",
+ "splits": {
+  "train": [
+   "2001-01-01",
+   "2012-12-31"
+  ],
+  "validate": [
+   "2013-08-01",
+   "2017-12-31"
+  ],
+  "test": [
+   "2018-08-01",
+   "2026-03-31"
+  ]
+ },
+ "ledger_trials_before": 241,
+ "real": {
+  "objective": "runner6m",
+  "base_rate": {
+   "train": 0.022829346619754894,
+   "validate": 0.01757335474589314,
+   "test": 0.06116903827281649
+  },
+  "n_trials_this_run": 51,
+  "candidates": 48,
+  "validation": [
+   {
+    "model": "timing/ALL/d3",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND W_mom30 <= -0.6516 AND rs_W_mom30 <= 0.0251",
+    "validate": {
+     "n_obs": 635,
+     "n_stocks": 157,
+     "n_runners": 157,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.247244094488189,
+     "expected": 12.646953150479131,
+     "lift": 12.414057214567292,
+     "lift_lo": 10.348055546888585,
+     "lift_hi": 14.674919481901858,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.173024892688759,
+     "timing_lo": 1.7776645579843544,
+     "timing_hi": 2.6379447735182366,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 123,
+     "median_ret": -0.10526315789473684,
+     "p_bad": 0.33385826771653543,
+     "excess_mean": -0.06594861578464478,
+     "excess_lo": -0.13183317477075024,
+     "excess_hi": 0.0026984241775275123,
+     "p_excess_le_0": 0.97
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 1,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 634,
+      "lift": 2.155148621943394
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 813,
+     "n_stocks": 233,
+     "n_runners": 293,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.36039360393603936,
+     "expected": 37.4592299094173,
+     "lift": 7.821837253689495,
+     "lift_lo": 6.858777041615814,
+     "lift_hi": 8.744100446865618,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.300997208096904,
+     "timing_lo": 1.9999998865299924,
+     "timing_hi": 2.683763272200854,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 201,
+     "median_ret": 0.12138730394895592,
+     "p_bad": 0.2865928659286593,
+     "excess_mean": 0.1401473447449884,
+     "excess_lo": 0.07568873139379559,
+     "excess_hi": 0.21116315001732944,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/ALL/d3",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND W_mom30 <= -0.6516 AND rs_W_mom30 > 0.0251",
+    "validate": {
+     "n_obs": 23,
+     "n_stocks": 22,
+     "n_runners": 14,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.6086956521739131,
+     "expected": 1.1065348433340711,
+     "lift": 12.652109496902028,
+     "lift_lo": 8.585200334517149,
+     "lift_hi": 16.470575242617922,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.767766512343125,
+     "timing_lo": 1.6318813614852328,
+     "timing_hi": 4.348387711751327,
+     "p_timing_le_1": 0.00025,
+     "n_informative_stocks": 21,
+     "median_ret": 0.8933859909669251,
+     "p_bad": 0.043478260869565216,
+     "excess_mean": 0.3270858926044491,
+     "excess_lo": 0.11161504060179867,
+     "excess_hi": 0.5088005837370511,
+     "p_excess_le_0": 0.002
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 23,
+      "lift": null
+     }
+    },
+    "p_ok": true,
+    "vol_ok": false,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 736,
+     "n_stocks": 320,
+     "n_runners": 404,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.5489130434782609,
+     "expected": 92.44527114781164,
+     "lift": 4.370153226702537,
+     "lift_lo": 4.018992930561459,
+     "lift_hi": 4.65497825269735,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.0693973035464923,
+     "timing_lo": 1.8646109322774198,
+     "timing_hi": 2.304571339679913,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 292,
+     "median_ret": 0.8842151154712147,
+     "p_bad": 0.06657608695652174,
+     "excess_mean": 0.3641072404324735,
+     "excess_lo": 0.3235462125103698,
+     "excess_hi": 0.4030554183927627,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/ALL/d3",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND W_mom30 > -0.6516 AND W_base_depth30 <= 0.6819",
+    "validate": {
+     "n_obs": 930,
+     "n_stocks": 214,
+     "n_runners": 110,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.11827956989247312,
+     "expected": 18.005566452823594,
+     "lift": 6.109221850265646,
+     "lift_lo": 4.46401843263912,
+     "lift_hi": 7.89792045686994,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.3893697775069838,
+     "timing_lo": 1.0785777695684824,
+     "timing_hi": 1.7338223658807983,
+     "p_timing_le_1": 0.0065,
+     "n_informative_stocks": 144,
+     "median_ret": -0.05149573076587438,
+     "p_bad": 0.2817204301075269,
+     "excess_mean": -0.030204233332947788,
+     "excess_lo": -0.07951381429629685,
+     "excess_hi": 0.02012255125571328,
+     "p_excess_le_0": 0.881
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 1,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 36,
+      "lift": 1.2431771995975032
+     },
+     "high_vol": {
+      "n_obs": 893,
+      "lift": 1.3096541453750874
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1167,
+     "n_stocks": 317,
+     "n_runners": 154,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.1319622964867181,
+     "expected": 44.72156765104431,
+     "lift": 3.4435286616435032,
+     "lift_lo": 2.460289592275611,
+     "lift_hi": 4.288975345584641,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.8248858736250784,
+     "timing_lo": 1.4233213002619673,
+     "timing_hi": 2.2119083662384615,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 249,
+     "median_ret": 0.07126429098568066,
+     "p_bad": 0.24592973436161097,
+     "excess_mean": 0.021000914874723945,
+     "excess_lo": -0.025854844639985428,
+     "excess_hi": 0.06572046337291143,
+     "p_excess_le_0": 0.175
+    }
+   },
+   {
+    "model": "timing/ALL/d3",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND W_mom30 > -0.6516 AND W_base_depth30 > 0.6819",
+    "validate": {
+     "n_obs": 760,
+     "n_stocks": 222,
+     "n_runners": 131,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.1723684210526316,
+     "expected": 14.241640886240765,
+     "lift": 9.198378265987781,
+     "lift_lo": 7.164085275679114,
+     "lift_hi": 11.207489522270276,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.4823906491037244,
+     "timing_lo": 1.2367959927171495,
+     "timing_hi": 1.745279614163957,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 142,
+     "median_ret": -0.24118178863603873,
+     "p_bad": 0.44605263157894737,
+     "excess_mean": -0.15496344916378382,
+     "excess_lo": -0.21435718525040393,
+     "excess_hi": -0.09084941345466609,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 3,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 757,
+      "lift": 1.36829654517664
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1758,
+     "n_stocks": 512,
+     "n_runners": 478,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.27189988623435724,
+     "expected": 113.20626943009947,
+     "lift": 4.222380990084181,
+     "lift_lo": 3.733102392299268,
+     "lift_hi": 4.748350850390557,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.8293486409014965,
+     "timing_lo": 1.5883914819239384,
+     "timing_hi": 2.062573869498066,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 424,
+     "median_ret": 0.2997221433883944,
+     "p_bad": 0.17349260523321958,
+     "excess_mean": 0.13383874617705582,
+     "excess_lo": 0.08623283649137231,
+     "excess_hi": 0.17785420402363644,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/ALL/d3",
+    "name": null,
+    "rule": "M_c_ma30 > -0.6139 AND W_dist_hi50 <= -0.6302 AND rs_W_mom50 <= 0.08387",
+    "validate": {
+     "n_obs": 1006,
+     "n_stocks": 371,
+     "n_runners": 105,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.10437375745526839,
+     "expected": 19.510703621552196,
+     "lift": 5.381661370941711,
+     "lift_lo": 4.146303736873046,
+     "lift_hi": 6.740903154993285,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.3321618828134105,
+     "timing_lo": 1.046127185989798,
+     "timing_hi": 1.653611774852605,
+     "p_timing_le_1": 0.0105,
+     "n_informative_stocks": 235,
+     "median_ret": -0.04565348622627985,
+     "p_bad": 0.2485089463220676,
+     "excess_mean": -0.019625709575539583,
+     "excess_lo": -0.060141725431486596,
+     "excess_hi": 0.020140507376904808,
+     "p_excess_le_0": 0.84125
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 23,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 983,
+      "lift": 1.3296262430802568
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1739,
+     "n_stocks": 548,
+     "n_runners": 192,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.11040828062104657,
+     "expected": 39.99818386761733,
+     "lift": 4.80021794578138,
+     "lift_lo": 3.8234982886786977,
+     "lift_hi": 5.631581793419097,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.8251163607286656,
+     "timing_lo": 1.5000746791232238,
+     "timing_hi": 2.115894694579123,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 427,
+     "median_ret": 0.0,
+     "p_bad": 0.25589419206440484,
+     "excess_mean": 0.017584759499387446,
+     "excess_lo": -0.015394024236942905,
+     "excess_hi": 0.05014431899068997,
+     "p_excess_le_0": 0.18
+    }
+   },
+   {
+    "model": "timing/ALL/d4",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND W_mom30 <= -0.6516 AND rs_W_mom30 <= 0.0251",
+    "validate": {
+     "n_obs": 635,
+     "n_stocks": 157,
+     "n_runners": 157,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.247244094488189,
+     "expected": 12.646953150479131,
+     "lift": 12.414057214567292,
+     "lift_lo": 10.348055546888585,
+     "lift_hi": 14.674919481901858,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.173024892688759,
+     "timing_lo": 1.7776645579843544,
+     "timing_hi": 2.6379447735182366,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 123,
+     "median_ret": -0.10526315789473684,
+     "p_bad": 0.33385826771653543,
+     "excess_mean": -0.06594861578464478,
+     "excess_lo": -0.13183317477075024,
+     "excess_hi": 0.0026984241775275123,
+     "p_excess_le_0": 0.97
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 1,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 634,
+      "lift": 2.155148621943394
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 813,
+     "n_stocks": 233,
+     "n_runners": 293,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.36039360393603936,
+     "expected": 37.4592299094173,
+     "lift": 7.821837253689495,
+     "lift_lo": 6.858777041615814,
+     "lift_hi": 8.744100446865618,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.300997208096904,
+     "timing_lo": 1.9999998865299924,
+     "timing_hi": 2.683763272200854,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 201,
+     "median_ret": 0.12138730394895592,
+     "p_bad": 0.2865928659286593,
+     "excess_mean": 0.1401473447449884,
+     "excess_lo": 0.07568873139379559,
+     "excess_hi": 0.21116315001732944,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/ALL/d4",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND W_mom30 <= -0.6516 AND rs_W_mom30 > 0.0251",
+    "validate": {
+     "n_obs": 23,
+     "n_stocks": 22,
+     "n_runners": 14,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.6086956521739131,
+     "expected": 1.1065348433340711,
+     "lift": 12.652109496902028,
+     "lift_lo": 8.585200334517149,
+     "lift_hi": 16.470575242617922,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.767766512343125,
+     "timing_lo": 1.6318813614852328,
+     "timing_hi": 4.348387711751327,
+     "p_timing_le_1": 0.00025,
+     "n_informative_stocks": 21,
+     "median_ret": 0.8933859909669251,
+     "p_bad": 0.043478260869565216,
+     "excess_mean": 0.3270858926044491,
+     "excess_lo": 0.11161504060179867,
+     "excess_hi": 0.5088005837370511,
+     "p_excess_le_0": 0.002
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 23,
+      "lift": null
+     }
+    },
+    "p_ok": true,
+    "vol_ok": false,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 736,
+     "n_stocks": 320,
+     "n_runners": 404,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.5489130434782609,
+     "expected": 92.44527114781164,
+     "lift": 4.370153226702537,
+     "lift_lo": 4.018992930561459,
+     "lift_hi": 4.65497825269735,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.0693973035464923,
+     "timing_lo": 1.8646109322774198,
+     "timing_hi": 2.304571339679913,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 292,
+     "median_ret": 0.8842151154712147,
+     "p_bad": 0.06657608695652174,
+     "excess_mean": 0.3641072404324735,
+     "excess_lo": 0.3235462125103698,
+     "excess_hi": 0.4030554183927627,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/ALL/d4",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND W_mom30 > -0.6516 AND W_base_depth30 <= 0.6819",
+    "validate": {
+     "n_obs": 930,
+     "n_stocks": 214,
+     "n_runners": 110,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.11827956989247312,
+     "expected": 18.005566452823594,
+     "lift": 6.109221850265646,
+     "lift_lo": 4.46401843263912,
+     "lift_hi": 7.89792045686994,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.3893697775069838,
+     "timing_lo": 1.0785777695684824,
+     "timing_hi": 1.7338223658807983,
+     "p_timing_le_1": 0.0065,
+     "n_informative_stocks": 144,
+     "median_ret": -0.05149573076587438,
+     "p_bad": 0.2817204301075269,
+     "excess_mean": -0.030204233332947788,
+     "excess_lo": -0.07951381429629685,
+     "excess_hi": 0.02012255125571328,
+     "p_excess_le_0": 0.881
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 1,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 36,
+      "lift": 1.2431771995975032
+     },
+     "high_vol": {
+      "n_obs": 893,
+      "lift": 1.3096541453750874
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1167,
+     "n_stocks": 317,
+     "n_runners": 154,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.1319622964867181,
+     "expected": 44.72156765104431,
+     "lift": 3.4435286616435032,
+     "lift_lo": 2.460289592275611,
+     "lift_hi": 4.288975345584641,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.8248858736250784,
+     "timing_lo": 1.4233213002619673,
+     "timing_hi": 2.2119083662384615,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 249,
+     "median_ret": 0.07126429098568066,
+     "p_bad": 0.24592973436161097,
+     "excess_mean": 0.021000914874723945,
+     "excess_lo": -0.025854844639985428,
+     "excess_hi": 0.06572046337291143,
+     "p_excess_le_0": 0.175
+    }
+   },
+   {
+    "model": "timing/ALL/d4",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND W_mom30 > -0.6516 AND W_base_depth30 > 0.6819 AND rs_W_mom30 <= 0.1562",
+    "validate": {
+     "n_obs": 547,
+     "n_stocks": 193,
+     "n_runners": 99,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.1809872029250457,
+     "expected": 10.392515225905473,
+     "lift": 9.526086596748227,
+     "lift_lo": 7.399498236643974,
+     "lift_hi": 11.73050205779164,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.5796458827782658,
+     "timing_lo": 1.3105292393329124,
+     "timing_hi": 1.8951227262469312,
+     "p_timing_le_1": 0.00025,
+     "n_informative_stocks": 129,
+     "median_ret": -0.21800945109373682,
+     "p_bad": 0.43144424131627057,
+     "excess_mean": -0.1394339687153632,
+     "excess_lo": -0.20578077367136205,
+     "excess_hi": -0.06806630211897081,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 3,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 544,
+      "lift": 1.4552620534714165
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 826,
+     "n_stocks": 344,
+     "n_runners": 161,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.19491525423728814,
+     "expected": 31.788987715391986,
+     "lift": 5.064646960181277,
+     "lift_lo": 4.159027802873797,
+     "lift_hi": 6.122775541146587,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.2667123246665697,
+     "timing_lo": 1.9363513621190773,
+     "timing_hi": 2.630847393564765,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 291,
+     "median_ret": 0.10236234703333047,
+     "p_bad": 0.23123486682808717,
+     "excess_mean": 0.06659991824283326,
+     "excess_lo": 0.022816209626922625,
+     "excess_hi": 0.12116565196543354,
+     "p_excess_le_0": 0.005
+    }
+   },
+   {
+    "model": "timing/ALL/d4",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND W_mom30 > -0.6516 AND W_base_depth30 > 0.6819 AND rs_W_mom30 > 0.1562",
+    "validate": {
+     "n_obs": 213,
+     "n_stocks": 86,
+     "n_runners": 32,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.15023474178403756,
+     "expected": 3.8491256603352895,
+     "lift": 8.313576334946816,
+     "lift_lo": 5.0091406020054325,
+     "lift_hi": 12.08234402264302,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.245209172170225,
+     "timing_lo": 0.8129879645642649,
+     "timing_hi": 1.7390791509530326,
+     "p_timing_le_1": 0.1415,
+     "n_informative_stocks": 59,
+     "median_ret": -0.2883190704223576,
+     "p_bad": 0.4835680751173709,
+     "excess_mean": -0.19484432148907058,
+     "excess_lo": -0.28560519945584023,
+     "excess_hi": -0.09412149517804824,
+     "p_excess_le_0": 0.99975
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 213,
+      "lift": 1.154797106360944
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 932,
+     "n_stocks": 363,
+     "n_runners": 317,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.34012875536480686,
+     "expected": 81.41728171470749,
+     "lift": 3.893522275906886,
+     "lift_lo": 3.4278606731303602,
+     "lift_hi": 4.404977849491384,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.6660779456240506,
+     "timing_lo": 1.4317631756391356,
+     "timing_hi": 1.901810025016742,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 310,
+     "median_ret": 0.48171310356667274,
+     "p_bad": 0.1223175965665236,
+     "excess_mean": 0.193430239603738,
+     "excess_lo": 0.13632164347271947,
+     "excess_hi": 0.24277324234300132,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/ALL/d4",
+    "name": null,
+    "rule": "M_c_ma30 > -0.6139 AND W_dist_hi50 <= -0.6302 AND rs_W_mom50 <= 0.08387",
+    "validate": {
+     "n_obs": 1006,
+     "n_stocks": 371,
+     "n_runners": 105,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.10437375745526839,
+     "expected": 19.510703621552196,
+     "lift": 5.381661370941711,
+     "lift_lo": 4.146303736873046,
+     "lift_hi": 6.740903154993285,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.3321618828134105,
+     "timing_lo": 1.046127185989798,
+     "timing_hi": 1.653611774852605,
+     "p_timing_le_1": 0.0105,
+     "n_informative_stocks": 235,
+     "median_ret": -0.04565348622627985,
+     "p_bad": 0.2485089463220676,
+     "excess_mean": -0.019625709575539583,
+     "excess_lo": -0.060141725431486596,
+     "excess_hi": 0.020140507376904808,
+     "p_excess_le_0": 0.84125
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 23,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 983,
+      "lift": 1.3296262430802568
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1739,
+     "n_stocks": 548,
+     "n_runners": 192,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.11040828062104657,
+     "expected": 39.99818386761733,
+     "lift": 4.80021794578138,
+     "lift_lo": 3.8234982886786977,
+     "lift_hi": 5.631581793419097,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.8251163607286656,
+     "timing_lo": 1.5000746791232238,
+     "timing_hi": 2.115894694579123,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 427,
+     "median_ret": 0.0,
+     "p_bad": 0.25589419206440484,
+     "excess_mean": 0.017584759499387446,
+     "excess_lo": -0.015394024236942905,
+     "excess_hi": 0.05014431899068997,
+     "p_excess_le_0": 0.18
+    }
+   },
+   {
+    "model": "timing/ALL/d4",
+    "name": null,
+    "rule": "M_c_ma30 > -0.6139 AND W_dist_hi50 <= -0.6302 AND rs_W_mom50 > 0.08387 AND M_mom50 <= -0.3175",
+    "validate": {
+     "n_obs": 204,
+     "n_stocks": 88,
+     "n_runners": 15,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.07352941176470588,
+     "expected": 3.7068473628281104,
+     "lift": 4.046565324059059,
+     "lift_lo": 2.2181022063436093,
+     "lift_hi": 6.160867640803666,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 0.6947022709107229,
+     "timing_lo": 0.38350021738239715,
+     "timing_hi": 1.0716964231495796,
+     "p_timing_le_1": 0.943,
+     "n_informative_stocks": 62,
+     "median_ret": -0.20163328641029532,
+     "p_bad": 0.4117647058823529,
+     "excess_mean": -0.18552783355317604,
+     "excess_lo": -0.2608594735860006,
+     "excess_hi": -0.10592772096523029,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 1,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 203,
+      "lift": 0.712282836303054
+     }
+    },
+    "p_ok": false,
+    "vol_ok": false,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 638,
+     "n_stocks": 328,
+     "n_runners": 136,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.21316614420062696,
+     "expected": 62.39464214028659,
+     "lift": 2.179674333161827,
+     "lift_lo": 1.807712689570385,
+     "lift_hi": 2.671896168549902,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.7964134547057504,
+     "timing_lo": 1.4613291555152133,
+     "timing_hi": 2.1905330805527585,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 245,
+     "median_ret": 0.36364699307382164,
+     "p_bad": 0.11755485893416928,
+     "excess_mean": 0.09969442277159088,
+     "excess_lo": 0.05776855394960471,
+     "excess_hi": 0.13899934303588296,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/ALL/d4",
+    "name": null,
+    "rule": "M_c_ma30 > -0.6139 AND W_dist_hi50 > -0.6302 AND M_c_ma30 <= -0.4581 AND M_ma50_slope <= -0.1191",
+    "validate": {
+     "n_obs": 559,
+     "n_stocks": 166,
+     "n_runners": 67,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.11985688729874776,
+     "expected": 10.164736855681628,
+     "lift": 6.5914151001902255,
+     "lift_lo": 4.4867473591429885,
+     "lift_hi": 9.066805277922713,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.048719612042836,
+     "timing_lo": 1.450831145560149,
+     "timing_hi": 2.686364857943482,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 107,
+     "median_ret": -0.047522775602948264,
+     "p_bad": 0.2808586762075134,
+     "excess_mean": -0.016635330912766807,
+     "excess_lo": -0.07383783868308387,
+     "excess_hi": 0.044530536797408295,
+     "p_excess_le_0": 0.701
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 28,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 531,
+      "lift": 1.8077311174470296
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 804,
+     "n_stocks": 264,
+     "n_runners": 100,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.12437810945273632,
+     "expected": 27.698473023748356,
+     "lift": 3.610307323232625,
+     "lift_lo": 2.7150047411314127,
+     "lift_hi": 4.687412798859692,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.877179963763339,
+     "timing_lo": 1.401936755769929,
+     "timing_hi": 2.482581347958962,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 213,
+     "median_ret": 0.1314667059510105,
+     "p_bad": 0.13432835820895522,
+     "excess_mean": 0.08166331158733661,
+     "excess_lo": 0.04073993478926857,
+     "excess_hi": 0.13056093586532852,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/D/d3",
+    "name": null,
+    "rule": "D_base_depth30 <= 0.4604 AND D_base_depth30 <= 0.3241 AND D_dist_hi50 <= -0.3784",
+    "validate": {
+     "n_obs": 693,
+     "n_stocks": 479,
+     "n_runners": 56,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.08080808080808081,
+     "expected": 12.107784151368019,
+     "lift": 4.625123746831309,
+     "lift_lo": 3.4602644927032977,
+     "lift_hi": 5.817029132703765,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.053371111032618,
+     "timing_lo": 0.8053015320986585,
+     "timing_hi": 1.3193832613595509,
+     "p_timing_le_1": 0.3395,
+     "n_informative_stocks": 292,
+     "median_ret": -0.06360421503839975,
+     "p_bad": 0.2698412698412698,
+     "excess_mean": -0.06494108559705822,
+     "excess_lo": -0.09529633393718474,
+     "excess_hi": -0.03459346620358574,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 693,
+      "lift": 1.015782426484984
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1196,
+     "n_stocks": 778,
+     "n_runners": 96,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.0802675585284281,
+     "expected": 35.576407406541406,
+     "lift": 2.6984174906415244,
+     "lift_lo": 2.2972736787058845,
+     "lift_hi": 3.2113531038774608,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.5295951029106671,
+     "timing_lo": 1.2905950785138467,
+     "timing_hi": 1.8408903940991768,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 517,
+     "median_ret": 0.03694800054567193,
+     "p_bad": 0.2157190635451505,
+     "excess_mean": 0.006591751485461049,
+     "excess_lo": -0.01482458047071577,
+     "excess_hi": 0.0283572500885582,
+     "p_excess_le_0": 0.29
+    }
+   },
+   {
+    "model": "timing/D/d3",
+    "name": null,
+    "rule": "D_base_depth30 <= 0.4604 AND D_base_depth30 > 0.3241 AND D_bars_since_hi50 > 124.5",
+    "validate": {
+     "n_obs": 789,
+     "n_stocks": 410,
+     "n_runners": 86,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.10899873257287707,
+     "expected": 18.334056546261742,
+     "lift": 4.690724051330317,
+     "lift_lo": 3.609598190355642,
+     "lift_hi": 5.880752119971249,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.4560768357424891,
+     "timing_lo": 1.1318001268718765,
+     "timing_hi": 1.8112467125812977,
+     "p_timing_le_1": 0.00275,
+     "n_informative_stocks": 225,
+     "median_ret": 0.0060352439759132626,
+     "p_bad": 0.2420785804816223,
+     "excess_mean": -0.01811665458733594,
+     "excess_lo": -0.055888487024397776,
+     "excess_hi": 0.01997086826633951,
+     "p_excess_le_0": 0.819
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 789,
+      "lift": 1.5995754341358561
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 2210,
+     "n_stocks": 958,
+     "n_runners": 263,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.11900452488687782,
+     "expected": 128.76030190401855,
+     "lift": 2.0425550119946707,
+     "lift_lo": 1.7809501193599464,
+     "lift_hi": 2.25778705693485,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.457182357737479,
+     "timing_lo": 1.2880846713855065,
+     "timing_hi": 1.6553442061558636,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 615,
+     "median_ret": 0.10396426703221406,
+     "p_bad": 0.20045248868778281,
+     "excess_mean": 0.02794932065783041,
+     "excess_lo": 0.006584321353111267,
+     "excess_hi": 0.046490510537822737,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/D/d3",
+    "name": null,
+    "rule": "D_base_depth30 > 0.4604 AND D_mom50 <= -0.6086",
+    "validate": {
+     "n_obs": 254,
+     "n_stocks": 151,
+     "n_runners": 79,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.3110236220472441,
+     "expected": 5.480334915330877,
+     "lift": 14.415177397097153,
+     "lift_lo": 11.505282624064966,
+     "lift_hi": 17.34044453110502,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.3874086385265283,
+     "timing_lo": 1.8398795475742988,
+     "timing_hi": 3.036994206613044,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 117,
+     "median_ret": -0.09382680727077297,
+     "p_bad": 0.35826771653543305,
+     "excess_mean": -0.04875248447824858,
+     "excess_lo": -0.12989684231105122,
+     "excess_hi": 0.03208616372564817,
+     "p_excess_le_0": 0.88
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 254,
+      "lift": 2.567680771274091
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 738,
+     "n_stocks": 409,
+     "n_runners": 311,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.42140921409214094,
+     "expected": 47.055998587577506,
+     "lift": 6.609146747171615,
+     "lift_lo": 6.077626017248798,
+     "lift_hi": 7.286499999226837,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.450649195508441,
+     "timing_lo": 2.186636511836252,
+     "timing_hi": 2.7511799746945287,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 331,
+     "median_ret": 0.20727009251427198,
+     "p_bad": 0.23848238482384823,
+     "excess_mean": 0.17798312087209547,
+     "excess_lo": 0.12545971860138103,
+     "excess_hi": 0.22849143594291518,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/D/d3",
+    "name": null,
+    "rule": "D_base_depth30 > 0.4604 AND D_mom50 > -0.6086 AND D_bars_since_hi50 <= 123.5",
+    "validate": {
+     "n_obs": 2492,
+     "n_stocks": 734,
+     "n_runners": 326,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.13081861958266452,
+     "expected": 46.40722072698081,
+     "lift": 7.024768880642448,
+     "lift_lo": 6.171399951449747,
+     "lift_hi": 7.919673890241091,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 0.974819839091073,
+     "timing_lo": 0.8773885686181113,
+     "timing_hi": 1.0800519563789948,
+     "p_timing_le_1": 0.6895,
+     "n_informative_stocks": 430,
+     "median_ret": -0.1946518697359919,
+     "p_bad": 0.3952648475120385,
+     "excess_mean": -0.1513398623705809,
+     "excess_lo": -0.17652251624463822,
+     "excess_hi": -0.12461998401983714,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 2492,
+      "lift": 0.9411158629001295
+     }
+    },
+    "p_ok": false,
+    "vol_ok": false,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 5635,
+     "n_stocks": 1458,
+     "n_runners": 827,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.14676131322094055,
+     "expected": 228.86714762673196,
+     "lift": 3.613450023630239,
+     "lift_lo": 3.3275743176019184,
+     "lift_hi": 3.941923885537069,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.563262151719901,
+     "timing_lo": 1.4597708410766217,
+     "timing_hi": 1.6705853464571776,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 863,
+     "median_ret": -0.017441816623948503,
+     "p_bad": 0.27346938775510204,
+     "excess_mean": -0.027033025872194746,
+     "excess_lo": -0.043258746391440416,
+     "excess_hi": -0.010842202583418734,
+     "p_excess_le_0": 1.0
+    }
+   },
+   {
+    "model": "timing/D/d3",
+    "name": null,
+    "rule": "D_base_depth30 > 0.4604 AND D_mom50 > -0.6086 AND D_bars_since_hi50 > 123.5",
+    "validate": {
+     "n_obs": 336,
+     "n_stocks": 179,
+     "n_runners": 53,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.15773809523809523,
+     "expected": 8.19827899618117,
+     "lift": 6.464771450774957,
+     "lift_lo": 4.797139110456069,
+     "lift_hi": 8.231004520318168,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.2694735184574886,
+     "timing_lo": 0.9437912007814695,
+     "timing_hi": 1.6786594921944646,
+     "p_timing_le_1": 0.0565,
+     "n_informative_stocks": 128,
+     "median_ret": 0.018976001527244657,
+     "p_bad": 0.26785714285714285,
+     "excess_mean": -0.04493873361436087,
+     "excess_lo": -0.10457153433712978,
+     "excess_hi": 0.017988342688613164,
+     "p_excess_le_0": 0.918
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 336,
+      "lift": 1.6316593597201408
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1139,
+     "n_stocks": 550,
+     "n_runners": 317,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.2783143107989464,
+     "expected": 77.85544418149925,
+     "lift": 4.0716484676524205,
+     "lift_lo": 3.683402247181287,
+     "lift_hi": 4.4423817066421165,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.838664805422178,
+     "timing_lo": 1.6504329159189877,
+     "timing_hi": 2.0587614222728496,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 431,
+     "median_ret": 0.22555747417309235,
+     "p_bad": 0.208955223880597,
+     "excess_mean": 0.1341085871073841,
+     "excess_lo": 0.10052786436223361,
+     "excess_hi": 0.1648962192478864,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/D/d4",
+    "name": null,
+    "rule": "D_base_depth30 <= 0.4604 AND D_base_depth30 <= 0.3241 AND D_dist_hi50 <= -0.3784",
+    "validate": {
+     "n_obs": 693,
+     "n_stocks": 479,
+     "n_runners": 56,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.08080808080808081,
+     "expected": 12.107784151368019,
+     "lift": 4.625123746831309,
+     "lift_lo": 3.4602644927032977,
+     "lift_hi": 5.817029132703765,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.053371111032618,
+     "timing_lo": 0.8053015320986585,
+     "timing_hi": 1.3193832613595509,
+     "p_timing_le_1": 0.3395,
+     "n_informative_stocks": 292,
+     "median_ret": -0.06360421503839975,
+     "p_bad": 0.2698412698412698,
+     "excess_mean": -0.06494108559705822,
+     "excess_lo": -0.09529633393718474,
+     "excess_hi": -0.03459346620358574,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 693,
+      "lift": 1.015782426484984
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1196,
+     "n_stocks": 778,
+     "n_runners": 96,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.0802675585284281,
+     "expected": 35.576407406541406,
+     "lift": 2.6984174906415244,
+     "lift_lo": 2.2972736787058845,
+     "lift_hi": 3.2113531038774608,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.5295951029106671,
+     "timing_lo": 1.2905950785138467,
+     "timing_hi": 1.8408903940991768,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 517,
+     "median_ret": 0.03694800054567193,
+     "p_bad": 0.2157190635451505,
+     "excess_mean": 0.006591751485461049,
+     "excess_lo": -0.01482458047071577,
+     "excess_hi": 0.0283572500885582,
+     "p_excess_le_0": 0.29
+    }
+   },
+   {
+    "model": "timing/D/d4",
+    "name": null,
+    "rule": "D_base_depth30 <= 0.4604 AND D_base_depth30 > 0.3241 AND D_bars_since_hi50 > 124.5 AND D_range10 <= 0.245",
+    "validate": {
+     "n_obs": 394,
+     "n_stocks": 291,
+     "n_runners": 28,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.07106598984771574,
+     "expected": 8.534150206285382,
+     "lift": 3.2809359248654966,
+     "lift_lo": 2.1609202738228195,
+     "lift_hi": 4.491961649316542,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.1246189984404944,
+     "timing_lo": 0.7581679187388297,
+     "timing_hi": 1.5335316820702287,
+     "p_timing_le_1": 0.262,
+     "n_informative_stocks": 157,
+     "median_ret": -0.0365306122371834,
+     "p_bad": 0.2233502538071066,
+     "excess_mean": -0.02298257506418586,
+     "excess_lo": -0.06194774363759707,
+     "excess_hi": 0.01860753456966114,
+     "p_excess_le_0": 0.87025
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 394,
+      "lift": 1.1560528435201003
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1024,
+     "n_stocks": 677,
+     "n_runners": 71,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.0693359375,
+     "expected": 45.06867962286256,
+     "lift": 1.575373421057202,
+     "lift_lo": 1.1900426071245043,
+     "lift_hi": 1.9818968253139808,
+     "p_lift_le_1": 0.005,
+     "timing_lift": 1.3135173844009893,
+     "timing_lo": 0.9931918807390093,
+     "timing_hi": 1.6763199350963747,
+     "p_timing_le_1": 0.035,
+     "n_informative_stocks": 442,
+     "median_ret": 0.05964984320675104,
+     "p_bad": 0.212890625,
+     "excess_mean": 0.0009409060010674482,
+     "excess_lo": -0.025304101835723673,
+     "excess_hi": 0.021761995491580817,
+     "p_excess_le_0": 0.485
+    }
+   },
+   {
+    "model": "timing/D/d4",
+    "name": null,
+    "rule": "D_base_depth30 <= 0.4604 AND D_base_depth30 > 0.3241 AND D_bars_since_hi50 > 124.5 AND D_range10 > 0.245",
+    "validate": {
+     "n_obs": 395,
+     "n_stocks": 259,
+     "n_runners": 58,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.1468354430379747,
+     "expected": 9.799906339976362,
+     "lift": 5.91842391017585,
+     "lift_lo": 4.463341311908437,
+     "lift_hi": 7.494172095601412,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.6976191220308259,
+     "timing_lo": 1.2954462636937556,
+     "timing_hi": 2.1858091427779716,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 156,
+     "median_ret": 0.03298975822585892,
+     "p_bad": 0.2607594936708861,
+     "excess_mean": -0.013263052896503364,
+     "excess_lo": -0.06391133385945241,
+     "excess_hi": 0.03875571251917171,
+     "p_excess_le_0": 0.68325
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 395,
+      "lift": 1.9631788591388672
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1186,
+     "n_stocks": 695,
+     "n_runners": 192,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.16188870151770657,
+     "expected": 83.69162228115597,
+     "lift": 2.294136435245452,
+     "lift_lo": 2.0168038631574543,
+     "lift_hi": 2.5820073108755297,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.5186033082754982,
+     "timing_lo": 1.3320471998462529,
+     "timing_hi": 1.7293892384589298,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 480,
+     "median_ret": 0.14919528009051153,
+     "p_bad": 0.1897133220910624,
+     "excess_mean": 0.05126855894495121,
+     "excess_lo": 0.02406804387893041,
+     "excess_hi": 0.07545678720739338,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/D/d4",
+    "name": null,
+    "rule": "D_base_depth30 > 0.4604 AND D_mom50 <= -0.6086",
+    "validate": {
+     "n_obs": 254,
+     "n_stocks": 151,
+     "n_runners": 79,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.3110236220472441,
+     "expected": 5.480334915330877,
+     "lift": 14.415177397097153,
+     "lift_lo": 11.505282624064966,
+     "lift_hi": 17.34044453110502,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.3874086385265283,
+     "timing_lo": 1.8398795475742988,
+     "timing_hi": 3.036994206613044,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 117,
+     "median_ret": -0.09382680727077297,
+     "p_bad": 0.35826771653543305,
+     "excess_mean": -0.04875248447824858,
+     "excess_lo": -0.12989684231105122,
+     "excess_hi": 0.03208616372564817,
+     "p_excess_le_0": 0.88
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 254,
+      "lift": 2.567680771274091
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 738,
+     "n_stocks": 409,
+     "n_runners": 311,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.42140921409214094,
+     "expected": 47.055998587577506,
+     "lift": 6.609146747171615,
+     "lift_lo": 6.077626017248798,
+     "lift_hi": 7.286499999226837,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.450649195508441,
+     "timing_lo": 2.186636511836252,
+     "timing_hi": 2.7511799746945287,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 331,
+     "median_ret": 0.20727009251427198,
+     "p_bad": 0.23848238482384823,
+     "excess_mean": 0.17798312087209547,
+     "excess_lo": 0.12545971860138103,
+     "excess_hi": 0.22849143594291518,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/D/d4",
+    "name": null,
+    "rule": "D_base_depth30 > 0.4604 AND D_mom50 > -0.6086 AND D_bars_since_hi50 <= 123.5 AND D_dist_lo50 <= 1.451",
+    "validate": {
+     "n_obs": 1983,
+     "n_stocks": 684,
+     "n_runners": 237,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.11951588502269289,
+     "expected": 37.5764501434647,
+     "lift": 6.30714181608821,
+     "lift_lo": 5.418037551768511,
+     "lift_hi": 7.260206279979843,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 0.965355759323977,
+     "timing_lo": 0.849615985095923,
+     "timing_hi": 1.081410226311646,
+     "p_timing_le_1": 0.7185,
+     "n_informative_stocks": 410,
+     "median_ret": -0.15416664547390413,
+     "p_bad": 0.3535047907211296,
+     "excess_mean": -0.12337619814323629,
+     "excess_lo": -0.15077749846141578,
+     "excess_hi": -0.09580869859920053,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 1983,
+      "lift": 0.9477912740240894
+     }
+    },
+    "p_ok": false,
+    "vol_ok": false,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 4606,
+     "n_stocks": 1395,
+     "n_runners": 588,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.1276595744680851,
+     "expected": 190.0075132561858,
+     "lift": 3.094614470361515,
+     "lift_lo": 2.807235090051916,
+     "lift_hi": 3.3710268365026983,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.4678695207054027,
+     "timing_lo": 1.3519582673179138,
+     "timing_hi": 1.587709202780307,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 845,
+     "median_ret": -0.016985244438131653,
+     "p_bad": 0.2585757707338254,
+     "excess_mean": -0.026159130761720634,
+     "excess_lo": -0.04335177308819587,
+     "excess_hi": -0.007388378023562761,
+     "p_excess_le_0": 0.995
+    }
+   },
+   {
+    "model": "timing/D/d4",
+    "name": null,
+    "rule": "D_base_depth30 > 0.4604 AND D_mom50 > -0.6086 AND D_bars_since_hi50 <= 123.5 AND D_dist_lo50 > 1.451",
+    "validate": {
+     "n_obs": 509,
+     "n_stocks": 275,
+     "n_runners": 89,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.17485265225933203,
+     "expected": 8.830770583516106,
+     "lift": 10.078395668678247,
+     "lift_lo": 7.844311951902109,
+     "lift_hi": 12.327801188634146,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.0009512133373062,
+     "timing_lo": 0.8016363273501569,
+     "timing_hi": 1.2381118281524817,
+     "p_timing_le_1": 0.515,
+     "n_informative_stocks": 175,
+     "median_ret": -0.35104894591891156,
+     "p_bad": 0.5579567779960707,
+     "excess_mean": -0.26028278214037337,
+     "excess_lo": -0.30805892354244147,
+     "excess_hi": -0.2117883852052185,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 509,
+      "lift": 0.9237899203213704
+     }
+    },
+    "p_ok": false,
+    "vol_ok": false,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1029,
+     "n_stocks": 522,
+     "n_runners": 239,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.23226433430515064,
+     "expected": 38.859634370546175,
+     "lift": 6.150340935301004,
+     "lift_lo": 5.2464444978207,
+     "lift_hi": 7.043185764041651,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.8607708710332158,
+     "timing_lo": 1.5821698884947173,
+     "timing_hi": 2.15550563574275,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 386,
+     "median_ret": -0.018957327549697922,
+     "p_bad": 0.3401360544217687,
+     "excess_mean": -0.030944746842888372,
+     "excess_lo": -0.0742653185730953,
+     "excess_hi": 0.01619879120389863,
+     "p_excess_le_0": 0.91
+    }
+   },
+   {
+    "model": "timing/D/d4",
+    "name": null,
+    "rule": "D_base_depth30 > 0.4604 AND D_mom50 > -0.6086 AND D_bars_since_hi50 > 123.5",
+    "validate": {
+     "n_obs": 336,
+     "n_stocks": 179,
+     "n_runners": 53,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.15773809523809523,
+     "expected": 8.19827899618117,
+     "lift": 6.464771450774957,
+     "lift_lo": 4.797139110456069,
+     "lift_hi": 8.231004520318168,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.2694735184574886,
+     "timing_lo": 0.9437912007814695,
+     "timing_hi": 1.6786594921944646,
+     "p_timing_le_1": 0.0565,
+     "n_informative_stocks": 128,
+     "median_ret": 0.018976001527244657,
+     "p_bad": 0.26785714285714285,
+     "excess_mean": -0.04493873361436087,
+     "excess_lo": -0.10457153433712978,
+     "excess_hi": 0.017988342688613164,
+     "p_excess_le_0": 0.918
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 336,
+      "lift": 1.6316593597201408
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1139,
+     "n_stocks": 550,
+     "n_runners": 317,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.2783143107989464,
+     "expected": 77.85544418149925,
+     "lift": 4.0716484676524205,
+     "lift_lo": 3.683402247181287,
+     "lift_hi": 4.4423817066421165,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.838664805422178,
+     "timing_lo": 1.6504329159189877,
+     "timing_hi": 2.0587614222728496,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 431,
+     "median_ret": 0.22555747417309235,
+     "p_bad": 0.208955223880597,
+     "excess_mean": 0.1341085871073841,
+     "excess_lo": 0.10052786436223361,
+     "excess_hi": 0.1648962192478864,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/W/d3",
+    "name": null,
+    "rule": "W_dist_hi50 <= -0.7299 AND W_mom30 <= -0.7312",
+    "validate": {
+     "n_obs": 524,
+     "n_stocks": 165,
+     "n_runners": 130,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.2480916030534351,
+     "expected": 11.94679089261335,
+     "lift": 10.881583277763609,
+     "lift_lo": 9.00214456125965,
+     "lift_hi": 12.889096092392503,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.8334194845269165,
+     "timing_lo": 1.4739295789721802,
+     "timing_hi": 2.252947570855405,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 127,
+     "median_ret": -0.0984191640864357,
+     "p_bad": 0.33396946564885494,
+     "excess_mean": -0.07316317384667248,
+     "excess_lo": -0.1388835099675816,
+     "excess_hi": -0.003308190740332529,
+     "p_excess_le_0": 0.97875
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 1,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 523,
+      "lift": 2.011216942065042
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1353,
+     "n_stocks": 407,
+     "n_runners": 612,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.4523281596452328,
+     "expected": 99.75809382735571,
+     "lift": 6.134840557991668,
+     "lift_lo": 5.757759137669031,
+     "lift_hi": 6.586596050104902,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.997154573682199,
+     "timing_lo": 1.7790357060504591,
+     "timing_hi": 2.2172893122398794,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 352,
+     "median_ret": 0.37323948580744526,
+     "p_bad": 0.24538063562453807,
+     "excess_mean": 0.20083309145350042,
+     "excess_lo": 0.14505698556457103,
+     "excess_hi": 0.2522416223428642,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/W/d3",
+    "name": null,
+    "rule": "W_dist_hi50 <= -0.7299 AND W_mom30 > -0.7312 AND rs_W_mom30 <= 0.08926",
+    "validate": {
+     "n_obs": 1149,
+     "n_stocks": 309,
+     "n_runners": 188,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.16362053959965187,
+     "expected": 21.558089468192595,
+     "lift": 8.720624352050326,
+     "lift_lo": 7.201908159810085,
+     "lift_hi": 10.263691519752124,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.480540414341399,
+     "timing_lo": 1.2743189557372687,
+     "timing_hi": 1.7182899443730375,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 217,
+     "median_ret": -0.17499997951090362,
+     "p_bad": 0.3803307223672759,
+     "excess_mean": -0.11613498518246425,
+     "excess_lo": -0.15911266155336296,
+     "excess_hi": -0.07197692579337503,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 4,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 1145,
+      "lift": 1.461365513635471
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1794,
+     "n_stocks": 527,
+     "n_runners": 327,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.18227424749163879,
+     "expected": 51.56509207329442,
+     "lift": 6.34149939139454,
+     "lift_lo": 5.613860209487996,
+     "lift_hi": 7.173213837199513,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.3665409089216585,
+     "timing_lo": 2.1141199376775486,
+     "timing_hi": 2.6612478148027154,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 418,
+     "median_ret": -0.06894819591555118,
+     "p_bad": 0.3166109253065775,
+     "excess_mean": -0.011395568308214407,
+     "excess_lo": -0.04410548860722692,
+     "excess_hi": 0.025387181265216344,
+     "p_excess_le_0": 0.74
+    }
+   },
+   {
+    "model": "timing/W/d3",
+    "name": null,
+    "rule": "W_dist_hi50 <= -0.7299 AND W_mom30 > -0.7312 AND rs_W_mom30 > 0.08926",
+    "validate": {
+     "n_obs": 305,
+     "n_stocks": 151,
+     "n_runners": 40,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.13114754098360656,
+     "expected": 5.452056788699241,
+     "lift": 7.3366807335738065,
+     "lift_lo": 5.11983444200154,
+     "lift_hi": 9.80097686983659,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 0.9067852599889545,
+     "timing_lo": 0.658747170755235,
+     "timing_hi": 1.1964463768882883,
+     "p_timing_le_1": 0.7445,
+     "n_informative_stocks": 110,
+     "median_ret": -0.2638889578757435,
+     "p_bad": 0.46557377049180326,
+     "excess_mean": -0.20919060049825033,
+     "excess_lo": -0.27138653142886504,
+     "excess_hi": -0.14229509664502937,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 6,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 299,
+      "lift": 0.8569118998503185
+     }
+    },
+    "p_ok": false,
+    "vol_ok": false,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1075,
+     "n_stocks": 503,
+     "n_runners": 360,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.33488372093023255,
+     "expected": 92.6475535924684,
+     "lift": 3.8856935346997172,
+     "lift_lo": 3.5089264305184544,
+     "lift_hi": 4.226058926218338,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.5708671723431524,
+     "timing_lo": 1.4054480810460048,
+     "timing_hi": 1.7890425232383036,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 415,
+     "median_ret": 0.354981575786667,
+     "p_bad": 0.1841860465116279,
+     "excess_mean": 0.1429078085053502,
+     "excess_lo": 0.09890194301783262,
+     "excess_hi": 0.1773424313537669,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/W/d3",
+    "name": null,
+    "rule": "W_dist_hi50 > -0.7299 AND W_base_depth30 <= 0.658 AND W_dist_hi50 <= -0.6317",
+    "validate": {
+     "n_obs": 819,
+     "n_stocks": 347,
+     "n_runners": 87,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.10622710622710622,
+     "expected": 16.45544824634835,
+     "lift": 5.287002742043583,
+     "lift_lo": 3.9364381285420307,
+     "lift_hi": 6.755246366514647,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.5222011334021455,
+     "timing_lo": 1.1690136247235803,
+     "timing_hi": 1.903687995318629,
+     "p_timing_le_1": 0.002,
+     "n_informative_stocks": 219,
+     "median_ret": -0.017045454545454586,
+     "p_bad": 0.2454212454212454,
+     "excess_mean": -0.00751501209349992,
+     "excess_lo": -0.0480157969794051,
+     "excess_hi": 0.035401420040533316,
+     "p_excess_le_0": 0.62825
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 2,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 22,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 795,
+      "lift": 1.539643836717843
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1733,
+     "n_stocks": 647,
+     "n_runners": 143,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.08251586843623773,
+     "expected": 60.66107680925855,
+     "lift": 2.3573600654938303,
+     "lift_lo": 1.919117090355797,
+     "lift_hi": 2.7937310320212316,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.4974392320344512,
+     "timing_lo": 1.2055694545830171,
+     "timing_hi": 1.7593525565204844,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 461,
+     "median_ret": 0.006793439265038392,
+     "p_bad": 0.25620311598384304,
+     "excess_mean": 0.0030994680203665936,
+     "excess_lo": -0.017272462171783565,
+     "excess_hi": 0.028765708692777683,
+     "p_excess_le_0": 0.38
+    }
+   },
+   {
+    "model": "timing/W/d3",
+    "name": null,
+    "rule": "W_dist_hi50 > -0.7299 AND W_base_depth30 > 0.658 AND W_mom50 <= -0.5887",
+    "validate": {
+     "n_obs": 438,
+     "n_stocks": 217,
+     "n_runners": 50,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.1141552511415525,
+     "expected": 8.544966321934428,
+     "lift": 5.85139813502283,
+     "lift_lo": 4.23065196950593,
+     "lift_hi": 7.585601477361247,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.3840462519818613,
+     "timing_lo": 1.0417499487254132,
+     "timing_hi": 1.7980418345691649,
+     "p_timing_le_1": 0.01425,
+     "n_informative_stocks": 146,
+     "median_ret": 0.004679073358825114,
+     "p_bad": 0.2579908675799087,
+     "excess_mean": -0.006074403952311558,
+     "excess_lo": -0.0627513797262093,
+     "excess_hi": 0.050146456831454314,
+     "p_excess_le_0": 0.58125
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 6,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 432,
+      "lift": 1.334667163848111
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1703,
+     "n_stocks": 695,
+     "n_runners": 276,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.1620669406928949,
+     "expected": 115.14510240371902,
+     "lift": 2.396975591999522,
+     "lift_lo": 2.0922523970349025,
+     "lift_hi": 2.734049823505961,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.5742619621656513,
+     "timing_lo": 1.3526970867765888,
+     "timing_hi": 1.7847629687666857,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 536,
+     "median_ret": 0.22704075351947184,
+     "p_bad": 0.19025249559600704,
+     "excess_mean": 0.08504426834420008,
+     "excess_lo": 0.05607379278588292,
+     "excess_hi": 0.10743956342303351,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/W/d4",
+    "name": null,
+    "rule": "W_dist_hi50 <= -0.7299 AND W_mom30 <= -0.7312",
+    "validate": {
+     "n_obs": 524,
+     "n_stocks": 165,
+     "n_runners": 130,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.2480916030534351,
+     "expected": 11.94679089261335,
+     "lift": 10.881583277763609,
+     "lift_lo": 9.00214456125965,
+     "lift_hi": 12.889096092392503,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.8334194845269165,
+     "timing_lo": 1.4739295789721802,
+     "timing_hi": 2.252947570855405,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 127,
+     "median_ret": -0.0984191640864357,
+     "p_bad": 0.33396946564885494,
+     "excess_mean": -0.07316317384667248,
+     "excess_lo": -0.1388835099675816,
+     "excess_hi": -0.003308190740332529,
+     "p_excess_le_0": 0.97875
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 1,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 523,
+      "lift": 2.011216942065042
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1353,
+     "n_stocks": 407,
+     "n_runners": 612,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.4523281596452328,
+     "expected": 99.75809382735571,
+     "lift": 6.134840557991668,
+     "lift_lo": 5.757759137669031,
+     "lift_hi": 6.586596050104902,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.997154573682199,
+     "timing_lo": 1.7790357060504591,
+     "timing_hi": 2.2172893122398794,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 352,
+     "median_ret": 0.37323948580744526,
+     "p_bad": 0.24538063562453807,
+     "excess_mean": 0.20083309145350042,
+     "excess_lo": 0.14505698556457103,
+     "excess_hi": 0.2522416223428642,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/W/d4",
+    "name": null,
+    "rule": "W_dist_hi50 <= -0.7299 AND W_mom30 > -0.7312 AND rs_W_mom30 <= 0.08926 AND W_base_depth30 <= 0.7627",
+    "validate": {
+     "n_obs": 614,
+     "n_stocks": 238,
+     "n_runners": 106,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.17263843648208468,
+     "expected": 11.75304863551887,
+     "lift": 9.018936557418606,
+     "lift_lo": 7.031192079275328,
+     "lift_hi": 11.134261717271137,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.6892964937456703,
+     "timing_lo": 1.3289995604976117,
+     "timing_hi": 2.097621456566648,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 171,
+     "median_ret": -0.10238936953844863,
+     "p_bad": 0.3322475570032573,
+     "excess_mean": -0.06026490016813485,
+     "excess_lo": -0.11086299101825166,
+     "excess_hi": -0.004531092380515724,
+     "p_excess_le_0": 0.9845
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 4,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 610,
+      "lift": 1.719815497037542
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 880,
+     "n_stocks": 337,
+     "n_runners": 110,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.125,
+     "expected": 21.092535277927496,
+     "lift": 5.215115136733262,
+     "lift_lo": 4.011340026142743,
+     "lift_hi": 6.314978465264334,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.0985802242428417,
+     "timing_lo": 1.6485973056478676,
+     "timing_hi": 2.5237204166499563,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 269,
+     "median_ret": -0.09219189434767827,
+     "p_bad": 0.31022727272727274,
+     "excess_mean": -0.0318709367369091,
+     "excess_lo": -0.08023036054908034,
+     "excess_hi": 0.011627589632312366,
+     "p_excess_le_0": 0.92
+    }
+   },
+   {
+    "model": "timing/W/d4",
+    "name": null,
+    "rule": "W_dist_hi50 <= -0.7299 AND W_mom30 > -0.7312 AND rs_W_mom30 <= 0.08926 AND W_base_depth30 > 0.7627",
+    "validate": {
+     "n_obs": 535,
+     "n_stocks": 189,
+     "n_runners": 82,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.15327102803738318,
+     "expected": 9.805040832673726,
+     "lift": 8.363045233503582,
+     "lift_lo": 6.343712290089321,
+     "lift_hi": 10.577497354039696,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.2766093908329417,
+     "timing_lo": 1.0295249543568648,
+     "timing_hi": 1.5407885902120444,
+     "p_timing_le_1": 0.01425,
+     "n_informative_stocks": 142,
+     "median_ret": -0.2466666666666667,
+     "p_bad": 0.4355140186915888,
+     "excess_mean": -0.1802550453671339,
+     "excess_lo": -0.2336515071057897,
+     "excess_hi": -0.12259594809783281,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 535,
+      "lift": 1.2236562547898218
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 914,
+     "n_stocks": 375,
+     "n_runners": 217,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.237417943107221,
+     "expected": 30.47255679536693,
+     "lift": 7.121161557175039,
+     "lift_lo": 6.1456422636241825,
+     "lift_hi": 8.178390059366592,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.5303181636702163,
+     "timing_lo": 2.2125087460132233,
+     "timing_hi": 2.9541119585797126,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 309,
+     "median_ret": -0.040715372278876505,
+     "p_bad": 0.3227571115973742,
+     "excess_mean": 0.008318134336480707,
+     "excess_lo": -0.03652321995968671,
+     "excess_hi": 0.05398224502473971,
+     "p_excess_le_0": 0.345
+    }
+   },
+   {
+    "model": "timing/W/d4",
+    "name": null,
+    "rule": "W_dist_hi50 <= -0.7299 AND W_mom30 > -0.7312 AND rs_W_mom30 > 0.08926",
+    "validate": {
+     "n_obs": 305,
+     "n_stocks": 151,
+     "n_runners": 40,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.13114754098360656,
+     "expected": 5.452056788699241,
+     "lift": 7.3366807335738065,
+     "lift_lo": 5.11983444200154,
+     "lift_hi": 9.80097686983659,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 0.9067852599889545,
+     "timing_lo": 0.658747170755235,
+     "timing_hi": 1.1964463768882883,
+     "p_timing_le_1": 0.7445,
+     "n_informative_stocks": 110,
+     "median_ret": -0.2638889578757435,
+     "p_bad": 0.46557377049180326,
+     "excess_mean": -0.20919060049825033,
+     "excess_lo": -0.27138653142886504,
+     "excess_hi": -0.14229509664502937,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 6,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 299,
+      "lift": 0.8569118998503185
+     }
+    },
+    "p_ok": false,
+    "vol_ok": false,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1075,
+     "n_stocks": 503,
+     "n_runners": 360,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.33488372093023255,
+     "expected": 92.6475535924684,
+     "lift": 3.8856935346997172,
+     "lift_lo": 3.5089264305184544,
+     "lift_hi": 4.226058926218338,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.5708671723431524,
+     "timing_lo": 1.4054480810460048,
+     "timing_hi": 1.7890425232383036,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 415,
+     "median_ret": 0.354981575786667,
+     "p_bad": 0.1841860465116279,
+     "excess_mean": 0.1429078085053502,
+     "excess_lo": 0.09890194301783262,
+     "excess_hi": 0.1773424313537669,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/W/d4",
+    "name": null,
+    "rule": "W_dist_hi50 > -0.7299 AND W_base_depth30 <= 0.658 AND W_dist_hi50 <= -0.6317 AND W_atr_pctl100 > 0.7157",
+    "validate": {
+     "n_obs": 446,
+     "n_stocks": 248,
+     "n_runners": 44,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.09865470852017937,
+     "expected": 9.989954352919845,
+     "lift": 4.404424529441394,
+     "lift_lo": 3.082238135475151,
+     "lift_hi": 5.747239001703616,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.7975725210120952,
+     "timing_lo": 1.271937553460584,
+     "timing_hi": 2.3959058556636723,
+     "p_timing_le_1": 0.00075,
+     "n_informative_stocks": 145,
+     "median_ret": 0.05814525637906809,
+     "p_bad": 0.19955156950672645,
+     "excess_mean": 0.03511689332663035,
+     "excess_lo": -0.009608385902638973,
+     "excess_hi": 0.08087518923049254,
+     "p_excess_le_0": 0.06725
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 446,
+      "lift": 1.9667703549772915
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 784,
+     "n_stocks": 449,
+     "n_runners": 74,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.09438775510204081,
+     "expected": 30.92113897523538,
+     "lift": 2.3931848066549657,
+     "lift_lo": 1.9027690289829913,
+     "lift_hi": 3.064443627632831,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.9466605100533445,
+     "timing_lo": 1.5635905751563246,
+     "timing_hi": 2.5990248071162254,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 327,
+     "median_ret": 0.00803495636474616,
+     "p_bad": 0.2614795918367347,
+     "excess_mean": 0.054982045055559946,
+     "excess_lo": 0.024020646907363417,
+     "excess_hi": 0.08550170506055443,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/W/d4",
+    "name": null,
+    "rule": "W_dist_hi50 > -0.7299 AND W_base_depth30 > 0.658 AND W_mom50 <= -0.5887 AND rs_W_mom50 <= 0.08568",
+    "validate": {
+     "n_obs": 438,
+     "n_stocks": 217,
+     "n_runners": 50,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.1141552511415525,
+     "expected": 8.544966321934428,
+     "lift": 5.85139813502283,
+     "lift_lo": 4.23065196950593,
+     "lift_hi": 7.585601477361247,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.3840462519818613,
+     "timing_lo": 1.0417499487254132,
+     "timing_hi": 1.7980418345691649,
+     "p_timing_le_1": 0.01425,
+     "n_informative_stocks": 146,
+     "median_ret": 0.004679073358825114,
+     "p_bad": 0.2579908675799087,
+     "excess_mean": -0.006074403952311558,
+     "excess_lo": -0.0627513797262093,
+     "excess_hi": 0.050146456831454314,
+     "p_excess_le_0": 0.58125
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 6,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 432,
+      "lift": 1.334667163848111
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 874,
+     "n_stocks": 408,
+     "n_runners": 89,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.10183066361556065,
+     "expected": 21.548742609892017,
+     "lift": 4.130171379890364,
+     "lift_lo": 3.2515294364505682,
+     "lift_hi": 5.092354192733577,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.723030291834461,
+     "timing_lo": 1.359095670013906,
+     "timing_hi": 2.0949222139002064,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 321,
+     "median_ret": -0.04771992933425828,
+     "p_bad": 0.3135011441647597,
+     "excess_mean": -0.01810612467414381,
+     "excess_lo": -0.05638201429407821,
+     "excess_hi": 0.01208479668554614,
+     "p_excess_le_0": 0.86
+    }
+   },
+   {
+    "model": "timing/W/d4",
+    "name": null,
+    "rule": "W_dist_hi50 > -0.7299 AND W_base_depth30 > 0.658 AND W_mom50 <= -0.5887 AND rs_W_mom50 > 0.08568",
+    "validate": {
+     "n_obs": 0,
+     "n_stocks": 0,
+     "n_runners": 0,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": null,
+     "expected": 0.0,
+     "lift": null,
+     "lift_lo": null,
+     "lift_hi": null,
+     "p_lift_le_1": null,
+     "timing_lift": null,
+     "timing_lo": null,
+     "timing_hi": null,
+     "p_timing_le_1": null,
+     "n_informative_stocks": 0,
+     "median_ret": null,
+     "p_bad": null,
+     "excess_mean": null,
+     "excess_lo": null,
+     "excess_hi": null,
+     "p_excess_le_0": null
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 0,
+      "lift": null
+     }
+    },
+    "p_ok": false,
+    "vol_ok": false,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 829,
+     "n_stocks": 429,
+     "n_runners": 187,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.2255729794933655,
+     "expected": 93.596359793827,
+     "lift": 1.997940949967728,
+     "lift_lo": 1.7186347785758707,
+     "lift_hi": 2.2381472097333748,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.5121244982562942,
+     "timing_lo": 1.2810951221344802,
+     "timing_hi": 1.7489322295074716,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 339,
+     "median_ret": 0.47489545178892056,
+     "p_bad": 0.06031363088057901,
+     "excess_mean": 0.19379389861926952,
+     "excess_lo": 0.15703078026704798,
+     "excess_hi": 0.2257475278354851,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/W/d4",
+    "name": null,
+    "rule": "W_dist_hi50 > -0.7299 AND W_base_depth30 > 0.658 AND W_mom50 > -0.5887 AND W_range10 > 0.6521",
+    "validate": {
+     "n_obs": 1799,
+     "n_stocks": 501,
+     "n_runners": 232,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.12896053362979434,
+     "expected": 31.271150488566672,
+     "lift": 7.418978719213532,
+     "lift_lo": 6.293334476201747,
+     "lift_hi": 8.591100346533752,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 0.9429133590052711,
+     "timing_lo": 0.8206378956192413,
+     "timing_hi": 1.0762179791386757,
+     "p_timing_le_1": 0.809,
+     "n_informative_stocks": 316,
+     "median_ret": -0.1947825887928838,
+     "p_bad": 0.3913285158421345,
+     "excess_mean": -0.1509082118506521,
+     "excess_lo": -0.18304792377722856,
+     "excess_hi": -0.11947167986763345,
+     "p_excess_le_0": 1.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 1799,
+      "lift": 0.9152521131895658
+     }
+    },
+    "p_ok": false,
+    "vol_ok": false,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 3966,
+     "n_stocks": 1074,
+     "n_runners": 525,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.132375189107413,
+     "expected": 150.82818966337302,
+     "lift": 3.480781683926095,
+     "lift_lo": 3.086441607596958,
+     "lift_hi": 3.9264527084673224,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.5343812817169045,
+     "timing_lo": 1.3936935808516862,
+     "timing_hi": 1.7081433766161331,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 701,
+     "median_ret": -0.026775502946454477,
+     "p_bad": 0.27508825012607163,
+     "excess_mean": -0.05065752804072086,
+     "excess_lo": -0.07000221938484183,
+     "excess_hi": -0.027870496119992674,
+     "p_excess_le_0": 1.0
+    }
+   },
+   {
+    "model": "timing/M/d3",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND M_atr_pctl100 <= 0.9897 AND M_range10 <= 3.495",
+    "validate": {
+     "n_obs": 1103,
+     "n_stocks": 219,
+     "n_runners": 177,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.16047144152311876,
+     "expected": 21.610924132712164,
+     "lift": 8.190302224608594,
+     "lift_lo": 6.538875519767727,
+     "lift_hi": 10.012234779082116,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.8091661227538212,
+     "timing_lo": 1.5016897395753541,
+     "timing_hi": 2.1624736668609272,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 141,
+     "median_ret": -0.06972306373377057,
+     "p_bad": 0.30099728014505894,
+     "excess_mean": -0.02893521356372894,
+     "excess_lo": -0.07770007077252761,
+     "excess_hi": 0.023427694891588854,
+     "p_excess_le_0": 0.87
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 1,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 26,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 1076,
+      "lift": 1.7187585697852796
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1663,
+     "n_stocks": 377,
+     "n_runners": 298,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.17919422730006013,
+     "expected": 82.3600236033552,
+     "lift": 3.6182602549407235,
+     "lift_lo": 3.062783194942227,
+     "lift_hi": 4.215413030442478,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.719130134420611,
+     "timing_lo": 1.4559926840172095,
+     "timing_hi": 1.961222389991689,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 314,
+     "median_ret": 0.12078653754737734,
+     "p_bad": 0.24894768490679495,
+     "excess_mean": 0.060394483881733255,
+     "excess_lo": 0.015971627377690034,
+     "excess_hi": 0.10100044609979056,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/M/d3",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND M_atr_pctl100 <= 0.9897 AND M_range10 > 3.495",
+    "validate": {
+     "n_obs": 561,
+     "n_stocks": 122,
+     "n_runners": 118,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.2103386809269162,
+     "expected": 11.445073385400644,
+     "lift": 10.310113009019323,
+     "lift_lo": 7.948664615169394,
+     "lift_hi": 12.982786740450724,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.6352756095744052,
+     "timing_lo": 1.3266289866807703,
+     "timing_hi": 1.983174426271161,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 92,
+     "median_ret": -0.17068060696853182,
+     "p_bad": 0.3939393939393939,
+     "excess_mean": -0.12268420885900833,
+     "excess_lo": -0.20500133639937002,
+     "excess_hi": -0.036436032007981976,
+     "p_excess_le_0": 0.99775
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 2,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 559,
+      "lift": 1.5780498109077639
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 934,
+     "n_stocks": 240,
+     "n_runners": 362,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.3875802997858672,
+     "expected": 58.79906241783347,
+     "lift": 6.156560753087913,
+     "lift_lo": 5.519868315875693,
+     "lift_hi": 6.800731227101931,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.979086514127298,
+     "timing_lo": 1.741824432011751,
+     "timing_hi": 2.2248799087828814,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 215,
+     "median_ret": 0.24044700471184888,
+     "p_bad": 0.2462526766595289,
+     "excess_mean": 0.15421025923555004,
+     "excess_lo": 0.10406815343147714,
+     "excess_hi": 0.2144068662202135,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/M/d3",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND M_atr_pctl100 > 0.9897",
+    "validate": {
+     "n_obs": 169,
+     "n_stocks": 81,
+     "n_runners": 47,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.2781065088757396,
+     "expected": 3.2080582841856833,
+     "lift": 14.650606640063035,
+     "lift_lo": 11.003050169364936,
+     "lift_hi": 18.380933230182674,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.9147044568844422,
+     "timing_lo": 2.0260314150493843,
+     "timing_hi": 4.0599292003705205,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 56,
+     "median_ret": -0.03731343063380255,
+     "p_bad": 0.28402366863905326,
+     "excess_mean": 0.00012176099378367502,
+     "excess_lo": -0.08759600771687501,
+     "excess_hi": 0.09639787612147359,
+     "p_excess_le_0": 0.479
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 1,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 168,
+      "lift": 2.8748088937633542
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 506,
+     "n_stocks": 258,
+     "n_runners": 249,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.49209486166007904,
+     "expected": 72.5721313921311,
+     "lift": 3.431069133887926,
+     "lift_lo": 3.175923638447154,
+     "lift_hi": 3.769778782808199,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.3757098147016356,
+     "timing_lo": 2.1565197025216474,
+     "timing_hi": 2.720453171089876,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 221,
+     "median_ret": 0.772756722260364,
+     "p_bad": 0.07509881422924901,
+     "excess_mean": 0.26386349901506767,
+     "excess_lo": 0.21719578758958707,
+     "excess_hi": 0.31191264995502843,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/M/d3",
+    "name": null,
+    "rule": "M_c_ma30 > -0.6139 AND M_c_ma30 <= -0.458 AND M_range10 > 1.911",
+    "validate": {
+     "n_obs": 419,
+     "n_stocks": 187,
+     "n_runners": 35,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.08353221957040573,
+     "expected": 8.075480070227698,
+     "lift": 4.334107656216794,
+     "lift_lo": 2.6972119928838127,
+     "lift_hi": 6.194408103604723,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.026543120678151,
+     "timing_lo": 0.6730813285068639,
+     "timing_hi": 1.42015537059648,
+     "p_timing_le_1": 0.46025,
+     "n_informative_stocks": 126,
+     "median_ret": -0.12096769231663218,
+     "p_bad": 0.2935560859188544,
+     "excess_mean": -0.07932762547929306,
+     "excess_lo": -0.13660156706211407,
+     "excess_hi": -0.020797729466681465,
+     "p_excess_le_0": 0.996
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 8,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 411,
+      "lift": 1.0101907061321445
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1614,
+     "n_stocks": 589,
+     "n_runners": 258,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.15985130111524162,
+     "expected": 112.63565582751292,
+     "lift": 2.290571294715893,
+     "lift_lo": 1.9253127690574459,
+     "lift_hi": 2.647758443532554,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.3629746492942314,
+     "timing_lo": 1.156093046215475,
+     "timing_hi": 1.5937303565348797,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 460,
+     "median_ret": 0.26622590718866324,
+     "p_bad": 0.14745972738537794,
+     "excess_mean": 0.10082380472514742,
+     "excess_lo": 0.07189181787364289,
+     "excess_hi": 0.12753624336835753,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/M/d4",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND M_atr_pctl100 <= 0.9897 AND M_range10 <= 3.495 AND M_vol_dry <= 1.454",
+    "validate": {
+     "n_obs": 626,
+     "n_stocks": 147,
+     "n_runners": 116,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.1853035143769968,
+     "expected": 12.48764302266909,
+     "lift": 9.289182897799263,
+     "lift_lo": 7.018332231490728,
+     "lift_hi": 11.747355278468289,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.9873737601776225,
+     "timing_lo": 1.5929918453548169,
+     "timing_hi": 2.4386527368432027,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 102,
+     "median_ret": -0.0018649829067837187,
+     "p_bad": 0.2731629392971246,
+     "excess_mean": 0.02120332989804542,
+     "excess_lo": -0.04500795270437029,
+     "excess_hi": 0.08926074922726769,
+     "p_excess_le_0": 0.261
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 1,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 22,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 603,
+      "lift": 1.9958790619365179
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 1088,
+     "n_stocks": 289,
+     "n_runners": 235,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.21599264705882354,
+     "expected": 58.77860124028314,
+     "lift": 3.9980536290636643,
+     "lift_lo": 3.255454402956889,
+     "lift_hi": 4.66780341570817,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.72173303893905,
+     "timing_lo": 1.459082610581081,
+     "timing_hi": 2.0031829636339378,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 248,
+     "median_ret": 0.18705986559954713,
+     "p_bad": 0.23253676470588236,
+     "excess_mean": 0.10405994890983772,
+     "excess_lo": 0.061542749111743594,
+     "excess_hi": 0.15556272643946414,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/M/d4",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND M_atr_pctl100 <= 0.9897 AND M_range10 <= 3.495 AND M_vol_dry > 1.454",
+    "validate": {
+     "n_obs": 477,
+     "n_stocks": 141,
+     "n_runners": 61,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.1278825995807128,
+     "expected": 9.123281110043076,
+     "lift": 6.686190994690504,
+     "lift_lo": 4.672040907941734,
+     "lift_hi": 8.94003675448639,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.545609105951858,
+     "timing_lo": 1.1173203245143675,
+     "timing_hi": 2.0537753055613437,
+     "p_timing_le_1": 0.00625,
+     "n_informative_stocks": 91,
+     "median_ret": -0.13010204081632648,
+     "p_bad": 0.33752620545073375,
+     "excess_mean": -0.09473548234165505,
+     "excess_lo": -0.15492904620835296,
+     "excess_hi": -0.025879409980628477,
+     "p_excess_le_0": 0.9945
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 4,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 473,
+      "lift": 1.3696040689881348
+     }
+    },
+    "p_ok": false,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 575,
+     "n_stocks": 175,
+     "n_runners": 63,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.10956521739130434,
+     "expected": 23.581422363072075,
+     "lift": 2.6715945726266472,
+     "lift_lo": 1.9808815344842166,
+     "lift_hi": 3.5128921094579955,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.709489929108315,
+     "timing_lo": 1.2750087265842858,
+     "timing_hi": 2.259489709922866,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 135,
+     "median_ret": 0.012820512820512775,
+     "p_bad": 0.28,
+     "excess_mean": -0.022228169945358308,
+     "excess_lo": -0.069065283694335,
+     "excess_hi": 0.027540354034049835,
+     "p_excess_le_0": 0.8
+    }
+   },
+   {
+    "model": "timing/M/d4",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND M_atr_pctl100 <= 0.9897 AND M_range10 > 3.495",
+    "validate": {
+     "n_obs": 561,
+     "n_stocks": 122,
+     "n_runners": 118,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.2103386809269162,
+     "expected": 11.445073385400644,
+     "lift": 10.310113009019323,
+     "lift_lo": 7.948664615169394,
+     "lift_hi": 12.982786740450724,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.6352756095744052,
+     "timing_lo": 1.3266289866807703,
+     "timing_hi": 1.983174426271161,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 92,
+     "median_ret": -0.17068060696853182,
+     "p_bad": 0.3939393939393939,
+     "excess_mean": -0.12268420885900833,
+     "excess_lo": -0.20500133639937002,
+     "excess_hi": -0.036436032007981976,
+     "p_excess_le_0": 0.99775
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 2,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 559,
+      "lift": 1.5780498109077639
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 934,
+     "n_stocks": 240,
+     "n_runners": 362,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.3875802997858672,
+     "expected": 58.79906241783347,
+     "lift": 6.156560753087913,
+     "lift_lo": 5.519868315875693,
+     "lift_hi": 6.800731227101931,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.979086514127298,
+     "timing_lo": 1.741824432011751,
+     "timing_hi": 2.2248799087828814,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 215,
+     "median_ret": 0.24044700471184888,
+     "p_bad": 0.2462526766595289,
+     "excess_mean": 0.15421025923555004,
+     "excess_lo": 0.10406815343147714,
+     "excess_hi": 0.2144068662202135,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/M/d4",
+    "name": null,
+    "rule": "M_c_ma30 <= -0.6139 AND M_atr_pctl100 > 0.9897",
+    "validate": {
+     "n_obs": 169,
+     "n_stocks": 81,
+     "n_runners": 47,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.2781065088757396,
+     "expected": 3.2080582841856833,
+     "lift": 14.650606640063035,
+     "lift_lo": 11.003050169364936,
+     "lift_hi": 18.380933230182674,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.9147044568844422,
+     "timing_lo": 2.0260314150493843,
+     "timing_hi": 4.0599292003705205,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 56,
+     "median_ret": -0.03731343063380255,
+     "p_bad": 0.28402366863905326,
+     "excess_mean": 0.00012176099378367502,
+     "excess_lo": -0.08759600771687501,
+     "excess_hi": 0.09639787612147359,
+     "p_excess_le_0": 0.479
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 1,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 168,
+      "lift": 2.8748088937633542
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 506,
+     "n_stocks": 258,
+     "n_runners": 249,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.49209486166007904,
+     "expected": 72.5721313921311,
+     "lift": 3.431069133887926,
+     "lift_lo": 3.175923638447154,
+     "lift_hi": 3.769778782808199,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.3757098147016356,
+     "timing_lo": 2.1565197025216474,
+     "timing_hi": 2.720453171089876,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 221,
+     "median_ret": 0.772756722260364,
+     "p_bad": 0.07509881422924901,
+     "excess_mean": 0.26386349901506767,
+     "excess_lo": 0.21719578758958707,
+     "excess_hi": 0.31191264995502843,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/M/d4",
+    "name": null,
+    "rule": "M_c_ma30 > -0.6139 AND M_c_ma30 <= -0.458 AND M_range10 <= 1.911 AND M_ma50_slope <= -0.1243",
+    "validate": {
+     "n_obs": 602,
+     "n_stocks": 163,
+     "n_runners": 78,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.12956810631229235,
+     "expected": 11.15349576079828,
+     "lift": 6.9933231403691645,
+     "lift_lo": 4.983484356936017,
+     "lift_hi": 9.392321705923393,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 2.2209924689805782,
+     "timing_lo": 1.6485113559647457,
+     "timing_hi": 2.8600630737930026,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 104,
+     "median_ret": -0.05046061412965225,
+     "p_bad": 0.2807308970099668,
+     "excess_mean": -0.0071053320708357685,
+     "excess_lo": -0.06563337685525479,
+     "excess_hi": 0.05505963453621341,
+     "p_excess_le_0": 0.5765
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 29,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 573,
+      "lift": 1.986288840237825
+     }
+    },
+    "p_ok": true,
+    "vol_ok": true,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 788,
+     "n_stocks": 243,
+     "n_runners": 96,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.1218274111675127,
+     "expected": 26.22675544468717,
+     "lift": 3.660384152453253,
+     "lift_lo": 2.6849395903430158,
+     "lift_hi": 4.713222717209157,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.808642140593982,
+     "timing_lo": 1.3217912930214737,
+     "timing_hi": 2.4749531438393353,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 197,
+     "median_ret": 0.13423569477152497,
+     "p_bad": 0.1383248730964467,
+     "excess_mean": 0.08124174961129867,
+     "excess_lo": 0.029736566236842267,
+     "excess_hi": 0.12716205481824758,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "timing/M/d4",
+    "name": null,
+    "rule": "M_c_ma30 > -0.6139 AND M_c_ma30 <= -0.458 AND M_range10 > 1.911 AND M_vol_dry > 1.234",
+    "validate": {
+     "n_obs": 286,
+     "n_stocks": 135,
+     "n_runners": 18,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.06293706293706294,
+     "expected": 5.365523103568551,
+     "lift": 3.3547521187688853,
+     "lift_lo": 1.6520792388330663,
+     "lift_hi": 5.4277691947763245,
+     "p_lift_le_1": 0.0025,
+     "timing_lift": 0.8278222534394042,
+     "timing_lo": 0.42143005384125837,
+     "timing_hi": 1.3021154766490428,
+     "p_timing_le_1": 0.786,
+     "n_informative_stocks": 86,
+     "median_ret": -0.16439409200052202,
+     "p_bad": 0.3356643356643357,
+     "excess_mean": -0.12336263545790911,
+     "excess_lo": -0.19167278523355386,
+     "excess_hi": -0.05373511242203229,
+     "p_excess_le_0": 0.99975
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 0,
+      "lift": null
+     },
+     "mid_vol": {
+      "n_obs": 2,
+      "lift": null
+     },
+     "high_vol": {
+      "n_obs": 284,
+      "lift": 0.7900268480899992
+     }
+    },
+    "p_ok": false,
+    "vol_ok": false,
+    "money_ok": false,
+    "passed": false,
+    "train": {
+     "n_obs": 911,
+     "n_stocks": 390,
+     "n_runners": 107,
+     "base_rate": 0.022829346619754894,
+     "rule_rate": 0.11745334796926454,
+     "expected": 63.54318747953933,
+     "lift": 1.6838941237320462,
+     "lift_lo": 1.3207510409879981,
+     "lift_hi": 2.089909102071963,
+     "p_lift_le_1": 0.0,
+     "timing_lift": 1.5284722102131976,
+     "timing_lo": 1.169115061755488,
+     "timing_hi": 1.9135289655331615,
+     "p_timing_le_1": 0.0,
+     "n_informative_stocks": 291,
+     "median_ret": 0.264822167537774,
+     "p_bad": 0.1602634467618002,
+     "excess_mean": 0.08257959773126562,
+     "excess_lo": 0.044689040557219825,
+     "excess_hi": 0.11981863189542655,
+     "p_excess_le_0": 0.0
+    }
+   },
+   {
+    "model": "textbook",
+    "name": "textbook_stage2_trend",
+    "rule": "W_c_ma30 > 0 AND W_ma10_30 > 0 AND W_ma30_50 > 0 AND W_ma50_slope > 0 AND W_dist_hi50 > -0.25 AND W_dist_lo50 > 0.3 AND rs_W_mom50 > 0.7",
+    "validate": {
+     "n_obs": 23047,
+     "n_stocks": 2210,
+     "n_runners": 294,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.012756540981472643,
+     "expected": 395.5453319132333,
+     "lift": 0.7432776379332716,
+     "lift_lo": 0.602787252194634,
+     "lift_hi": 0.8965522046514576,
+     "p_lift_le_1": 0.99925,
+     "timing_lift": 0.7872778671852588,
+     "timing_lo": 0.6812878107821491,
+     "timing_hi": 0.8996661978408812,
+     "p_timing_le_1": 0.9995,
+     "n_informative_stocks": 447,
+     "median_ret": 0.026666683620876652,
+     "p_bad": 0.05835900551047859,
+     "excess_mean": 0.008695089513181679,
+     "excess_lo": 0.0024916826965315332,
+     "excess_hi": 0.015057349593556695,
+     "p_excess_le_0": 0.00225
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 6513,
+      "lift": 0.6348160569146291
+     },
+     "mid_vol": {
+      "n_obs": 9372,
+      "lift": 0.676472677412912
+     },
+     "high_vol": {
+      "n_obs": 7162,
+      "lift": 0.678437225062281
+     }
+    },
+    "p_ok": false,
+    "vol_ok": false,
+    "money_ok": false,
+    "passed": false,
+    "train": null
+   },
+   {
+    "model": "textbook",
+    "name": "textbook_tight_base_breakout",
+    "rule": "W_ma30_50 > 0 AND W_ma50_slope > 0 AND W_base_depth30 <= 0.35 AND W_dist_hi50 > -0.08 AND W_contraction <= 0.7",
+    "validate": {
+     "n_obs": 21361,
+     "n_stocks": 1795,
+     "n_runners": 15,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.000702214315809185,
+     "expected": 368.28365169897233,
+     "lift": 0.04072947558438108,
+     "lift_lo": 0.014007390092215561,
+     "lift_hi": 0.07735155558282418,
+     "p_lift_le_1": 1.0,
+     "timing_lift": 0.6709136880445097,
+     "timing_lo": 0.2769424362170924,
+     "timing_hi": 1.1161301806625954,
+     "p_timing_le_1": 0.9345,
+     "n_informative_stocks": 141,
+     "median_ret": 0.041436994485547274,
+     "p_bad": 0.010626843312579,
+     "excess_mean": 0.013117087319199534,
+     "excess_lo": 0.009187593844609654,
+     "excess_hi": 0.01713800401554681,
+     "p_excess_le_0": 0.0
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 16424,
+      "lift": 0.5677716209817015
+     },
+     "mid_vol": {
+      "n_obs": 4903,
+      "lift": 0.8534231343390981
+     },
+     "high_vol": {
+      "n_obs": 34,
+      "lift": 2.2553110262762965
+     }
+    },
+    "p_ok": false,
+    "vol_ok": false,
+    "money_ok": true,
+    "passed": false,
+    "train": null
+   },
+   {
+    "model": "textbook",
+    "name": "textbook_compression_golden_cross",
+    "rule": "D_ma30_50 > 0 AND D_c_ma50 > 0 AND D_atr_pctl100 <= 0.25 AND D_contraction <= 0.7",
+    "validate": {
+     "n_obs": 16089,
+     "n_stocks": 2477,
+     "n_runners": 195,
+     "base_rate": 0.01757335474589314,
+     "rule_rate": 0.012120082043632295,
+     "expected": 278.4763988803545,
+     "lift": 0.7002388740446921,
+     "lift_lo": 0.5779785032347162,
+     "lift_hi": 0.8274709086233369,
+     "p_lift_le_1": 1.0,
+     "timing_lift": 0.8451510017837426,
+     "timing_lo": 0.7419737501652329,
+     "timing_hi": 0.9512739788347542,
+     "p_timing_le_1": 0.99775,
+     "n_informative_stocks": 512,
+     "median_ret": 0.038022543060437286,
+     "p_bad": 0.05401205792777674,
+     "excess_mean": 0.00880906307127455,
+     "excess_lo": 0.003899658025040992,
+     "excess_hi": 0.013720675529591251,
+     "p_excess_le_0": 0.00075
+    },
+    "vol_terciles": {
+     "low_vol": {
+      "n_obs": 6211,
+      "lift": 0.6562735108137
+     },
+     "mid_vol": {
+      "n_obs": 6008,
+      "lift": 0.7726107287130292
+     },
+     "high_vol": {
+      "n_obs": 3870,
+      "lift": 0.7506919716706014
+     }
+    },
+    "p_ok": false,
+    "vol_ok": false,
+    "money_ok": true,
+    "passed": false,
+    "train": null
+   }
+  ],
+  "validated": [],
+  "test": [],
+  "textbook_on_test": {
+   "textbook_stage2_trend": {
+    "n_obs": 50940,
+    "n_stocks": 3988,
+    "n_runners": 2270,
+    "base_rate": 0.06116903827281649,
+    "rule_rate": 0.044562230074597566,
+    "expected": 3033.595337794315,
+    "lift": 0.7482870149881248,
+    "lift_lo": 0.6887593505154735,
+    "lift_hi": 0.8084447593282978,
+    "p_lift_le_1": 1.0,
+    "timing_lift": 0.7815250439405014,
+    "timing_lo": 0.7392730568367404,
+    "timing_hi": 0.8227932185096207,
+    "p_timing_le_1": 1.0,
+    "n_informative_stocks": 2172,
+    "median_ret": 0.020196204792517936,
+    "p_bad": 0.11081664703572831,
+    "excess_mean": 0.04642300228137903,
+    "excess_lo": 0.040441363327186064,
+    "excess_hi": 0.05231489701545894,
+    "p_excess_le_0": 0.0
+   },
+   "textbook_tight_base_breakout": {
+    "n_obs": 22653,
+    "n_stocks": 2276,
+    "n_runners": 55,
+    "base_rate": 0.06116903827281649,
+    "rule_rate": 0.002427934489913036,
+    "expected": 1034.865772795701,
+    "lift": 0.05314698915146928,
+    "lift_lo": 0.029488454665030108,
+    "lift_hi": 0.08065018705219752,
+    "p_lift_le_1": 1.0,
+    "timing_lift": 0.5517601452465064,
+    "timing_lo": 0.3197456629398988,
+    "timing_hi": 0.8052218824917472,
+    "p_timing_le_1": 0.99975,
+    "n_informative_stocks": 742,
+    "median_ret": 0.015843462012197662,
+    "p_bad": 0.05628393590252947,
+    "excess_mean": 0.04211711853804685,
+    "excess_lo": 0.038164362389545695,
+    "excess_hi": 0.0462175561821102,
+    "p_excess_le_0": 0.0
+   },
+   "textbook_compression_golden_cross": {
+    "n_obs": 40087,
+    "n_stocks": 4707,
+    "n_runners": 1759,
+    "base_rate": 0.06116903827281649,
+    "rule_rate": 0.04387956195275276,
+    "expected": 2460.572848257289,
+    "lift": 0.7148741811264882,
+    "lift_lo": 0.669025948965705,
+    "lift_hi": 0.760661814655863,
+    "p_lift_le_1": 1.0,
+    "timing_lift": 0.9085910442370008,
+    "timing_lo": 0.873101394731915,
+    "timing_hi": 0.9447350444546957,
+    "p_timing_le_1": 1.0,
+    "n_informative_stocks": 2626,
+    "median_ret": 0.014527974737015947,
+    "p_bad": 0.12375583106742834,
+    "excess_mean": 0.022579323872715246,
+    "excess_lo": 0.018248266634964212,
+    "excess_hi": 0.026996293696517237,
+    "p_excess_le_0": 0.0
+   }
+  }
+ },
+ "placebo": [
+  {
+   "seed": 1,
+   "base_rate": {
+    "train": 0.021294839945709427,
+    "validate": 0.029060971748232065,
+    "test": 0.029991749914808904
+   },
+   "n_trials_this_run": 8,
+   "candidates": 5,
+   "validated": [],
+   "test": []
+  },
+  {
+   "seed": 2,
+   "base_rate": {
+    "train": 0.021015547291106242,
+    "validate": 0.030204411919924005,
+    "test": 0.02977653030112811
+   },
+   "n_trials_this_run": 10,
+   "candidates": 7,
+   "validated": [],
+   "test": []
+  },
+  {
+   "seed": 3,
+   "base_rate": {
+    "train": 0.021368338012710264,
+    "validate": 0.02973824015761883,
+    "test": 0.029485087074268702
+   },
+   "n_trials_this_run": 7,
+   "candidates": 4,
+   "validated": [],
+   "test": []
+  }
+ ],
+ "ledger_trials_after": 368
+}

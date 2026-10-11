@@ -1,0 +1,1699 @@
+{
+ "label": "see rounds",
+ "trial_count": 371,
+ "rounds": [
+  {
+   "round": 2,
+   "objective": "runner6m",
+   "label": "fwd_max_6m >= 1.0",
+   "learned_candidates": 48,
+   "learned_validated": 0,
+   "placebo_validated": [
+    0,
+    0,
+    0
+   ]
+  }
+ ],
+ "setups": [
+  {
+   "id": "r1-01",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "W_mom30",
+     "op": ">",
+     "value": -0.7207
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.7233
+    },
+    {
+     "feature": "W_bars_since_hi50",
+     "op": ">",
+     "value": 60.5
+    },
+    {
+     "feature": "rs_W_mom30",
+     "op": "<=",
+     "value": 0.0811
+    }
+   ],
+   "rule_text": "W_mom30 > -0.7207 AND W_dist_hi50 <= -0.7233 AND W_bars_since_hi50 > 60.5 AND rs_W_mom30 <= 0.0811",
+   "found_by": [
+    "timing/W/d4"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 1.7413592584329223,
+    "timing_lo": 1.2726440318103596,
+    "n_stocks": 148,
+    "lift": 4.612371927230235
+   },
+   "test": {
+    "timing_lift": 1.668753234813525,
+    "timing_lo": 1.4072466218196995,
+    "timing_hi": 1.9881302128228016,
+    "n_stocks": 400,
+    "lift": 2.3099138493538414,
+    "rule_rate": 0.09043020193151888,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.7542997646627128,
+    "p_loss_50": 0.6093064091308165,
+    "recall_stocks": 0.16243654822335024
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "too few liquid stocks to confirm the lift there",
+     "61% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.5248450639127702,
+    "liquid_lo": 1.105648697457587,
+    "liquid_hi": 2.1111485778023455,
+    "liquid_stocks": 104,
+    "p_loss_50_rule": 0.6093064091308165,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.7542997646627128,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "too few liquid stocks to confirm the lift there",
+    "61% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-02",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "W_mom30",
+     "op": ">",
+     "value": -0.7207
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.7233
+    },
+    {
+     "feature": "W_bars_since_hi50",
+     "op": ">",
+     "value": 60.5
+    }
+   ],
+   "rule_text": "W_mom30 > -0.7207 AND W_dist_hi50 <= -0.7233 AND W_bars_since_hi50 > 60.5",
+   "found_by": [
+    "timing/W/d3"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 1.7117060353144506,
+    "timing_lo": 1.3109385036354568,
+    "n_stocks": 156,
+    "lift": 4.999268635524101
+   },
+   "test": {
+    "timing_lift": 1.5695368697936554,
+    "timing_lo": 1.3774334917736333,
+    "timing_hi": 1.7980997525608344,
+    "n_stocks": 556,
+    "lift": 2.3469304662979398,
+    "rule_rate": 0.08906182447038478,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.7229965296889107,
+    "p_loss_50": 0.6018158236057068,
+    "recall_stocks": 0.23181049069373943
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "too few liquid stocks to confirm the lift there",
+     "60% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.3847572383461462,
+    "liquid_lo": 1.0155570839398753,
+    "liquid_hi": 1.9089791930881912,
+    "liquid_stocks": 152,
+    "p_loss_50_rule": 0.6018158236057068,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.7229965296889107,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "too few liquid stocks to confirm the lift there",
+    "60% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-03",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "D_base_depth30",
+     "op": "<=",
+     "value": 0.5132
+    },
+    {
+     "feature": "D_dist_hi50",
+     "op": "<=",
+     "value": -0.3442
+    },
+    {
+     "feature": "D_bars_since_hi50",
+     "op": ">",
+     "value": 123.5
+    },
+    {
+     "feature": "D_atr_pctl100",
+     "op": ">",
+     "value": 0.565
+    }
+   ],
+   "rule_text": "D_base_depth30 <= 0.5132 AND D_dist_hi50 <= -0.3442 AND D_bars_since_hi50 > 123.5 AND D_atr_pctl100 > 0.565",
+   "found_by": [
+    "timing/D/d4"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 2.039175241068623,
+    "timing_lo": 1.5593068205455876,
+    "n_stocks": 277,
+    "lift": 3.629463482896519
+   },
+   "test": {
+    "timing_lift": 1.4467039293765889,
+    "timing_lo": 1.1951325354587938,
+    "timing_hi": 1.7122802991976038,
+    "n_stocks": 689,
+    "lift": 2.3883985288309812,
+    "rule_rate": 0.06896551724137931,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.6880815216197167,
+    "p_loss_50": 0.5885057471264368,
+    "recall_stocks": 0.27918781725888325
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "too few liquid stocks to confirm the lift there",
+     "59% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.0641426030562349,
+    "liquid_lo": 0.6420529592232914,
+    "liquid_hi": 1.5417028694800758,
+    "liquid_stocks": 224,
+    "p_loss_50_rule": 0.5885057471264368,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.6880815216197167,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "too few liquid stocks to confirm the lift there",
+    "59% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-04",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "M_c_ma10",
+     "op": "<=",
+     "value": -0.5859
+    }
+   ],
+   "rule_text": "M_c_ma10 <= -0.5859",
+   "found_by": [
+    "timing/M/d3",
+    "timing/M/d4"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 2.225130181091712,
+    "timing_lo": 1.7569442483962996,
+    "n_stocks": 178,
+    "lift": 5.615301344630705
+   },
+   "test": {
+    "timing_lift": 1.4280924049434858,
+    "timing_lo": 1.252765741061596,
+    "timing_hi": 1.620831604830881,
+    "n_stocks": 812,
+    "lift": 2.3469866903889223,
+    "rule_rate": 0.08846383741781232,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.9000000025841949,
+    "p_loss_50": 0.7077106993424985,
+    "recall_stocks": 0.34348561759729274
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "too few liquid stocks to confirm the lift there",
+     "71% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.5850393688952056,
+    "liquid_lo": 1.1692011595624068,
+    "liquid_hi": 2.1198364439374195,
+    "liquid_stocks": 227,
+    "p_loss_50_rule": 0.7077106993424985,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.9000000025841949,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "too few liquid stocks to confirm the lift there",
+    "71% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-05",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "M_range10",
+     "op": ">",
+     "value": 0.5886
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.5939
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.7233
+    },
+    {
+     "feature": "W_mom30",
+     "op": "<=",
+     "value": -0.7218
+    }
+   ],
+   "rule_text": "M_range10 > 0.5886 AND W_dist_hi50 <= -0.5939 AND W_dist_hi50 <= -0.7233 AND W_mom30 <= -0.7218",
+   "found_by": [
+    "typeTiming/ALL/d4"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 2.0893590571548932,
+    "timing_lo": 1.6320487629081564,
+    "n_stocks": 158,
+    "lift": 5.651826954779661
+   },
+   "test": {
+    "timing_lift": 1.4235429816977416,
+    "timing_lo": 1.2239083173076226,
+    "timing_hi": 1.6462541316992128,
+    "n_stocks": 723,
+    "lift": 2.4697177655768763,
+    "rule_rate": 0.09220636663007684,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.9129032242682672,
+    "p_loss_50": 0.7321624588364435,
+    "recall_stocks": 0.31810490693739424
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "too few liquid stocks to confirm the lift there",
+     "73% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.4441806420894803,
+    "liquid_lo": 0.9885792847524478,
+    "liquid_hi": 2.0272873729662195,
+    "liquid_stocks": 198,
+    "p_loss_50_rule": 0.7320644216691069,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.9127613612897033,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "too few liquid stocks to confirm the lift there",
+    "73% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-06",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "W_base_depth30",
+     "op": ">",
+     "value": 0.421
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.628
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.7233
+    },
+    {
+     "feature": "W_mom30",
+     "op": "<=",
+     "value": -0.7219
+    }
+   ],
+   "rule_text": "W_base_depth30 > 0.421 AND W_dist_hi50 <= -0.628 AND W_dist_hi50 <= -0.7233 AND W_mom30 <= -0.7219",
+   "found_by": [
+    "typeTiming/W/d4"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 2.0893590571548932,
+    "timing_lo": 1.6320487629081564,
+    "n_stocks": 158,
+    "lift": 5.651826954779661
+   },
+   "test": {
+    "timing_lift": 1.4227580149581036,
+    "timing_lo": 1.2231783686119695,
+    "timing_hi": 1.6386619439798833,
+    "n_stocks": 723,
+    "lift": 2.478886360026476,
+    "rule_rate": 0.09257226491035492,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.9126194983111394,
+    "p_loss_50": 0.7317965605561654,
+    "recall_stocks": 0.31810490693739424
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "too few liquid stocks to confirm the lift there",
+     "73% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.4723897186964363,
+    "liquid_lo": 1.016799187252756,
+    "liquid_hi": 2.185629036238845,
+    "liquid_stocks": 197,
+    "p_loss_50_rule": 0.7317965605561654,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.9126194983111394,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "too few liquid stocks to confirm the lift there",
+    "73% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-07",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "W_mom30",
+     "op": "<=",
+     "value": -0.7218
+    }
+   ],
+   "rule_text": "W_mom30 <= -0.7218",
+   "found_by": [
+    "timing/ALL/d3",
+    "timing/ALL/d4"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 2.073034825532029,
+    "timing_lo": 1.6204655421984864,
+    "n_stocks": 162,
+    "lift": 5.6287977995865575
+   },
+   "test": {
+    "timing_lift": 1.3848403640614464,
+    "timing_lo": 1.1967107465025117,
+    "timing_hi": 1.5917524271954733,
+    "n_stocks": 793,
+    "lift": 2.3805024686938547,
+    "rule_rate": 0.08732017397122784,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.9159722173471508,
+    "p_loss_50": 0.7350284376045501,
+    "recall_stocks": 0.3316412859560068
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "73% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.4800587273874033,
+    "liquid_lo": 1.019503398833967,
+    "liquid_hi": 2.1631740968271536,
+    "liquid_stocks": 220,
+    "p_loss_50_rule": 0.734851021091396,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.9159722173471508,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "73% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-08",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "W_mom30",
+     "op": "<=",
+     "value": -0.7207
+    }
+   ],
+   "rule_text": "W_mom30 <= -0.7207",
+   "found_by": [
+    "timing/W/d3",
+    "timing/W/d4"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 2.150186597908516,
+    "timing_lo": 1.7145361942934227,
+    "n_stocks": 166,
+    "lift": 6.023303317465621
+   },
+   "test": {
+    "timing_lift": 1.3809735409508506,
+    "timing_lo": 1.1884554400390974,
+    "timing_hi": 1.599032937740193,
+    "n_stocks": 794,
+    "lift": 2.370093851891039,
+    "rule_rate": 0.08689883913764511,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.9157241377337225,
+    "p_loss_50": 0.7339966832504146,
+    "recall_stocks": 0.3316412859560068
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "73% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.4800587273874033,
+    "liquid_lo": 1.0232214842144125,
+    "liquid_hi": 2.1773312181664295,
+    "liquid_stocks": 221,
+    "p_loss_50_rule": 0.7339084273390842,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.9154418536185012,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "73% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-09",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "M_range10",
+     "op": ">",
+     "value": 0.5886
+    },
+    {
+     "feature": "M_base_depth30",
+     "op": ">",
+     "value": 0.7441
+    },
+    {
+     "feature": "M_range10",
+     "op": ">",
+     "value": 2.302
+    },
+    {
+     "feature": "M_dist_hi50",
+     "op": "<=",
+     "value": -0.8148
+    }
+   ],
+   "rule_text": "M_range10 > 0.5886 AND M_base_depth30 > 0.7441 AND M_range10 > 2.302 AND M_dist_hi50 <= -0.8148",
+   "found_by": [
+    "typeTiming/M/d4"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 1.6996613653709014,
+    "timing_lo": 1.3632553437799086,
+    "n_stocks": 223,
+    "lift": 4.098883530655809
+   },
+   "test": {
+    "timing_lift": 1.3699617391819423,
+    "timing_lo": 1.1982399623787594,
+    "timing_hi": 1.5677562819660615,
+    "n_stocks": 737,
+    "lift": 2.276055466544316,
+    "rule_rate": 0.07315079689415611,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.9024390262370069,
+    "p_loss_50": 0.7380465876583572,
+    "recall_stocks": 0.26903553299492383
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "too few liquid stocks to confirm the lift there",
+     "74% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.3976422241396258,
+    "liquid_lo": 1.0552935382243915,
+    "liquid_hi": 1.8728214911827155,
+    "liquid_stocks": 226,
+    "p_loss_50_rule": 0.7380465876583572,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.9024390262370069,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "too few liquid stocks to confirm the lift there",
+    "74% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-10",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "M_range10",
+     "op": ">",
+     "value": 0.5886
+    },
+    {
+     "feature": "M_base_depth30",
+     "op": ">",
+     "value": 0.7441
+    },
+    {
+     "feature": "M_range10",
+     "op": ">",
+     "value": 2.302
+    }
+   ],
+   "rule_text": "M_range10 > 0.5886 AND M_base_depth30 > 0.7441 AND M_range10 > 2.302",
+   "found_by": [
+    "typeTiming/M/d3"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 1.5356198700241455,
+    "timing_lo": 1.2935732121229517,
+    "n_stocks": 325,
+    "lift": 4.617068256937831
+   },
+   "test": {
+    "timing_lift": 1.3527221311494002,
+    "timing_lo": 1.2192933545702551,
+    "timing_hi": 1.5069090131651217,
+    "n_stocks": 1158,
+    "lift": 2.2990395514425033,
+    "rule_rate": 0.06984880669748844,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.8568207443842075,
+    "p_loss_50": 0.7069848806697488,
+    "recall_stocks": 0.43485617597292725
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "71% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.2943054255780349,
+    "liquid_lo": 1.020465073600706,
+    "liquid_hi": 1.6533655838222767,
+    "liquid_stocks": 415,
+    "p_loss_50_rule": 0.7069116360454943,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.8567434186275811,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "71% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-11",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "D_base_depth30",
+     "op": "<=",
+     "value": 0.5132
+    },
+    {
+     "feature": "D_dist_hi50",
+     "op": "<=",
+     "value": -0.3442
+    },
+    {
+     "feature": "D_bars_since_hi50",
+     "op": ">",
+     "value": 123.5
+    }
+   ],
+   "rule_text": "D_base_depth30 <= 0.5132 AND D_dist_hi50 <= -0.3442 AND D_bars_since_hi50 > 123.5",
+   "found_by": [
+    "timing/D/d3"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 2.0218776713146682,
+    "timing_lo": 1.5699676784542387,
+    "n_stocks": 337,
+    "lift": 3.9066631539305865
+   },
+   "test": {
+    "timing_lift": 1.3200157176596379,
+    "timing_lo": 1.1406611950970942,
+    "timing_hi": 1.5224496178446807,
+    "n_stocks": 933,
+    "lift": 2.155647362286255,
+    "rule_rate": 0.06535947712418301,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.7149532693620851,
+    "p_loss_50": 0.6091503267973856,
+    "recall_stocks": 0.3587140439932318
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "lift among liquid stocks is 1.25 [0.97, 1.73], interval includes 1",
+     "61% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.2549495666572799,
+    "liquid_lo": 0.9659965847588243,
+    "liquid_hi": 1.7343348167644521,
+    "liquid_stocks": 316,
+    "p_loss_50_rule": 0.6091503267973856,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.7149532693620851,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "lift among liquid stocks is 1.25 [0.97, 1.73], interval includes 1",
+    "61% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-12",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "W_mom30",
+     "op": ">",
+     "value": -0.7218
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.7191
+    },
+    {
+     "feature": "M_vol_dry",
+     "op": "<=",
+     "value": 1.485
+    }
+   ],
+   "rule_text": "W_mom30 > -0.7218 AND W_dist_hi50 <= -0.7191 AND M_vol_dry <= 1.485",
+   "found_by": [
+    "timing/ALL/d3",
+    "timing/ALL/d4"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 2.128534124015748,
+    "timing_lo": 1.6988712095281144,
+    "n_stocks": 145,
+    "lift": 5.737277965798793
+   },
+   "test": {
+    "timing_lift": 1.2574486236891982,
+    "timing_lo": 1.0674783093942877,
+    "timing_hi": 1.4605299259336584,
+    "n_stocks": 752,
+    "lift": 2.018253624712266,
+    "rule_rate": 0.06549364613880743,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.7244444423251681,
+    "p_loss_50": 0.6217008797653959,
+    "recall_stocks": 0.3197969543147208
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "too few liquid stocks to confirm the lift there",
+     "62% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.1890749538011445,
+    "liquid_lo": 0.7170070659743368,
+    "liquid_hi": 1.7496573355007958,
+    "liquid_stocks": 191,
+    "p_loss_50_rule": 0.6216216216216216,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.7244444423251681,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "too few liquid stocks to confirm the lift there",
+    "62% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-13",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "W_base_depth30",
+     "op": ">",
+     "value": 0.421
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.628
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.7233
+    }
+   ],
+   "rule_text": "W_base_depth30 > 0.421 AND W_dist_hi50 <= -0.628 AND W_dist_hi50 <= -0.7233",
+   "found_by": [
+    "typeTiming/W/d3"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 1.6568559904505775,
+    "timing_lo": 1.3867886763860329,
+    "n_stocks": 305,
+    "lift": 5.0551151069271265
+   },
+   "test": {
+    "timing_lift": 1.251139820877421,
+    "timing_lo": 1.135634526359857,
+    "timing_hi": 1.3714990147931676,
+    "n_stocks": 1472,
+    "lift": 2.3163360707840974,
+    "rule_rate": 0.07665505226480836,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.8397212450567603,
+    "p_loss_50": 0.6816326530612244,
+    "recall_stocks": 0.5532994923857868
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "lift among liquid stocks is 1.19 [0.98, 1.42], interval includes 1",
+     "68% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.1925038051079286,
+    "liquid_lo": 0.9839474873551205,
+    "liquid_hi": 1.4165349190794643,
+    "liquid_stocks": 490,
+    "p_loss_50_rule": 0.6816326530612244,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.8397212450567603,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "lift among liquid stocks is 1.19 [0.98, 1.42], interval includes 1",
+    "68% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-14",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "M_range10",
+     "op": ">",
+     "value": 0.5886
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.5939
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.7233
+    }
+   ],
+   "rule_text": "M_range10 > 0.5886 AND W_dist_hi50 <= -0.5939 AND W_dist_hi50 <= -0.7233",
+   "found_by": [
+    "typeTiming/ALL/d3"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 1.655452276499857,
+    "timing_lo": 1.3871195719015235,
+    "n_stocks": 305,
+    "lift": 5.041688781695387
+   },
+   "test": {
+    "timing_lift": 1.2507614943462173,
+    "timing_lo": 1.135274171929317,
+    "timing_hi": 1.3737583043502655,
+    "n_stocks": 1474,
+    "lift": 2.307639924022824,
+    "rule_rate": 0.07632754342431762,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.8381395467208353,
+    "p_loss_50": 0.680893300248139,
+    "recall_stocks": 0.5532994923857868
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "lift among liquid stocks is 1.19 [0.98, 1.41], interval includes 1",
+     "68% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.1859354560426316,
+    "liquid_lo": 0.9820548292857263,
+    "liquid_hi": 1.412502766803927,
+    "liquid_stocks": 491,
+    "p_loss_50_rule": 0.680893300248139,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.8381395467208353,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "lift among liquid stocks is 1.19 [0.98, 1.41], interval includes 1",
+    "68% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-15",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "M_c_ma10",
+     "op": ">",
+     "value": -0.5859
+    },
+    {
+     "feature": "M_range10",
+     "op": ">",
+     "value": 2.067
+    },
+    {
+     "feature": "M_vol_dry",
+     "op": "<=",
+     "value": 1.125
+    }
+   ],
+   "rule_text": "M_c_ma10 > -0.5859 AND M_range10 > 2.067 AND M_vol_dry <= 1.125",
+   "found_by": [
+    "timing/M/d3",
+    "timing/M/d4"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 1.9261007405895179,
+    "timing_lo": 1.507081185467964,
+    "n_stocks": 134,
+    "lift": 4.6642027508771
+   },
+   "test": {
+    "timing_lift": 1.2480461332137212,
+    "timing_lo": 1.0446784929410582,
+    "timing_hi": 1.4651791731426873,
+    "n_stocks": 702,
+    "lift": 2.0022469082745564,
+    "rule_rate": 0.06285511363636363,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.7408200585749403,
+    "p_loss_50": 0.6480823863636364,
+    "recall_stocks": 0.30287648054145516
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "too few liquid stocks to confirm the lift there",
+     "65% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.134365391115215,
+    "liquid_lo": 0.513362760283294,
+    "liquid_hi": 2.0792625535001936,
+    "liquid_stocks": 147,
+    "p_loss_50_rule": 0.6480625666548169,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.7407894717028927,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "too few liquid stocks to confirm the lift there",
+    "65% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-16",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "W_base_depth30",
+     "op": ">",
+     "value": 0.421
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.628
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.7233
+    },
+    {
+     "feature": "W_mom30",
+     "op": ">",
+     "value": -0.7219
+    }
+   ],
+   "rule_text": "W_base_depth30 > 0.421 AND W_dist_hi50 <= -0.628 AND W_dist_hi50 <= -0.7233 AND W_mom30 > -0.7219",
+   "found_by": [
+    "typeTiming/W/d4"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 1.4899983826136884,
+    "timing_lo": 1.223838389841733,
+    "n_stocks": 291,
+    "lift": 4.781985866065723
+   },
+   "test": {
+    "timing_lift": 1.1814032745769696,
+    "timing_lo": 1.0580631619128438,
+    "timing_hi": 1.3135360980229638,
+    "n_stocks": 1395,
+    "lift": 2.244317354706935,
+    "rule_rate": 0.07070568927789934,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.8007575675280219,
+    "p_loss_50": 0.662882932166302,
+    "recall_stocks": 0.5313028764805414
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "lift among liquid stocks is 1.11 [0.91, 1.34], interval includes 1",
+     "66% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.1106059047366563,
+    "liquid_lo": 0.9066631241485235,
+    "liquid_hi": 1.3422904095760568,
+    "liquid_stocks": 461,
+    "p_loss_50_rule": 0.662882932166302,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.8007575675280219,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "lift among liquid stocks is 1.11 [0.91, 1.34], interval includes 1",
+    "66% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-17",
+   "round": 1,
+   "rule": [
+    {
+     "feature": "M_range10",
+     "op": ">",
+     "value": 0.5886
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.5939
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": "<=",
+     "value": -0.7233
+    },
+    {
+     "feature": "W_mom30",
+     "op": ">",
+     "value": -0.7218
+    }
+   ],
+   "rule_text": "M_range10 > 0.5886 AND W_dist_hi50 <= -0.5939 AND W_dist_hi50 <= -0.7233 AND W_mom30 > -0.7218",
+   "found_by": [
+    "typeTiming/ALL/d4"
+   ],
+   "label": ">= 5x within 3 years",
+   "learned_on": [
+    "2001-01-01",
+    "2011-12-31"
+   ],
+   "selected_on": [
+    "2015-01-01",
+    "2017-12-31"
+   ],
+   "judged_on": [
+    "2021-01-01",
+    "2023-12-31"
+   ],
+   "validate": {
+    "timing_lift": 1.4894726737326962,
+    "timing_lo": 1.228422713988921,
+    "n_stocks": 290,
+    "lift": 4.765631851141649
+   },
+   "test": {
+    "timing_lift": 1.1808981967489753,
+    "timing_lo": 1.0547902598165444,
+    "timing_hi": 1.3165116871091087,
+    "n_stocks": 1398,
+    "lift": 2.236111322043952,
+    "rule_rate": 0.07041678016889132,
+    "base_rate": 0.03136243020170283,
+    "median_ret_3y": -0.7985249071404786,
+    "p_loss_50": 0.6618087714519204,
+    "recall_stocks": 0.5313028764805414
+   },
+   "robustness": {
+    "passed": false,
+    "reasons": [
+     "lift among liquid stocks is 1.11 [0.91, 1.34], interval includes 1",
+     "66% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+    ],
+    "liquid_timing_lift": 1.1106059047366563,
+    "liquid_lo": 0.9146350420108559,
+    "liquid_hi": 1.3416472666332144,
+    "liquid_stocks": 462,
+    "p_loss_50_rule": 0.661854827727087,
+    "p_loss_50_all": 0.283083985869406,
+    "median_3y_rule": -0.7985611508440916,
+    "median_3y_all": -0.09717661776326564
+   },
+   "status": "rejected_robustness",
+   "rejected_because": [
+    "lift among liquid stocks is 1.11 [0.91, 1.34], interval includes 1",
+    "66% of flagged stocks lose half or more in 3y, vs 28% of all stocks"
+   ],
+   "exploratory_verdict": true,
+   "objective": "runner3y",
+   "kind": "learned"
+  },
+  {
+   "id": "r1-textbook_compression_golden_cross",
+   "round": 1,
+   "rule_text": "textbook_compression_golden_cross",
+   "rule": [],
+   "status": "rejected_no_edge",
+   "rejected_because": [
+    "timing lift 0.82 [0.76, 0.88] on the test era: no better than chance, or worse"
+   ],
+   "test": {
+    "timing_lift": 0.8184847209347333,
+    "timing_lo": 0.7597700798203976,
+    "timing_hi": 0.8769291645131442,
+    "n_stocks": 3777
+   },
+   "exploratory_verdict": false,
+   "objective": "runner3y",
+   "kind": "textbook"
+  },
+  {
+   "id": "r1-textbook_stage2_trend",
+   "round": 1,
+   "rule_text": "textbook_stage2_trend",
+   "rule": [],
+   "status": "rejected_no_edge",
+   "rejected_because": [
+    "timing lift 0.54 [0.47, 0.60] on the test era: no better than chance, or worse"
+   ],
+   "test": {
+    "timing_lift": 0.5392216183829824,
+    "timing_lo": 0.4674523802519251,
+    "timing_hi": 0.6038455306119201,
+    "n_stocks": 2760
+   },
+   "exploratory_verdict": false,
+   "objective": "runner3y",
+   "kind": "textbook"
+  },
+  {
+   "id": "r1-textbook_tight_base_breakout",
+   "round": 1,
+   "rule_text": "textbook_tight_base_breakout",
+   "rule": [],
+   "status": "rejected_no_edge",
+   "rejected_because": [
+    "timing lift 0.82 [0.65, 1.02] on the test era: no better than chance, or worse"
+   ],
+   "test": {
+    "timing_lift": 0.8163573081613327,
+    "timing_lo": 0.6522609483685122,
+    "timing_hi": 1.019914608055244,
+    "n_stocks": 1598
+   },
+   "exploratory_verdict": false,
+   "objective": "runner3y",
+   "kind": "textbook"
+  },
+  {
+   "id": "r2-textbook_compression_golden_cross",
+   "round": 2,
+   "objective": "runner6m",
+   "kind": "textbook",
+   "rule_text": "textbook_compression_golden_cross",
+   "rule": [
+    {
+     "feature": "D_ma30_50",
+     "op": ">",
+     "value": 0.0
+    },
+    {
+     "feature": "D_c_ma50",
+     "op": ">",
+     "value": 0.0
+    },
+    {
+     "feature": "D_atr_pctl100",
+     "op": "<=",
+     "value": 0.25
+    },
+    {
+     "feature": "D_contraction",
+     "op": "<=",
+     "value": 0.7
+    }
+   ],
+   "label": "mean fwd_ret_6m above the same date's average (winsorised 1/99)",
+   "excess_by_era": {
+    "train": {
+     "excess_mean": 0.0017580115083588117,
+     "excess_lo": -0.0018330094943386167,
+     "excess_hi": 0.005511676770572538,
+     "n_obs": 32398,
+     "n_stocks": 2059,
+     "timing_lift": 0.7773929469313607,
+     "timing_lo": 0.7167564989608265,
+     "timing_hi": 0.8413817985699669
+    },
+    "validate": {
+     "excess_mean": 0.00880906307127455,
+     "excess_lo": 0.00404189646128164,
+     "excess_hi": 0.013690136058159946,
+     "n_obs": 16089,
+     "n_stocks": 2477,
+     "timing_lift": 0.8451510017837426,
+     "timing_lo": 0.745716339439301,
+     "timing_hi": 0.9530962644144321
+    },
+    "test": {
+     "excess_mean": 0.022579323872715246,
+     "excess_lo": 0.018259713252110805,
+     "excess_hi": 0.026937667211521268,
+     "n_obs": 40087,
+     "n_stocks": 4707,
+     "timing_lift": 0.9085910442370008,
+     "timing_lo": 0.873158658377196,
+     "timing_hi": 0.9447350444546957
+    }
+   },
+   "robustness": {
+    "passed": true,
+    "reasons": [],
+    "liquid_timing_lift": 0.828355989238766,
+    "liquid_lo": 0.7757543871615993,
+    "liquid_hi": 0.8837138184679328,
+    "liquid_stocks": 2572,
+    "liquid_excess_mean": 0.010998048422701372,
+    "liquid_excess_lo": 0.006330160743353544,
+    "liquid_excess_hi": 0.015548503742366573,
+    "p_bad_rule": 0.12375583106742834,
+    "p_bad_all": 0.17463505888125613,
+    "median_ret_rule": 0.014527974737015947,
+    "median_ret_all": -0.006191939571338012,
+    "excess_mean": 0.022579323872715246,
+    "excess_lo": 0.018259713252110805,
+    "excess_hi": 0.026937667211521268
+   },
+   "status": "approved",
+   "rejected_because": [],
+   "provisional": true,
+   "caveat": "Earns more than the average stock but is LESS likely to double: its timing lift is below 1. Excess return is measured on 6-month winsorised returns before costs, against the equal-weighted average of liquid listed stocks. Two eras of evidence; 2001-2012 shows about +1% per half-year, 2018-2026 about +2% to +5%.",
+   "exploratory_verdict": true
+  },
+  {
+   "id": "r2-textbook_stage2_trend",
+   "round": 2,
+   "objective": "runner6m",
+   "kind": "textbook",
+   "rule_text": "textbook_stage2_trend",
+   "rule": [
+    {
+     "feature": "W_c_ma30",
+     "op": ">",
+     "value": 0.0
+    },
+    {
+     "feature": "W_ma10_30",
+     "op": ">",
+     "value": 0.0
+    },
+    {
+     "feature": "W_ma30_50",
+     "op": ">",
+     "value": 0.0
+    },
+    {
+     "feature": "W_ma50_slope",
+     "op": ">",
+     "value": 0.0
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": ">",
+     "value": -0.25
+    },
+    {
+     "feature": "W_dist_lo50",
+     "op": ">",
+     "value": 0.3
+    },
+    {
+     "feature": "rs_W_mom50",
+     "op": ">",
+     "value": 0.7
+    }
+   ],
+   "label": "mean fwd_ret_6m above the same date's average (winsorised 1/99)",
+   "excess_by_era": {
+    "train": {
+     "excess_mean": 0.012935253971202628,
+     "excess_lo": 0.007302189343749944,
+     "excess_hi": 0.018642880590137478,
+     "n_obs": 37484,
+     "n_stocks": 1954,
+     "timing_lift": 0.9729331219118755,
+     "timing_lo": 0.8686437009045402,
+     "timing_hi": 1.0857161537111577
+    },
+    "validate": {
+     "excess_mean": 0.008695089513181679,
+     "excess_lo": 0.002445672439917266,
+     "excess_hi": 0.014972676033167986,
+     "n_obs": 23047,
+     "n_stocks": 2210,
+     "timing_lift": 0.7872778671852588,
+     "timing_lo": 0.6768112757717346,
+     "timing_hi": 0.9013307879411555
+    },
+    "test": {
+     "excess_mean": 0.04642300228137903,
+     "excess_lo": 0.04030617305965557,
+     "excess_hi": 0.052364677353702115,
+     "n_obs": 50940,
+     "n_stocks": 3988,
+     "timing_lift": 0.7815250439405014,
+     "timing_lo": 0.7389980124219306,
+     "timing_hi": 0.8229561478295477
+    }
+   },
+   "robustness": {
+    "passed": true,
+    "reasons": [],
+    "liquid_timing_lift": 0.7663283655286239,
+    "liquid_lo": 0.7149968063098774,
+    "liquid_hi": 0.8189589110062868,
+    "liquid_stocks": 2477,
+    "liquid_excess_mean": 0.02699160813042459,
+    "liquid_excess_lo": 0.0205971568455998,
+    "liquid_excess_hi": 0.03338266142787466,
+    "p_bad_rule": 0.11081664703572831,
+    "p_bad_all": 0.17463505888125613,
+    "median_ret_rule": 0.020196204792517936,
+    "median_ret_all": -0.006191939571338012,
+    "excess_mean": 0.04642300228137903,
+    "excess_lo": 0.04030617305965557,
+    "excess_hi": 0.052364677353702115
+   },
+   "status": "approved",
+   "rejected_because": [],
+   "provisional": true,
+   "caveat": "Earns more than the average stock but is LESS likely to double: its timing lift is below 1. Excess return is measured on 6-month winsorised returns before costs, against the equal-weighted average of liquid listed stocks. Two eras of evidence; 2001-2012 shows about +1% per half-year, 2018-2026 about +2% to +5%.",
+   "exploratory_verdict": true
+  },
+  {
+   "id": "r2-textbook_tight_base_breakout",
+   "round": 2,
+   "objective": "runner6m",
+   "kind": "textbook",
+   "rule_text": "textbook_tight_base_breakout",
+   "rule": [
+    {
+     "feature": "W_ma30_50",
+     "op": ">",
+     "value": 0.0
+    },
+    {
+     "feature": "W_ma50_slope",
+     "op": ">",
+     "value": 0.0
+    },
+    {
+     "feature": "W_base_depth30",
+     "op": "<=",
+     "value": 0.35
+    },
+    {
+     "feature": "W_dist_hi50",
+     "op": ">",
+     "value": -0.08
+    },
+    {
+     "feature": "W_contraction",
+     "op": "<=",
+     "value": 0.7
+    }
+   ],
+   "label": "mean fwd_ret_6m above the same date's average (winsorised 1/99)",
+   "excess_by_era": {
+    "train": {
+     "excess_mean": 0.010200825095236007,
+     "excess_lo": 0.006577547974325287,
+     "excess_hi": 0.013711582065779323,
+     "n_obs": 26030,
+     "n_stocks": 1448,
+     "timing_lift": 0.2608403995414603,
+     "timing_lo": 0.1578902918131929,
+     "timing_hi": 0.37901993666663236
+    },
+    "validate": {
+     "excess_mean": 0.013117087319199534,
+     "excess_lo": 0.009118371169027433,
+     "excess_hi": 0.017191347429848586,
+     "n_obs": 21361,
+     "n_stocks": 1795,
+     "timing_lift": 0.6709136880445097,
+     "timing_lo": 0.2794391104880912,
+     "timing_hi": 1.1260273087720065
+    },
+    "test": {
+     "excess_mean": 0.04211711853804685,
+     "excess_lo": 0.03814807326470304,
+     "excess_hi": 0.04627061050663988,
+     "n_obs": 22653,
+     "n_stocks": 2276,
+     "timing_lift": 0.5517601452465064,
+     "timing_lo": 0.32038690248932805,
+     "timing_hi": 0.7982498103973246
+    }
+   },
+   "robustness": {
+    "passed": true,
+    "reasons": [],
+    "liquid_timing_lift": 0.19312877780821322,
+    "liquid_lo": 0.05744137546500521,
+    "liquid_hi": 0.34918858226001703,
+    "liquid_stocks": 1446,
+    "liquid_excess_mean": 0.022334976858149096,
+    "liquid_excess_lo": 0.017822748698444277,
+    "liquid_excess_hi": 0.026891035936141665,
+    "p_bad_rule": 0.05628393590252947,
+    "p_bad_all": 0.17463505888125613,
+    "median_ret_rule": 0.015843462012197662,
+    "median_ret_all": -0.006191939571338012,
+    "excess_mean": 0.04211711853804685,
+    "excess_lo": 0.03814807326470304,
+    "excess_hi": 0.04627061050663988
+   },
+   "status": "approved",
+   "rejected_because": [],
+   "provisional": true,
+   "caveat": "Earns more than the average stock but is LESS likely to double: its timing lift is below 1. Excess return is measured on 6-month winsorised returns before costs, against the equal-weighted average of liquid listed stocks. Two eras of evidence; 2001-2012 shows about +1% per half-year, 2018-2026 about +2% to +5%.",
+   "exploratory_verdict": true
+  }
+ ]
+}

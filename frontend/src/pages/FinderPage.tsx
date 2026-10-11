@@ -20,8 +20,12 @@ const KLineChartOverlay = lazy(() => import('../components/chart/KLineChartOverl
 //      ({signal: {...}, pennyking: {...}, maker: {...}}), not {presets: [...]}.
 //   2. /api/finder/health returns a bare dict keyed by table name
 //      ({price_data: {...}, indicators: {...}, ...}), not {tables: [...]}.
-//      There is also no `stale` field — staleness has to be derived from
-//      latest_date / instruments_current / instruments_total.
+//      There is also no `stale` field — staleness has to be derived here.
+//      Each entry carries `kind`: "dense" tables (prices, indicators,
+//      compressions) report instruments_current/instruments_total, and that
+//      ratio is a real coverage signal; "event" tables (breakout_signals)
+//      report events_30d/instruments_30d and have NO meaningful coverage
+//      ratio. Do not reintroduce a ratio test across both kinds.
 
 interface FinderChecks {
   // Each key is present only if the backend actually evaluated it — e.g.
@@ -60,6 +64,14 @@ interface FinderScanResult {
   range_low: number | null
   range_mid: number | null
   distance_to_entry_pct: number | null
+  // Where the price sits relative to those levels, and the reward-to-risk a buyer
+  // would really get. `risk_reward` above is the PLANNED ratio at the entry level
+  // (1.0 by construction); `rr_real` is measured from the price you would pay.
+  entry_status: EntryStatus | null
+  fill_ref: number | null
+  rr_real: number | null
+  risk_pct: number | null
+  reward_pct: number | null
 }
 
 interface FinderScanResponse {
@@ -76,9 +88,17 @@ interface FinderScanResponse {
 }
 
 interface FinderHealthTable {
+  // "dense" = one row per instrument per bar, so coverage is meaningful.
+  // "event" = a row only when something happens (breakouts), where coverage
+  // is not a health signal at all — see isStaleTable.
+  kind: 'dense' | 'event'
   latest_date: string | null
-  instruments_current: number
   instruments_total: number
+  // dense only
+  instruments_current?: number
+  // event only
+  events_30d?: number
+  instruments_30d?: number
 }
 type FinderHealth = Record<string, FinderHealthTable>
 
@@ -190,6 +210,22 @@ for (const pair of ETF_PAIRS) {
   if (pair.bear) ETF_SYMBOL_INFO.set(pair.bear, { pair, side: 'bear' })
 }
 
+/**
+ * Where a listed setup stands relative to its own levels. Replaying the Finder over the
+ * whole listed universe showed 55-57% of fills happened ABOVE the displayed entry, so
+ * the "R:R 1.0:1" every row used to show was not what a buyer got (realised mean 0.68).
+ */
+type EntryStatus = 'below_entry' | 'at_entry' | 'past_entry' | 'below_stop' | 'past_target'
+
+const ENTRY_STATUS_ORDER: EntryStatus[] = ['below_entry', 'at_entry', 'past_entry', 'below_stop', 'past_target']
+const ENTRY_STATUS_LABEL: Record<EntryStatus, string> = {
+  below_entry: 'below entry',
+  at_entry: 'at entry',
+  past_entry: 'past entry',
+  below_stop: 'below stop',
+  past_target: 'past target',
+}
+
 // ── Unified row — one shape for both finder-scan and crypto-scan results, so
 // there is a single row renderer regardless of which preset produced it. ────
 
@@ -203,6 +239,12 @@ interface Row {
   riskReward: number | null
   /** % price must move to reach entry. Negative means it is already through. */
   distanceToEntryPct: number | null
+  /** null for rows with no consolidation levels, and for crypto (it quotes entry at market). */
+  entryStatus: EntryStatus | null
+  /** Reward-to-risk from the price a buyer would pay. null when the setup is dead. */
+  rrReal: number | null
+  /** % lost from that price if the stop is hit. */
+  riskPct: number | null
   positionSize: number | null
   compressionScore: number | null
   compressionDuration: number | null
@@ -229,6 +271,9 @@ function rowFromFinderResult(r: FinderScanResult, note: string | null = null): R
     target: r.target ?? null,
     riskReward: r.risk_reward ?? null,
     distanceToEntryPct: r.distance_to_entry_pct ?? null,
+    entryStatus: r.entry_status ?? null,
+    rrReal: r.rr_real ?? null,
+    riskPct: r.risk_pct ?? null,
     positionSize: null,
     compressionScore: r.compression_score,
     compressionDuration: r.compression_duration,
@@ -256,6 +301,9 @@ function rowFromCryptoRec(rec: CryptoTradeRec): Row {
     // Crypto recommendations quote entry at the current price, so there is no
     // gap to the trigger to report.
     distanceToEntryPct: null,
+    entryStatus: null,
+    rrReal: null,
+    riskPct: null,
     positionSize: actionable ? rec.position_size : null,
     compressionScore: null,
     compressionDuration: null,
@@ -346,8 +394,30 @@ function daysSince(dateStr: string): number {
 function isStaleTable(t: FinderHealthTable): boolean {
   if (t.latest_date == null) return true
   if (daysSince(t.latest_date) > 5) return true
-  if (t.instruments_total > 0 && t.instruments_current / t.instruments_total < 0.5) return true
+  // Coverage only means something for dense tables. breakout_signals is an
+  // event table — roughly 70 events a month across 232 instruments — so on a
+  // normal day one or two are "current" and the old ratio test flagged it as
+  // stale every single day. A warning that is always on is not a warning.
+  if (t.kind === 'dense') {
+    const current = t.instruments_current ?? 0
+    // Healthy coverage is ~98% (a few delisted tickers never advance). The line was 50%, which let
+    // a real gap through: on 2026-10-06 half-written bars dropped 115 of 234 instruments out of
+    // volatility and compression, 49.1% coverage, and the banner appeared only because that
+    // happened to sit just under the line. At 120 affected it would have stayed silent.
+    if (t.instruments_total > 0 && current / t.instruments_total < 0.9) return true
+  }
   return false
+}
+
+// What to show per table in the staleness banner — the dense/event split
+// again, because "1/232 instruments current" is alarming and meaningless for
+// an event table.
+function healthDetail(t: FinderHealthTable): string {
+  const latest = `latest ${t.latest_date ?? 'unknown'}`
+  if (t.kind === 'event') {
+    return `${latest} · ${t.events_30d ?? 0} events in 30d across ${t.instruments_30d ?? 0} instruments`
+  }
+  return `${latest} · ${t.instruments_current ?? 0}/${t.instruments_total} instruments current`
 }
 
 // ── Small presentational pieces ─────────────────────────────────────────────
@@ -386,14 +456,58 @@ const CHECK_DEFS: { key: keyof FinderChecks; label: string }[] = [
   { key: 'confluence', label: 'Confluence' },
 ]
 
-function TradeStat({ label, value, tone, suffix }: { label: string; value: number | null; tone?: 'up' | 'down'; suffix?: string }) {
+function TradeStat({ label, value, tone, suffix, digits = 1, title }: { label: string; value: number | null; tone?: 'up' | 'down'; suffix?: string; digits?: number; title?: string }) {
   const color = tone === 'up' ? 'text-[color:var(--up)]' : tone === 'down' ? 'text-[color:var(--down)]' : 'text-[color:var(--text-primary)]'
   return (
-    <div>
+    <div title={title}>
       <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">{label}</div>
       <div className={`num text-[length:var(--text-base)] font-[var(--weight-medium)] ${color}`}>
-        {value == null ? '—' : suffix ? `${value.toFixed(1)}${suffix}` : `$${fmtPrice(value)}`}
+        {value == null ? '—' : suffix ? `${value.toFixed(digits)}${suffix}` : `$${fmtPrice(value)}`}
       </div>
+    </div>
+  )
+}
+
+/** "5 below entry · 1 at entry · 4 past entry" — how many of the listed setups are still takeable as shown. */
+function statusSummary(rows: Row[]): string | null {
+  const counts = new Map<EntryStatus, number>()
+  for (const r of rows) if (r.entryStatus) counts.set(r.entryStatus, (counts.get(r.entryStatus) ?? 0) + 1)
+  if (counts.size === 0) return null
+  return ENTRY_STATUS_ORDER.filter(st => counts.has(st)).map(st => `${counts.get(st)} ${ENTRY_STATUS_LABEL[st]}`).join(' · ')
+}
+
+/**
+ * One line saying where the price stands against the setup, so the levels above it are read in context.
+ * Colour is deliberately not used: the design system reserves green/red for price direction and amber
+ * for interactive state. The states that need attention get weight instead.
+ */
+function EntryStatusLine({ row }: { row: Row }) {
+  const { entryStatus: st, price, entry, riskPct } = row
+  if (!st || price == null || entry == null) return null
+  const away = Math.abs((price - entry) / entry * 100)
+  const risk = riskPct != null ? `risks ${riskPct.toFixed(1)}% to the stop` : null
+  let lead: string
+  let rest: Array<string | null>
+  let attention = true
+  switch (st) {
+    case 'below_entry':
+      lead = 'Not triggered'; rest = [`${away.toFixed(1)}% below entry`, risk]; attention = false; break
+    case 'at_entry':
+      lead = 'At entry'; rest = [risk]; attention = false; break
+    case 'past_entry':
+      lead = `Past entry by ${away.toFixed(1)}%`; rest = [risk ? `buying here ${risk}` : null]; break
+    case 'below_stop':
+      lead = 'Below its stop'; rest = ['the setup has failed']; break
+    case 'past_target':
+      lead = 'Past its target'; rest = ['the move has already happened']; break
+  }
+  const detail = rest.filter(Boolean).join(' · ')
+  return (
+    <div className="mt-2 text-[length:var(--text-xs)]">
+      <span className={attention
+        ? 'font-[var(--weight-medium)] text-[color:var(--text-primary)]'
+        : 'text-[color:var(--text-secondary)]'}>{lead}</span>
+      {detail && <span className="text-[color:var(--text-muted)]"> · {detail}</span>}
     </div>
   )
 }
@@ -404,6 +518,10 @@ function ResultRow({ row, onOpenChart }: { row: Row; onOpenChart: (symbol: strin
   const [expanded, setExpanded] = useState(false)
   const hasTrade = row.entry != null || row.stop != null || row.target != null
   const hasChecks = row.checks != null && row.passed != null
+  // A setup that is below its stop or past its target has no trade left in it: the levels are history.
+  const dead = row.entryStatus === 'below_stop' || row.entryStatus === 'past_target'
+  // Rows with a status show the ratio from where you would actually buy; crypto has no status and keeps its own.
+  const rr = row.entryStatus ? row.rrReal : row.riskReward
 
   return (
     <div
@@ -435,12 +553,20 @@ function ResultRow({ row, onOpenChart }: { row: Row; onOpenChart: (symbol: strin
 
       {/* THE TRADE — entry / stop / target / R:R, sized to be readable at a glance */}
       {hasTrade ? (
-        <div className="mt-3 grid grid-cols-4 gap-3 max-w-md">
-          <TradeStat label="Entry" value={row.entry} />
-          <TradeStat label="Stop" value={row.stop} tone="down" />
-          <TradeStat label="Target" value={row.target} tone="up" />
-          <TradeStat label="R:R" value={row.riskReward} suffix=":1" />
-        </div>
+        <>
+          <div className={`mt-3 grid grid-cols-4 gap-3 max-w-md ${dead ? 'opacity-50' : ''}`}>
+            <TradeStat label="Entry" value={row.entry} />
+            <TradeStat label="Stop" value={row.stop} tone="down" />
+            <TradeStat label="Target" value={row.target} tone="up" />
+            <TradeStat
+              label="R:R" value={rr} suffix=":1" digits={2}
+              title={row.entryStatus
+                ? 'Reward-to-risk from the price you would actually pay: the entry level while untriggered, the current price once past it. The planned 1.0:1 only holds at the entry.'
+                : undefined}
+            />
+          </div>
+          <EntryStatusLine row={row} />
+        </>
       ) : (
         <div className="mt-2 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
           No trade levels — screener match only
@@ -649,7 +775,7 @@ export default function FinderPage() {
               <div className="mt-1 space-y-0.5">
                 {staleTables.map(([name, t]) => (
                   <div key={name} className="num text-[length:var(--text-xs)] text-[color:var(--text-secondary)]">
-                    {name}: latest {t.latest_date ?? 'unknown'} · {t.instruments_current}/{t.instruments_total} instruments current
+                    {name}: {healthDetail(t)}
                   </div>
                 ))}
               </div>
@@ -702,7 +828,10 @@ export default function FinderPage() {
         </div>
       )}
       {!isScanning && scanMeta && !error && (
-        <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">{scanMeta}</div>
+        <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
+          {scanMeta}
+          {results && statusSummary(results) && <span> · {statusSummary(results)}</span>}
+        </div>
       )}
 
       {error && (

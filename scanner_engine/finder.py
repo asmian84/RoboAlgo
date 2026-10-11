@@ -34,6 +34,12 @@ Wide-universe scanning:
         DB. It is slower (minutes, not milliseconds) and confluence is
         skipped entirely (see scan_wide's docstring), but it is the only
         path that can ever find a real penny stock.
+
+        Stage 1 prefers TradingView's server-side screener (one request,
+        full universe, ~seconds) via data_engine.tradingview_provider and
+        falls back to the yfinance batch loop above when that is
+        unavailable. `stats["stage1_source"]` says which one ran. TradingView
+        is trusted for symbol / price / volume ONLY — see _stage1_screen.
 """
 from __future__ import annotations
 
@@ -41,6 +47,7 @@ import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date, timedelta
 from statistics import mean
 
 import numpy as np
@@ -74,6 +81,17 @@ class FinderCriteria:
     require_breakout_ready: bool = False
     consolidation_lookback: int = 30      # bars back to look for compression
     min_compression_score: float = 50.0
+    # Reject an instrument whose newest bar is older than this many calendar
+    # days. Without it `scan()` happily evaluates a delisted ticker's last
+    # known rows as if they were today's: CFLT stopped trading on 2026-03-05
+    # and was still being returned as the TOP result seven months later, with
+    # a confident-looking entry/stop/target built on a dead price. Nothing in
+    # the output said the quote was old, and the health panel counted it
+    # inside "230/234 current".
+    #
+    # 5 days absorbs a Friday bar read on the Tuesday after a Monday holiday
+    # without letting a genuinely dead symbol through.
+    max_bar_age_days: int = 5
 
 
 # Gap tolerance is calibrated PER PRICE BAND, because "no gaps" is not one
@@ -188,6 +206,14 @@ def _load_recent_breakouts(session, n: int) -> dict[int, list]:
 
 # ── Trade levels ──────────────────────────────────────────────────────────────
 
+# A price within this many percent of the entry level counts as "at entry": close enough that
+# the buy-stop is about to work or just has. Beyond it the setup is clearly below or past entry.
+AT_ENTRY_PCT = 0.5
+
+# The five states a listed setup can be in, relative to its own levels. Checked in this order.
+ENTRY_STATUSES = ("past_target", "below_stop", "past_entry", "at_entry", "below_entry")
+
+
 def trade_levels(range_high, range_low, price) -> dict:
     """Derive entry / stop / target from the consolidation the screener matched.
 
@@ -208,6 +234,25 @@ def trade_levels(range_high, range_low, price) -> dict:
     that is their call to make, not something to bake in so the screen looks
     better than it is. range_mid is returned so the UI can offer it.
 
+    `risk_reward` is the PLANNED ratio, measured from the entry level. It is not
+    what a buyer gets once the setup is past its trigger, and replaying the
+    Finder over the whole listed universe (docs/FINDER_VALIDATION_2026-10-06.md)
+    showed that is the usual case: 55-57% of fills happened ABOVE the displayed
+    entry, so the realised ratio averaged 0.68, not 1.0. Two things therefore
+    come with the levels:
+
+        entry_status  where the price is relative to the setup:
+                        below_entry  not triggered; a buy-stop at entry is still working
+                        at_entry     within AT_ENTRY_PCT of entry, either side
+                        past_entry   already through the trigger; chasing
+                        below_stop   at or under the stop: the consolidation has failed
+                        past_target  at or over the target: the measured move is done
+        rr_real       reward-to-risk from `fill_ref`, the price a buyer would actually
+                      pay: the entry level while untriggered, the current price once
+                      past it. None for below_stop / past_target, where there is no
+                      trade left to take. risk_pct / reward_pct are the same two legs
+                      as a percentage of fill_ref.
+
     Returns all-None when there is no consolidation to measure from, rather
     than inventing levels off a price alone.
     """
@@ -222,6 +267,8 @@ def trade_levels(range_high, range_low, price) -> dict:
         return {
             "entry": None, "stop": None, "target": None, "risk_reward": None,
             "range_high": None, "range_low": None, "range_mid": None,
+            "entry_status": None, "fill_ref": None, "rr_real": None,
+            "risk_pct": None, "reward_pct": None,
         }
 
     height = rh - rl
@@ -231,6 +278,25 @@ def trade_levels(range_high, range_low, price) -> dict:
     risk = entry - stop
     rr = round((target - entry) / risk, 2) if risk > 0 else None
 
+    status = fill_ref = rr_real = risk_pct = reward_pct = None
+    if px:
+        above_entry_pct = (px - entry) / entry * 100       # + means price is already past the trigger
+        if px >= target:
+            status = "past_target"
+        elif px <= stop:
+            status = "below_stop"
+        elif above_entry_pct > AT_ENTRY_PCT:
+            status = "past_entry"
+        elif above_entry_pct >= -AT_ENTRY_PCT:
+            status = "at_entry"
+        else:
+            status = "below_entry"
+        if status in ("below_entry", "at_entry", "past_entry"):
+            fill_ref = max(px, entry)                       # you cannot buy the break below the break
+            rr_real = round((target - fill_ref) / (fill_ref - stop), 2)
+            risk_pct = round((fill_ref - stop) / fill_ref * 100, 2)
+            reward_pct = round((target - fill_ref) / fill_ref * 100, 2)
+
     return {
         "entry": round(entry, 4),
         "stop": round(stop, 4),
@@ -239,8 +305,14 @@ def trade_levels(range_high, range_low, price) -> dict:
         "range_high": round(rh, 4),
         "range_low": round(rl, 4),
         "range_mid": round((rh + rl) / 2, 4),
-        # How far price sits below the trigger — 0 means it is breaking out now.
+        # How far price sits below the trigger — 0 means it is breaking out now,
+        # negative means it is already through.
         "distance_to_entry_pct": round((entry - px) / px * 100, 2) if px else None,
+        "entry_status": status,
+        "fill_ref": round(fill_ref, 4) if fill_ref is not None else None,
+        "rr_real": rr_real,
+        "risk_pct": risk_pct,
+        "reward_pct": reward_pct,
     }
 
 
@@ -371,6 +443,43 @@ def _evaluate(symbol: str, criteria: FinderCriteria, prices: list, indicator, co
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
+def attach_setup_evidence(results: list[dict], daily_by_symbol: dict | None = None) -> dict:
+    """Add `setup_evidence` to each result: which APPROVED learned setups it matches, and what the
+    evidence behind each says. Tags only. It never re-ranks, filters or drops a result, and it never
+    raises: on failure each result carries `setup_evidence: None` plus an error, and the returned status
+    says so. See setup_engine/apply.py for what "approved" means and what the tags do and do not claim."""
+    try:
+        from setup_engine import apply as setup_apply
+        return setup_apply.annotate(results, daily_by_symbol)
+    except Exception as exc:                                    # noqa: BLE001
+        logger.warning("setup evidence unavailable: %s", exc)
+        for r in results:
+            r["setup_evidence"] = None
+            r["setup_evidence_error"] = f"{type(exc).__name__}: {exc}"
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _db_daily_bars(symbols: list[str], bars: int = 600) -> dict:
+    """Recent daily bars for a few tracked instruments, straight from the price table."""
+    if not symbols:
+        return {}
+    with get_session() as session:
+        rows = session.execute(
+            select(Instrument.symbol, PriceData.date, PriceData.open, PriceData.high,
+                   PriceData.low, PriceData.close, PriceData.volume)
+            .join(PriceData, PriceData.instrument_id == Instrument.id)
+            .where(Instrument.symbol.in_(symbols), PriceData.close.isnot(None))
+        ).all()
+    if not rows:
+        return {}
+    df = pd.DataFrame(rows, columns=["symbol", "date", "open", "high", "low", "close", "volume"])
+    df["date"] = pd.to_datetime(df["date"])
+    out = {}
+    for sym, g in df.groupby("symbol"):
+        out[sym] = g.set_index("date").drop(columns="symbol").sort_index().astype(float).iloc[-bars:]
+    return out
+
+
 def scan(criteria: FinderCriteria, limit: int = 100) -> list[dict]:
     with get_session() as session:
         instruments = _load_instruments(session)
@@ -381,12 +490,28 @@ def scan(criteria: FinderCriteria, limit: int = 100) -> list[dict]:
         compressions_by_id = _load_recent_compressions(session, criteria.consolidation_lookback)
         breakouts_by_id = _load_recent_breakouts(session, 10)
 
+        cutoff = date.today() - timedelta(days=criteria.max_bar_age_days)
+
         results = []
+        stale_symbols: list[str] = []
         for instrument_id, symbol in instruments:
+            prices = prices_by_id.get(instrument_id, [])
+
+            # Recency gate, before any signal logic. `prices` is ascending by
+            # date, so [-1] is the newest bar this instrument has. A symbol
+            # that stopped trading keeps its last rows forever and every
+            # downstream check happily passes on them — the screener cannot
+            # tell "quiet consolidation" from "delisted".
+            if prices and criteria.max_bar_age_days > 0:
+                newest = prices[-1].date
+                if newest < cutoff:
+                    stale_symbols.append(f"{symbol} ({newest})")
+                    continue
+
             candidate = _evaluate(
                 symbol,
                 criteria,
-                prices_by_id.get(instrument_id, []),
+                prices,
                 indicators_by_id.get(instrument_id),
                 compressions_by_id.get(instrument_id, []),
                 breakouts_by_id.get(instrument_id, []),
@@ -394,11 +519,22 @@ def scan(criteria: FinderCriteria, limit: int = 100) -> list[dict]:
             if candidate is not None:
                 results.append(candidate)
 
+        if stale_symbols:
+            logger.warning(
+                "Finder excluded %d instrument(s) with no bar in the last %d "
+                "days: %s. These are usually delisted or renamed and should be "
+                "removed from the tracked universe.",
+                len(stale_symbols), criteria.max_bar_age_days,
+                ", ".join(sorted(stale_symbols)),
+            )
+
     results.sort(
         key=lambda r: (r["compression_score"] or 0, r["breakout_strength"] or 0),
         reverse=True,
     )
-    return results[:limit]
+    results = results[:limit]
+    attach_setup_evidence(results, _db_daily_bars([r["symbol"] for r in results]))
+    return results
 
 
 def _quiet_yfinance():
@@ -414,19 +550,148 @@ def _quiet_yfinance():
 # ── Stage 1: cheap bulk screen (price/volume only, no history) ────────────────
 
 _STAGE1_BATCH = 300
-_STAGE1_CACHE: dict[tuple, tuple[float, list[dict], int]] = {}
+# (timestamp, survivors, failed, source) — source is "tradingview" | "yfinance".
+_STAGE1_CACHE: dict[tuple, tuple[float, list[dict], int, str]] = {}
 _STAGE1_CACHE_TTL = 900  # 15 min
 
+# A provider price may sit this far outside the requested band before it is
+# treated as a violation. Pure float-noise tolerance, not a fuzzy margin.
+_BAND_EPS = 1e-9
 
-def _stage1_screen(universe: list[str], criteria: FinderCriteria) -> tuple[list[dict], int]:
-    """One cheap 1-day bulk download per batch of ~300 tickers. Filters on
-    price band + volume only (no history, no indicators). Returns
-    (survivors, failed_count) where survivors are
-    [{"symbol", "price", "volume"}, ...].
+
+def _tradingview_stage1(criteria: FinderCriteria) -> tuple[list[dict], int] | None:
+    """Stage-1 survivors from TradingView, or None if the caller should fall
+    back to yfinance. NEVER raises.
+
+    *** CORPORATE-ACTION GUARD — wrong-trade defence ***
+    TradingView is trusted here for exactly three things: symbol, price and
+    volume. Its PRECOMPUTED INDICATORS (SMA50 / SMA200 / RSI / change) are NOT
+    corporate-action-consistent with its own close, and the corruption is
+    silent and symbol-dependent. Verified live on 2026-10-06, same request:
+
+        symbol  close    SMA50    SMA200   RSI    change
+        CTVA    12.39    77.32    77.88    6.38   +3.94%   <-- inconsistent
+        SPY    774.83   764.42   720.95   58.83   +0.67%
+        MSFT   525.18   490.59   433.07   66.17   +1.48%
+        NVDA   238.90   218.92   201.02   66.90   +2.12%
+        AAPL   332.89   322.41   289.45   53.79   -0.24%
+
+    NYSE:CTVA closes at 12.39 but its "SMA50" is 77.32 — the averages were
+    computed on pre-adjustment prices, so a screen reading them would see an
+    ~84%-below-the-mean, RSI-6 extreme-oversold name that was actually UP 3.9%.
+    SPY/MSFT/NVDA/AAPL are self-consistent, which is why this is dangerous:
+    it only bites whichever symbols had a corporate action. CTVA is the #1
+    survivor of a $1-$20 screen, so this is live, not hypothetical.
+
+    So this function takes symbol/price/volume and nothing else.
+    `_stage2_deep_scan` / `_evaluate_wide` remain the ONLY source of signal
+    math: they pull real ~1y adjusted OHLCV and compute every indicator
+    themselves, and they re-check the price band against that fresh close.
+
+    Belt and braces on top of the provider's own band filter: any row whose
+    price falls outside the requested band by more than _BAND_EPS (or that is
+    malformed) is dropped and counted into `failed`, so a server that quietly
+    ignored part of the filter cannot widen the funnel.
+    """
+    try:
+        from data_engine import tradingview_provider
+
+        result = tradingview_provider.screen(criteria)
+        if result is None:
+            return None
+        raw, provider_failed = result
+
+        survivors: list[dict] = []
+        failed = int(provider_failed)
+        for row in raw:
+            try:
+                symbol = row["symbol"]
+                price = float(row["price"])
+                volume = float(row["volume"])
+                if not isinstance(symbol, str) or not symbol or not price > 0 or not volume >= 0:
+                    raise ValueError("malformed provider row")
+                if criteria.min_price is not None and price < criteria.min_price - _BAND_EPS:
+                    raise ValueError("below price band")
+                if criteria.max_price is not None and price > criteria.max_price + _BAND_EPS:
+                    raise ValueError("above price band")
+            except (KeyError, TypeError, ValueError):
+                failed += 1
+                continue
+            survivors.append({"symbol": symbol, "price": price, "volume": volume})
+
+        if not survivors:
+            return None
+        return survivors, failed
+    except Exception as exc:  # noqa: BLE001 — a provider problem must never break the scan
+        logger.warning("stage1: tradingview provider error, falling back: %s: %s", type(exc).__name__, exc)
+        return None
+
+
+# TradingView's market size changes slowly; measure it rarely.
+_TV_UNIVERSE_CACHE: tuple[float, int] | None = None
+_TV_UNIVERSE_TTL = 6 * 3600
+
+
+def _tradingview_universe_size() -> int | None:
+    """How many US stocks TradingView screened, or None if unknown. NEVER raises.
+
+    `provider.screen()` returns only the rows that survived the band, not the
+    size of the market it searched, so the figure `stats.universe_size` needs
+    is not in the stage-1 result. The only way to get it through the
+    provider's public API is an unfiltered screen (no price band, any
+    volume): rows returned = stocks examined. That is a multi-page walk
+    (~12 requests, a few seconds), so it is measured at most once per
+    _TV_UNIVERSE_TTL and best-effort — a failure just means the caller falls
+    back to a floored estimate rather than failing the scan.
+    """
+    global _TV_UNIVERSE_CACHE
+    now = time.time()
+    if _TV_UNIVERSE_CACHE is not None and now - _TV_UNIVERSE_CACHE[0] < _TV_UNIVERSE_TTL:
+        return _TV_UNIVERSE_CACHE[1]
+    try:
+        from data_engine import tradingview_provider
+
+        result = tradingview_provider.screen(
+            FinderCriteria(min_price=None, max_price=None, min_volume=-1)
+        )
+        if result is None:
+            return None
+        rows, failed = result
+        size = len(rows) + int(failed)
+    except Exception as exc:  # noqa: BLE001 — a stat must never break the scan
+        logger.info("stage1: tradingview universe size unavailable: %s: %s", type(exc).__name__, exc)
+        return None
+    if size <= 0:
+        return None
+    _TV_UNIVERSE_CACHE = (now, size)
+    return size
+
+
+def _stage1_screen(
+    universe: list[str],
+    criteria: FinderCriteria,
+    allow_provider: bool = True,
+) -> tuple[list[dict], int, str]:
+    """Stage-1 price/volume screen. Returns (survivors, failed_count, source)
+    where survivors are [{"symbol", "price", "volume"}, ...] and source is
+    "tradingview" or "yfinance" — the path that actually produced them.
+
+    Preferred path: TradingView's server-side screener (one request over the
+    whole market, see _tradingview_stage1 for the trust boundary). It ignores
+    `universe` by design — it screens the full market in one call — so it is
+    skipped when `allow_provider` is False (an explicit caller-supplied
+    universe must be honoured, and the provider cannot do that).
+
+    Fallback path (TradingView returned None / empty, or is disallowed): one
+    cheap 1-day yfinance bulk download per batch of ~300 tickers over
+    `universe`. Filters on price band + volume only (no history, no
+    indicators). This loop is unchanged.
 
     Cached in-process for _STAGE1_CACHE_TTL, keyed primarily by the
     price/volume band (plus a cheap universe fingerprint so two different
-    universes with the same band never collide).
+    universes with the same band never collide). The cache is consulted
+    BEFORE the provider, so both paths are cached; a cached fallback result
+    keeps its "yfinance" source label until it expires.
     """
     cache_key = (
         criteria.min_price,
@@ -434,12 +699,25 @@ def _stage1_screen(universe: list[str], criteria: FinderCriteria) -> tuple[list[
         criteria.min_volume,
         len(universe),
         hash(tuple(universe)),
+        allow_provider,
     )
     now = time.time()
     cached = _STAGE1_CACHE.get(cache_key)
     if cached is not None and now - cached[0] < _STAGE1_CACHE_TTL:
-        _, survivors, failed = cached
-        return survivors, failed
+        _, survivors, failed, source = cached
+        return survivors, failed, source
+
+    if allow_provider:
+        tv = _tradingview_stage1(criteria)
+        if tv is not None:
+            tv_survivors, tv_failed = tv
+            _STAGE1_CACHE[cache_key] = (now, tv_survivors, tv_failed, "tradingview")
+            return tv_survivors, tv_failed, "tradingview"
+        logger.info(
+            "stage1: TradingView unavailable or returned nothing; "
+            "falling back to the yfinance batch screen over %d tickers",
+            len(universe),
+        )
 
     survivors: list[dict] = []
     failed = 0
@@ -494,8 +772,8 @@ def _stage1_screen(universe: list[str], criteria: FinderCriteria) -> tuple[list[
     finally:
         yf_logger.setLevel(prev_level)
 
-    _STAGE1_CACHE[cache_key] = (now, survivors, failed)
-    return survivors, failed
+    _STAGE1_CACHE[cache_key] = (now, survivors, failed, "yfinance")
+    return survivors, failed, "yfinance"
 
 
 # ── Stage 2: deep per-symbol OHLCV analysis (survivors only) ──────────────────
@@ -768,11 +1046,17 @@ def scan_wide(
     ~234-instrument DB universe.
 
     Two stages:
-      1. Cheap 1-day bulk yfinance download over the whole universe (default:
-         the full live ~13,786-symbol US ticker list from
-         trade_signal_engine.universe._get_all_exchange_tickers), filtered on
-         price band + volume only. Cached in-process ~15 min per price/volume
-         band.
+      1. Price band + volume screen only, cached in-process ~15 min per
+         price/volume band. Preferred source is TradingView's server-side
+         screener (data_engine.tradingview_provider): one request screens the
+         whole market in seconds, so `max_universe` does NOT apply to it. If
+         TradingView is unavailable (or the caller passed an explicit
+         `universe`, which it cannot honour) this falls back to a cheap 1-day
+         bulk yfinance download over the universe (default: the live
+         ~13,786-symbol US ticker list from
+         trade_signal_engine.universe._get_all_exchange_tickers), which IS
+         capped by `max_universe`. TradingView supplies symbol/price/volume
+         only; it never supplies indicators (see _tradingview_stage1).
       2. Deep ~250-bar OHLCV pass, live, over the top `max_deep` stage-1
          survivors ranked by dollar volume (price × volume — most liquid
          first, since illiquid penny names are untradeable regardless of
@@ -785,10 +1069,13 @@ def scan_wide(
 
     Returns {"results": [...], "stats": {...}}. Each result has the same
     shape scan() returns. `stats` always reports universe_size so a scan's
-    true coverage is visible rather than assumed.
+    true coverage is visible rather than assumed, and `stage1_source`
+    ("tradingview" | "yfinance") so a scan never silently misrepresents which
+    path produced its candidates.
     """
     start = time.time()
 
+    explicit_universe = universe is not None
     if universe is None:
         from trade_signal_engine.universe import _get_all_exchange_tickers
 
@@ -806,6 +1093,10 @@ def scan_wide(
     # universe_size is what was actually screened, universe_available is what
     # existed. Pass max_universe=0 for the full sweep when a slow, complete
     # run is genuinely wanted (a scheduled job rather than a click).
+    #
+    # The cap exists for the yfinance fallback only. The TradingView path
+    # screens the whole market server-side in one request, so when it serves
+    # stage 1 the cap is moot and is reported as not applied (see stats below).
     universe_available = len(universe)
     if max_universe and universe_available > max_universe:
         universe = universe[:max_universe]
@@ -818,7 +1109,32 @@ def scan_wide(
             criteria.min_confluence,
         )
 
-    stage1_survivors, stage1_failed = _stage1_screen(universe, criteria)
+    # An explicit caller-supplied universe must be honoured, and TradingView
+    # cannot screen an arbitrary symbol list — so only the default universe
+    # may use the provider.
+    stage1_survivors, stage1_failed, stage1_source = _stage1_screen(
+        universe, criteria, allow_provider=not explicit_universe,
+    )
+
+    if stage1_source == "tradingview":
+        # Nothing was capped: TradingView screened its whole US stock market
+        # server-side, so `max_universe` did not apply. The ticker listing
+        # fetched above belongs to the yfinance fallback — it can be a
+        # different size AND a different membership (it excludes OTC and
+        # includes ETFs; TradingView's `type == stock` is the reverse), and
+        # when the listing source is down it is only a ~361-name static list,
+        # which would report a "universe" smaller than the survivor count.
+        # So report TradingView's own market size. If that measurement is
+        # unavailable, fall back to the listing length but never below the
+        # rows TradingView demonstrably returned.
+        tv_size = _tradingview_universe_size()
+        if tv_size is None:
+            tv_size = max(universe_available, len(stage1_survivors) + stage1_failed)
+        universe_size = universe_available = tv_size
+        universe_capped = False
+    else:
+        universe_size = len(universe)
+        universe_capped = len(universe) < universe_available
 
     stage1_survivors = sorted(
         stage1_survivors, key=lambda s: s["price"] * s["volume"], reverse=True
@@ -833,12 +1149,15 @@ def scan_wide(
     )
 
     stats = {
-        "universe_size": len(universe),
+        # Which stage-1 path produced the candidates. Never omit this: the two
+        # paths have different universes (see _tradingview_stage1 / ETF note).
+        "stage1_source": stage1_source,
+        "universe_size": universe_size,
         # What existed vs what was screened. If these differ the scan was
         # capped, and the caller should say so rather than implying full
         # market coverage.
         "universe_available": universe_available,
-        "universe_capped": len(universe) < universe_available,
+        "universe_capped": universe_capped,
         "stage1_survivors": len(stage1_survivors),
         "deep_analyzed": len(deep_candidates),
         "matched": len(results),
@@ -846,22 +1165,42 @@ def scan_wide(
         "failed_downloads": stage1_failed + stage2_failed,
     }
 
-    return {"results": results[:limit], "stats": stats}
+    final = results[:limit]
+    # Tag the hits with what the learned, validated setups say about them. Bars for these few stocks are
+    # fetched in one batched call; if that fails the scan still returns, and says so.
+    stats["setup_evidence"] = attach_setup_evidence(final)
+    return {"results": final, "stats": stats}
 
 
 def health() -> dict:
-    """Per-table freshness: latest date + how many instruments are current as
-    of that date. Makes a stale backfill VISIBLE instead of a silent empty scan.
+    """Per-table freshness. Makes a stale backfill VISIBLE instead of a silent
+    empty scan.
+
+    Two kinds of table, reported differently on purpose:
+
+    "dense" tables (prices, indicators, compressions) carry one row per
+    instrument per bar, so "how many instruments are current as of the latest
+    date" is a real coverage number — if it drops, ingestion is broken.
+
+    "event" tables (breakout_signals) only get a row when something actually
+    happens. Across this universe that is roughly 70 events a MONTH, so on any
+    normal day one or two instruments are "current" out of 232. Scoring that
+    as coverage made a healthy market look like a 99%-broken pipeline and the
+    UI showed a permanent DATA MAY BE STALE warning, which trains you to
+    ignore the one warning that matters. Event tables report recent activity
+    instead, and no coverage ratio.
     """
-    tables = (
+    dense_tables = (
         ("price_data", PriceData),
         ("indicators", Indicator),
         ("range_compressions", RangeCompression),
+    )
+    event_tables = (
         ("breakout_signals", BreakoutSignal),
     )
     result: dict = {}
     with get_session() as session:
-        for name, model in tables:
+        for name, model in dense_tables:
             latest_date = session.execute(select(func.max(model.date))).scalar()
             total_instruments = session.execute(
                 select(func.count(func.distinct(model.instrument_id)))
@@ -869,6 +1208,7 @@ def health() -> dict:
 
             if latest_date is None:
                 result[name] = {
+                    "kind": "dense",
                     "latest_date": None,
                     "instruments_current": 0,
                     "instruments_total": total_instruments,
@@ -886,8 +1226,32 @@ def health() -> dict:
             ).scalar() or 0
 
             result[name] = {
+                "kind": "dense",
                 "latest_date": str(latest_date),
                 "instruments_current": current_count,
+                "instruments_total": total_instruments,
+            }
+
+        for name, model in event_tables:
+            latest_date = session.execute(select(func.max(model.date))).scalar()
+            total_instruments = session.execute(
+                select(func.count(func.distinct(model.instrument_id)))
+            ).scalar() or 0
+
+            cutoff = date.today() - timedelta(days=30)
+            events_30d = session.execute(
+                select(func.count()).select_from(model).where(model.date >= cutoff)
+            ).scalar() or 0
+            instruments_30d = session.execute(
+                select(func.count(func.distinct(model.instrument_id)))
+                .where(model.date >= cutoff)
+            ).scalar() or 0
+
+            result[name] = {
+                "kind": "event",
+                "latest_date": str(latest_date) if latest_date else None,
+                "events_30d": events_30d,
+                "instruments_30d": instruments_30d,
                 "instruments_total": total_instruments,
             }
     return result

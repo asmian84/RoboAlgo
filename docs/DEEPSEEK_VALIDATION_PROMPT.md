@@ -539,6 +539,47 @@ the moving-average exits positive 2/17 and 3/17. The group-level table is descri
 * Entry at the first close above a moving average and an exit at the same average guarantees whipsaws: is "exposure-confounded" the right label, or is it simply a bad exit pairing?
 * The 30% trail sold AMD at +45% in mid-2024 (it went on to x11): is a fixed trail the right primary exit, and was it chosen before seeing results? (It was fixed in the plan before any run.)
 
+### CLAIM 25 (HIGH) — "today's blue chips" flatter a backtest by about 2 points per half-year, and chart setups add little in blue chips
+
+Asserted (`docs/BLUECHIP_STUDY_2026-10-12.md`, scripts in `scripts/exploratory/`): today's S&P 500 members averaged +6.0%/+8.6%/+6.7% per half-year vs +3.9%/+6.4%/+4.9% for the top 500 by dollar volume at the time;
+trend setups add +0.3% to +1.8% per half-year there; SPY above its 30-week average is not an entry signal.
+```bash
+python scripts/exploratory/bluechip_trend.py ; python scripts/exploratory/bluechip_regime.py ; python scripts/exploratory/bluechip_pullback.py ; python scripts/exploratory/bluechip_sector.py
+```
+* Join dates come from the Wikipedia table, where early rows carry placeholder dates (many 1957 or 1976). Does that weaken the join-date-aware universe?
+* "Top 500 by dollar volume" uses the 50-day dollar volume in the observation set (survivors only): is it a fair point-in-time proxy for blue chips? What does it miss (Lehman, Wachovia, Countrywide)?
+* About ten tests were run with no multiplicity correction; the RS-leader, pullback and sector rows were exploratory. Which conclusions survive a Bonferroni level?
+
+### CLAIM 26 (HIGH) — 50x stocks are 0.07% of start points; the fallen low-priced profile is a long shot; waiting for trend confirmation lowers the odds
+
+Asserted (`docs/MULTIBAGGER_STUDY_2026-10-12.md`, `scripts/multibagger_study.py`, SURVIVORS ONLY): 12 distinct stocks reached 50x within 10 years of a December start 2001-2015; the fallen $1-$10 profile hit 50x 0.84% of the time with 31.8% falling another 50%.
+```bash
+python -m pytest tests/test_study/test_multibagger_study.py -q ; python scripts/multibagger_study.py --workers 8
+```
+* Overlapping monthly starts inflate n: is the distinct-stock count the honest sample size? Recompute the 50x share per distinct stock.
+* The forward window excludes the start month and requires 120 full months; a stock delisted inside the window is missing in survivors-only runs. Quantify the bias with the delisted list once prices are merged (Tiingo loader).
+* Is the 60-month-high drawdown distorted by reverse splits? (36 of 521 pool names carry suspected unadjusted splits.)
+
+### CLAIM 27 (MEDIUM) — unadjusted splits and spin-offs do not change the earlier studies
+
+Asserted (`docs/ARTIFACT_SENSITIVITY_2026-10-12.md`): dropping contaminated trades moves the turnaround primary mean from +0.0957R to +0.0902R and the event-study excess by about 0.0003; BEFORE reproduces the published numbers exactly.
+```bash
+python -m pytest tests/test_setup_engine/test_artifacts.py tests/test_study/test_artifact_sensitivity.py -q ; python scripts/artifact_sensitivity.py --workers 8 --out /tmp/art.json
+```
+* The detector is post-hoc. Design a case it misses (artifact with a volume spike) and one it wrongly flags (halt-reopen); quantify both on the flagged list in the JSON.
+* The control is deliberately left uncleaned; does cleaning it too change any sign?
+
+### CLAIM 28 (MEDIUM) — the Tiingo loader and the SEC provider are correct offline; their live behaviour is untested
+
+Asserted: `scripts/tiingo_load_delisted.py` / `data_engine/tiingo_provider.py` (split-adjust, identity rule, throttle, token never persisted) and `data_engine/sec_edgar.py` (point-in-time rule on the `filed` date, quarterly differencing, runway) pass 171 tests with all planned mutants caught.
+```bash
+python -m pytest tests/test_data_engine/test_tiingo_provider.py tests/test_ingest/test_tiingo_load.py tests/test_data_engine/test_sec_edgar.py -q
+python scripts/tiingo_load_delisted.py --dry-run
+```
+* Tiingo `splitFactor` semantics were inferred from two live examples (a 2:1 in 1993 and a 1:4 reverse split in 2016); the adjusted series was not compared to `adjClose` live. Design that comparison.
+* XBRL pitfalls: amended filings duplicate facts; comparatives re-reported in later filings carry the later filed date; revenue concepts change around 2018; 52/53-week years; debt omits convertibles and leases. Which produces silently wrong numbers?
+* Confirm no credential or e-mail is present in the code, tests or fixtures (the only address-shaped strings should be reserved examples).
+
 ---
 
 # PART 2 — INDEPENDENT REVIEW (no claims supplied; find what was missed)

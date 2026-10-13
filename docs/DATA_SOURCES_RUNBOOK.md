@@ -43,3 +43,19 @@ export SEC_USER_AGENT="Your Name contact@your-domain.example"     # REQUIRED: th
 
 ## Security note
 Tokens pasted into a chat session are in that transcript. Regenerate the Tiingo and Market Data tokens after use, and rotate the old AlphaVantage key that is still in git history.
+
+## Alpaca (market data; account and orders live in broker_engine/alpaca.py)
+
+Not yet run with a real key. `data_engine/alpaca_provider.py` is a read-only market-data client (plain HTTP, no SDK): daily or intraday bars, the asset list (active or inactive, with the exchange so OTC rows can be told apart), the market clock and corporate-action announcements. It places no orders. Trading stays in `broker_engine/alpaca.py`, which uses the alpaca-py SDK.
+
+```bash
+export ALPACA_API_KEY=... ALPACA_SECRET_KEY=...         # same names as broker_engine/alpaca.py; paper-account keys are enough; never written to disk
+python scripts/alpaca_check.py                           # go/no-go: auth, AAPL since 2016, delisted-coverage probe (40 stocks, seed 7)
+python scripts/alpaca_check.py --plan plus --sample 100  # paid plan: faster throttle, bigger sample
+```
+* **Verdict:** PASS when at least half of the sampled delisted common stocks (AlphaVantage list, delisted 2017-2025) have bars from listing, or from 2016-01-04 for older listings, to within 45 days of delisting. FAIL means keep using the Tiingo loader. The report goes to `~/.roboalgo/reports/alpaca_check_<date>.json`. Read the per-stock rows: a re-used ticker can pass the date test.
+* **Plans:** free (Basic): 200 requests a minute, IEX in real time, SIP history without the latest 15 minutes (the client trims `end` on the free plan). Algo Trader Plus: 10,000 requests a minute. History starts in 2016, so delistings before 2016 are out of reach.
+* **Feed:** the client defaults to `iex` (IEX-exchange trades only). Studies should pass `feed="sip"`; the check script does.
+* **Adjustment:** always sent explicitly (`split` by default, matching the survivor cache). Run the artifact detector on delisted prices before trusting them.
+* **Unverified:** the OAuth route (ALPACA_CLIENT_ID and ALPACA_CLIENT_SECRET exchanged at authx.alpaca.markets, used only when ALPACA_API_KEY is not set; it may belong to Alpaca's Broker API rather than personal accounts), the `asof` symbol-mapping parameter, and the corporate-actions path `/v2/corporate_actions/announcements` (90-day windows, data since April 2020, no delistings or symbol changes).
+* **Host:** `ALPACA_PAPER=false` moves the asset and clock calls to api.alpaca.markets (read-only). Anything else uses the paper host.

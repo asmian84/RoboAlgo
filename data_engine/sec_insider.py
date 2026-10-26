@@ -9,7 +9,8 @@ optional download_quarters() helper, which no study path calls.
 
 *** FORMAT IS UNVERIFIED ***
 ---------------------------
-No data set was fetched while this module was written. The URL pattern, the member names
+No data set was fetched while this module was written. The URL pattern was wrong and is now
+verified and corrected (see DATASET_URLS); the member names
 (SUBMISSION, REPORTINGOWNER, NONDERIV_TRANS), the column names, the date format and the
 encoding of RPTOWNER_RELATIONSHIP are all assumptions taken from memory of the SEC's published
 layout. The first real file is the verification. read_table() fails loudly with the columns it
@@ -68,7 +69,11 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 
 INSIDER_DIR = Path.home() / ".roboalgo" / "sec" / "insider"
-DATASET_URL = "https://www.sec.gov/files/structureddata/data/form-345-data-sets/{year}q{q}_form345.zip"   # UNVERIFIED
+# Verified 2026-10-26 against the SEC's "Insider Transactions Data Sets" index page. The pre-registered
+# guess (".../form-345-data-sets/...") returns 404 for every quarter; see the amendment in the prereg.
+# 2006q1 to 2026q1 sit under structureddata, 2026q2 onward under datastandardsinnovation, so both are tried.
+DATASET_URLS = ("https://www.sec.gov/files/structureddata/data/insider-transactions-data-sets/{year}q{q}_form345.zip",
+                "https://www.sec.gov/files/datastandardsinnovation/data/insider-transactions-data-sets/{year}q{q}_form345.zip")
 TABLES = {"SUBMISSION": ("ACCESSION_NUMBER", "FILING_DATE", "DOCUMENT_TYPE", "ISSUERCIK", "ISSUERTRADINGSYMBOL"),
           "REPORTINGOWNER": ("ACCESSION_NUMBER", "RPTOWNERCIK", "RPTOWNER_RELATIONSHIP"),
           "NONDERIV_TRANS": ("ACCESSION_NUMBER", "TRANS_CODE", "TRANS_SHARES", "TRANS_PRICEPERSHARE")}
@@ -452,12 +457,17 @@ def download_quarters(quarters: list[str], dest=INSIDER_DIR, fetch=None, clock=t
     throttle = E.Throttle(E.MAX_PER_SEC, clock=clock, sleep=sleep)
     dest.mkdir(parents=True, exist_ok=True)
     for q, final in todo:
-        url = DATASET_URL.format(year=q[:4], q=q[5])
-        throttle.wait()
-        status, body = fetch(url, headers)
-        if status != 200 or body[:4] != _ZIP_MAGIC:
-            raise RuntimeError(f"{q}: HTTP {status} from {url}, or the body is not a zip. The Form 345 URL "
-                               f"pattern is UNVERIFIED; check it by hand before relying on this helper.")
+        tried = []
+        for template in DATASET_URLS:
+            url = template.format(year=q[:4], q=q[5])
+            throttle.wait()
+            status, body = fetch(url, headers)
+            tried.append(f"HTTP {status} from {url}")
+            if status == 200 and body[:4] == _ZIP_MAGIC:
+                break
+        else:
+            raise RuntimeError(f"{q}: no candidate URL returned a zip ({'; '.join(tried)}). Check the SEC's "
+                               f"Insider Transactions Data Sets page for the current path.")
         tmp = final.with_name(final.name + ".tmp")
         tmp.write_bytes(body)
         os.replace(tmp, final)

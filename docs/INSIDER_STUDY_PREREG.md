@@ -196,3 +196,20 @@ Options: `--history`, `--insider-dir`, `--facts-dir`, `--tiingo-dir`, `--out`, `
 * `setup_engine/insider_study.py`: groups, outcomes, short-arm features and verdicts (pure functions).
 * `data_engine/sec_insider.py`: the Form 345 loader, cluster builder, symbol map and the unwired download helper.
 * `tests/test_data_engine/test_sec_insider.py`, `tests/test_study/test_insider_study.py`, `tests/test_study/test_insider_study_cli.py`: fixture tests, including hand-computed boundaries and an end-to-end run on synthetic data.
+
+## Amendments
+
+### Amendment 1, 2026-10-26: the Form 345 URL, and what the first real files verified
+
+The assumed download URL was wrong. `https://www.sec.gov/files/structureddata/data/form-345-data-sets/{q}_form345.zip` returns **404 for every quarter**. The real paths, read off the SEC's "Insider Transactions Data Sets" index page on 2026-10-26, are:
+
+* `https://www.sec.gov/files/structureddata/data/insider-transactions-data-sets/{q}_form345.zip` for 2006q1 to 2026q1,
+* `https://www.sec.gov/files/datastandardsinnovation/data/insider-transactions-data-sets/{q}_form345.zip` for 2026q2 onward.
+
+`data_engine/sec_insider.py` now holds both as `DATASET_URLS` and tries them in order. **No study parameter changed**: the URL decides only where the files come from, not what is computed from them. The index page lists 83 quarters; 71 (2006q1 to 2023q3) were downloaded, 771 MB, no failures.
+
+**The format assumptions held.** The members are `SUBMISSION.tsv`, `REPORTINGOWNER.tsv` and `NONDERIV_TRANS.tsv` as assumed, every required column is present under its assumed name, and the dates parse: 2015q1 gave 73,143 submission rows, 77,142 reporting-owner rows and 108,960 non-derivative transaction rows with **0 unparsable dates, 0 missing issuer CIKs and 0 missing owner CIKs**. `RPTOWNER_RELATIONSHIP` is free text as assumed, not flag columns. Nothing in `read_table` had to change.
+
+**2005q4 does not exist.** The earliest published quarter is 2006q1, so the 90-day windows of the first two origins (2006-01 and 2006-02) touch a quarter with no data. The pre-registered quarter-coverage rule excludes those rows as `excluded_no_coverage` on its own. No parameter changed; the origin range stays 2006-01 to 2023-09.
+
+**Malformed as-reported symbols were left alone.** About 2% of symbol spans and 4% of qualifying purchase rows in 2015q1 carry a symbol the pre-registered normaliser cannot match to a price ticker: `(CALX)`, `NYSE:SIR`, `GEF,GEF-B`, `ABMC-PK`, `"""B"""`. The normaliser was **not** changed: tuning it after seeing data is what this pre-registration exists to prevent, and most of those names are OTC tickers that the $300,000 dollar-volume floor removes anyway. The loss shows up in the reported mapped share.

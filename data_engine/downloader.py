@@ -141,6 +141,30 @@ def _download_yfinance(symbol: str, start_date: str) -> pd.DataFrame | None:
         return None
 
 
+_PRICE_FIELDS = ["open", "high", "low", "close"]
+
+
+def drop_incomplete_bars(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Remove bars whose open, high, low or close is missing. Returns (clean, n_dropped).
+
+    A source can return a row that has a volume but no prices: seen on 2026-10-06, when 115
+    of 230 tracked instruments got such a row for the day just closed. Storing it is worse
+    than a gap in two ways:
+
+      * Every stage downstream left-joins on price and skips NaN bars, so the instrument
+        silently drops out of indicators, volatility, compression and the Finder with no
+        error. A fresh DATE hid it from the staleness checks, which only look at dates.
+      * The upsert below is ``DO UPDATE SET close = excluded.close`` and stage 1 re-fetches
+        the last few days on every run, so a partial row for a day already stored would
+        OVERWRITE a good bar with NULLs.
+
+    An instrument that has no bar for a day is honestly one day stale. One with an empty
+    bar looks current and is not.
+    """
+    complete = df[_PRICE_FIELDS].notna().all(axis=1)
+    return df[complete], int((~complete).sum())
+
+
 class MarketDataDownloader:
     """Downloads and stores historical market data.
 
@@ -224,6 +248,13 @@ class MarketDataDownloader:
         return _download_yfinance(symbol, self.start_date)
 
     def _store_prices(self, session, instrument_id: int, df: pd.DataFrame):
+        df, dropped = drop_incomplete_bars(df)
+        if dropped:
+            logger.warning(
+                "instrument %s: skipped %d bar(s) with a missing open/high/low/close "
+                "(source returned a partial row); stored bars were left untouched",
+                instrument_id, dropped,
+            )
         records = []
         for _, row in df.iterrows():
             records.append({

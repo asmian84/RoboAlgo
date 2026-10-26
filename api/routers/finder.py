@@ -12,11 +12,20 @@ Endpoints:
                                  is almost entirely large caps and leveraged ETFs —
                                  the pennyking/maker presets will find little to
                                  nothing here.
-  GET  /api/finder/scan/wide  — SLOW path: live, full-market scan (~13,786 US
-                                 tickers by default), no DB reads. Minutes, not
-                                 milliseconds — this is the path that can actually
-                                 find penny/small-cap names. See scanner_engine.
-                                 finder.scan_wide for the two-stage design.
+  GET  /api/finder/scan/wide  — SLOW path: live, full-market scan, no DB reads.
+                                 This is the path that can actually find penny/
+                                 small-cap names. See scanner_engine.finder.
+                                 scan_wide for the two-stage design.
+                                 Stage 1 prefers TradingView, which screens the
+                                 FULL universe in ONE request (seconds), so
+                                 max_universe does not apply to it. If TradingView
+                                 is unavailable it falls back to a yfinance batch
+                                 screen over ~13,786 US tickers (capped by
+                                 max_universe; minutes, not seconds).
+                                 `stats.stage1_source` ("tradingview" | "yfinance")
+                                 reports which path ran. TradingView supplies
+                                 symbol/price/volume only; every indicator is
+                                 computed from real OHLCV in stage 2.
   GET  /api/finder/health     — per-table data freshness (stale backfill, made visible)
 """
 from __future__ import annotations
@@ -120,7 +129,7 @@ def scan_wide(
     preset: str = Query("", description="signal | pennyking | maker. Empty = library defaults."),
     limit: int = Query(100, ge=1, le=500),
     max_deep: int = Query(400, ge=1, le=2000, description="Deep-analyze at most this many stage-1 survivors, most liquid (price*volume) first."),
-    max_universe: int = Query(3000, ge=0, le=20000, description="Screen at most this many tickers. The full US listing is ~13,786 and takes ~5 minutes; 0 means no cap. stats.universe_capped reports whether it was applied."),
+    max_universe: int = Query(3000, ge=0, le=20000, description="Cap on tickers screened by the yfinance FALLBACK only (the full US listing is ~13,786 and takes ~5 minutes; 0 means no cap). Ignored when TradingView serves stage 1: that path screens the full universe in one request and reports universe_capped=false. stats.stage1_source says which path ran; stats.universe_capped reports whether the cap was applied."),
     min_price: float | None = Query(None),
     max_price: float | None = Query(None),
     min_volume: int | None = Query(None),
@@ -134,12 +143,17 @@ def scan_wide(
     min_compression_score: float | None = Query(None),
 ):
     """
-    SLOW path. Live, full-market screen (default: the full ~13,786-symbol US
-    ticker universe) — does not depend on the precomputed DB tables `/scan`
-    reads, so it is the only path that can find sub-$5 / $5-$20 names.
-    Same preset + override semantics as `/scan`; takes minutes, not
-    milliseconds. confluence is always skipped/None regardless of
-    min_confluence — see scanner_engine.finder.scan_wide.
+    Live, full-market screen — does not depend on the precomputed DB tables
+    `/scan` reads, so it is the only path that can find sub-$5 / $5-$20 names.
+    Same preset + override semantics as `/scan`. Stage 1 uses TradingView
+    when reachable (full universe in one request, seconds) and otherwise the
+    yfinance batch fallback (minutes, capped by `max_universe`);
+    `stats.stage1_source` reports which. confluence is always skipped/None
+    regardless of min_confluence — see scanner_engine.finder.scan_wide.
+
+    Deliberately a sync `def`: FastAPI runs it in a threadpool. Do NOT make it
+    `async def` — the stage-1/2 calls block, and uvicorn runs ONE worker, so
+    that would stall the whole event loop.
     """
     from scanner_engine.finder import PRESETS, FinderCriteria
     from scanner_engine.finder import scan_wide as run_scan_wide

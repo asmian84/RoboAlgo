@@ -1,0 +1,478 @@
+{
+ "rule": {
+  "text": "A day is an artifact when |close/previous close - 1| >= MIN_ABS_RET, the previous day's dollar volume >= MIN_PRIOR_DVOL and the day's volume < VOL_SPIKE x the mean volume of the VOL_WIN days before it (at least VOL_MIN_DAYS of them). POST-HOC: chosen after seeing suspicious bars.",
+  "min_abs_ret": 0.5,
+  "min_prior_dvol": 1000000,
+  "vol_spike": 2.0,
+  "vol_win": 20,
+  "vol_min_days": 10
+ },
+ "post_hoc": true,
+ "data": {
+  "history": "/Users/asmian/.roboalgo/history_2000",
+  "n_stocks_requested": 3982,
+  "n_stocks_with_daily": 3982,
+  "n_stocks_flagged": 168,
+  "n_flagged_days": 223,
+  "limited_run": false,
+  "seed_turnaround": 20261007,
+  "seed_events": 20261009,
+  "n_boot": 2000
+ },
+ "turnaround": {
+  "config": "primary",
+  "arm": "C0",
+  "pre_days": 60,
+  "before": {
+   "n": 1568,
+   "mean_r": 0.09565029403843106,
+   "month": {
+    "mean": 0.09565029403843107,
+    "lo": -0.11198624004508542,
+    "hi": 0.3202803812390644,
+    "p_le_0": 0.203,
+    "n": 1568,
+    "n_clusters": 216
+   },
+   "stock": {
+    "mean": 0.09565029403843107,
+    "lo": -0.008260435680775767,
+    "hi": 0.1992267200342573,
+    "p_le_0": 0.034,
+    "n": 1568,
+    "n_clusters": 911
+   }
+  },
+  "after": {
+   "n": 1562,
+   "mean_r": 0.09019451466448193,
+   "month": {
+    "mean": 0.09019451466448193,
+    "lo": -0.1180099099766662,
+    "hi": 0.31376049689503294,
+    "p_le_0": 0.221,
+    "n": 1562,
+    "n_clusters": 216
+   },
+   "stock": {
+    "mean": 0.09019451466448193,
+    "lo": -0.015024545655749948,
+    "hi": 0.20042395448891986,
+    "p_le_0": 0.0485,
+    "n": 1562,
+    "n_clusters": 910
+   }
+  },
+  "n_dropped": 6,
+  "dropped_mean_r": 1.5159715243898562,
+  "dropped_win_rate": 0.5,
+  "dropped": [
+   {
+    "symbol": "VXRT",
+    "signal_date": "2020-04-20",
+    "exit_date": "2020-04-30",
+    "r_net": -0.022530638508387747
+   },
+   {
+    "symbol": "GTEC",
+    "signal_date": "2020-11-10",
+    "exit_date": "2020-12-14",
+    "r_net": 2.2956889543652257
+   },
+   {
+    "symbol": "OCGN",
+    "signal_date": "2021-02-05",
+    "exit_date": "2021-02-09",
+    "r_net": 2.7529885031054024
+   },
+   {
+    "symbol": "INND",
+    "signal_date": "2021-04-07",
+    "exit_date": "2021-04-13",
+    "r_net": -0.6297702907340766
+   },
+   {
+    "symbol": "LKCOF",
+    "signal_date": "2021-05-03",
+    "exit_date": "2021-05-11",
+    "r_net": -1.1181422338309082
+   },
+   {
+    "symbol": "SDEV",
+    "signal_date": "2025-08-27",
+    "exit_date": "2025-09-05",
+    "r_net": 5.81759485194188
+   }
+  ]
+ },
+ "events": {
+  "outcome": "ret_R3",
+  "weeks": [
+   "2001-05-18",
+   "2001-12-07",
+   "2002-11-29",
+   "2003-03-21",
+   "2008-05-02",
+   "2009-04-24",
+   "2010-08-06",
+   "2011-10-28",
+   "2019-02-15",
+   "2020-05-29"
+  ],
+  "alpha": 0.0125,
+  "horizon_weeks": 156,
+  "control": {
+   "n_rows": 12463,
+   "n_contaminated": 39,
+   "share_contaminated": 0.003129262617347348
+  },
+  "signatures": {
+   "S1": {
+    "before": {
+     "n": 1539,
+     "mean_ret": 0.2206961989386886,
+     "mean_excess": -0.007635219078465102,
+     "ci": {
+      "mean": -0.007635219078465105,
+      "lo": -0.06956902496350952,
+      "hi": 0.06075479677803994,
+      "p_le_0": 0.5905,
+      "n": 1539,
+      "n_clusters": 10
+     }
+    },
+    "after": {
+     "n": 1538,
+     "mean_ret": 0.2210737647377385,
+     "mean_excess": -0.007499562826487538,
+     "ci": {
+      "mean": -0.007499562826487539,
+      "lo": -0.06956902496350952,
+      "hi": 0.0612945509987622,
+      "p_le_0": 0.5895,
+      "n": 1538,
+      "n_clusters": 10
+     }
+    },
+    "n_dropped": 1,
+    "dropped_mean_ret": -0.36,
+    "dropped_mean_excess": -0.2162745346199598
+   },
+   "S2": {
+    "before": {
+     "n": 251,
+     "mean_ret": 0.4200292295775993,
+     "mean_excess": -0.0403407363256238,
+     "ci": {
+      "mean": -0.040340736325623766,
+      "lo": -0.1778236049711193,
+      "hi": 0.18516963026991567,
+      "p_le_0": 0.698,
+      "n": 251,
+      "n_clusters": 10
+     }
+    },
+    "after": {
+     "n": 250,
+     "mean_ret": 0.42314934649590963,
+     "mean_excess": -0.040113980327783766,
+     "ci": {
+      "mean": -0.04011398032778373,
+      "lo": -0.17830782518792693,
+      "hi": 0.186004988691273,
+      "p_le_0": 0.695,
+      "n": 250,
+      "n_clusters": 10
+     }
+    },
+    "n_dropped": 1,
+    "dropped_mean_ret": -0.36,
+    "dropped_mean_excess": -0.09702973578563379
+   },
+   "S3": {
+    "before": {
+     "n": 200,
+     "mean_ret": 0.18143031470960622,
+     "mean_excess": 0.035072284075217494,
+     "ci": {
+      "mean": 0.03507228407521749,
+      "lo": -0.08505920731719278,
+      "hi": 0.16880838986578223,
+      "p_le_0": 0.2165,
+      "n": 200,
+      "n_clusters": 10
+     }
+    },
+    "after": {
+     "n": 200,
+     "mean_ret": 0.18143031470960622,
+     "mean_excess": 0.035072284075217494,
+     "ci": {
+      "mean": 0.03507228407521749,
+      "lo": -0.08505920731719278,
+      "hi": 0.16880838986578223,
+      "p_le_0": 0.2165,
+      "n": 200,
+      "n_clusters": 10
+     }
+    },
+    "n_dropped": 0,
+    "dropped_mean_ret": null,
+    "dropped_mean_excess": null
+   },
+   "S4": {
+    "before": {
+     "n": 129,
+     "mean_ret": 0.14662103990824188,
+     "mean_excess": 0.031454030864487795,
+     "ci": {
+      "mean": 0.03145403086448779,
+      "lo": -0.09137882259650931,
+      "hi": 0.19454455553636446,
+      "p_le_0": 0.2745,
+      "n": 129,
+      "n_clusters": 9
+     }
+    },
+    "after": {
+     "n": 129,
+     "mean_ret": 0.14662103990824188,
+     "mean_excess": 0.031454030864487795,
+     "ci": {
+      "mean": 0.03145403086448779,
+      "lo": -0.09137882259650931,
+      "hi": 0.19454455553636446,
+      "p_le_0": 0.2745,
+      "n": 129,
+      "n_clusters": 9
+     }
+    },
+    "n_dropped": 0,
+    "dropped_mean_ret": null,
+    "dropped_mean_excess": null
+   },
+   "B0": {
+    "before": {
+     "n": 6672,
+     "mean_ret": 0.22455153839135986,
+     "mean_excess": 0.003753860572545973,
+     "ci": {
+      "mean": 0.0037538605725459893,
+      "lo": -0.01763854367998206,
+      "hi": 0.022141318298025348,
+      "p_le_0": 0.317,
+      "n": 6672,
+      "n_clusters": 10
+     }
+    },
+    "after": {
+     "n": 6660,
+     "mean_ret": 0.2254511297893549,
+     "mean_excess": 0.004100860560014599,
+     "ci": {
+      "mean": 0.004100860560014608,
+      "lo": -0.017393877996293224,
+      "hi": 0.02270764651532864,
+      "p_le_0": 0.306,
+      "n": 6660,
+      "n_clusters": 10
+     }
+    },
+    "n_dropped": 12,
+    "dropped_mean_ret": -0.27472168749586195,
+    "dropped_mean_excess": -0.18883113247254155
+   }
+  }
+ },
+ "by_year": [
+  {
+   "year": 2000,
+   "artifact_days": 6,
+   "stocks_flagged": 6,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 0
+  },
+  {
+   "year": 2001,
+   "artifact_days": 1,
+   "stocks_flagged": 1,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 3
+  },
+  {
+   "year": 2002,
+   "artifact_days": 2,
+   "stocks_flagged": 2,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 0
+  },
+  {
+   "year": 2003,
+   "artifact_days": 0,
+   "stocks_flagged": 0,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 0
+  },
+  {
+   "year": 2004,
+   "artifact_days": 0,
+   "stocks_flagged": 0,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 4
+  },
+  {
+   "year": 2005,
+   "artifact_days": 0,
+   "stocks_flagged": 0,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 3
+  },
+  {
+   "year": 2006,
+   "artifact_days": 0,
+   "stocks_flagged": 0,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 26
+  },
+  {
+   "year": 2007,
+   "artifact_days": 5,
+   "stocks_flagged": 4,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 48
+  },
+  {
+   "year": 2008,
+   "artifact_days": 19,
+   "stocks_flagged": 12,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 11
+  },
+  {
+   "year": 2009,
+   "artifact_days": 4,
+   "stocks_flagged": 4,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 0
+  },
+  {
+   "year": 2010,
+   "artifact_days": 0,
+   "stocks_flagged": 0,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 2
+  },
+  {
+   "year": 2011,
+   "artifact_days": 0,
+   "stocks_flagged": 0,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 1
+  },
+  {
+   "year": 2012,
+   "artifact_days": 1,
+   "stocks_flagged": 1,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 0
+  },
+  {
+   "year": 2013,
+   "artifact_days": 0,
+   "stocks_flagged": 0,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 4
+  },
+  {
+   "year": 2014,
+   "artifact_days": 2,
+   "stocks_flagged": 2,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 3
+  },
+  {
+   "year": 2015,
+   "artifact_days": 2,
+   "stocks_flagged": 1,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 2
+  },
+  {
+   "year": 2016,
+   "artifact_days": 0,
+   "stocks_flagged": 0,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 12
+  },
+  {
+   "year": 2017,
+   "artifact_days": 0,
+   "stocks_flagged": 0,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 38
+  },
+  {
+   "year": 2018,
+   "artifact_days": 3,
+   "stocks_flagged": 2,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 19
+  },
+  {
+   "year": 2019,
+   "artifact_days": 4,
+   "stocks_flagged": 3,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 86
+  },
+  {
+   "year": 2020,
+   "artifact_days": 37,
+   "stocks_flagged": 31,
+   "c0_trades_dropped": 2,
+   "event_rows_dropped": 11
+  },
+  {
+   "year": 2021,
+   "artifact_days": 26,
+   "stocks_flagged": 19,
+   "c0_trades_dropped": 3,
+   "event_rows_dropped": 110
+  },
+  {
+   "year": 2022,
+   "artifact_days": 11,
+   "stocks_flagged": 10,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 32
+  },
+  {
+   "year": 2023,
+   "artifact_days": 11,
+   "stocks_flagged": 9,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 0
+  },
+  {
+   "year": 2024,
+   "artifact_days": 34,
+   "stocks_flagged": 28,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 0
+  },
+  {
+   "year": 2025,
+   "artifact_days": 26,
+   "stocks_flagged": 23,
+   "c0_trades_dropped": 1,
+   "event_rows_dropped": 5
+  },
+  {
+   "year": 2026,
+   "artifact_days": 29,
+   "stocks_flagged": 21,
+   "c0_trades_dropped": 0,
+   "event_rows_dropped": 0
+  }
+ ]
+}

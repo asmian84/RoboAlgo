@@ -519,8 +519,8 @@ def test_download_writes_zip_and_sends_ua(tmp_path, monkeypatch):
     paths = SI.download_quarters(["2015q1", "2015q2"], dest, fetch=fetch, clock=lambda: 0.0, sleep=sleeps.append)
     assert paths == [dest / "2015q1_form345.zip", dest / "2015q2_form345.zip"]
     assert (dest / "2015q1_form345.zip").read_bytes() == body
-    assert calls[0][0] == SI.DATASET_URL.format(year=2015, q=1)
-    assert calls[1][0] == SI.DATASET_URL.format(year=2015, q=2)
+    assert calls[0][0] == SI.DATASET_URLS[0].format(year=2015, q=1)
+    assert calls[1][0] == SI.DATASET_URLS[0].format(year=2015, q=2)
     assert calls[0][1]["User-Agent"] == UA
     assert len(sleeps) == 1 and sleeps[0] > 0                     # the second request was throttled
     assert [p.name for p in dest.iterdir() if p.name.endswith(".tmp")] == []
@@ -530,12 +530,12 @@ def test_download_rejects_non_zip_and_errors(tmp_path, monkeypatch):
     monkeypatch.setenv("SEC_USER_AGENT", UA)
     dest = tmp_path / "dl"
     for status, body in ((200, b"<html>"), (404, b"")):
-        with pytest.raises(RuntimeError, match="UNVERIFIED"):
+        with pytest.raises(RuntimeError, match="no candidate URL"):
             SI.download_quarters(["2015q1"], dest, fetch=lambda u, h, s=status, b=body: (s, b),
                                  clock=lambda: 0.0, sleep=lambda s: None)
         assert not dest.exists() or list(dest.iterdir()) == []   # no file and no .tmp left behind
     # a zip served with an error status is still an error
-    with pytest.raises(RuntimeError, match="UNVERIFIED"):
+    with pytest.raises(RuntimeError, match="no candidate URL"):
         SI.download_quarters(["2015q1"], dest, fetch=lambda u, h: (500, _tiny_zip_bytes(tmp_path)),
                              clock=lambda: 0.0, sleep=lambda s: None)
     assert list(dest.iterdir()) == []

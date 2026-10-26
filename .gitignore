@@ -29,7 +29,10 @@ ENV/
 env/
 
 # Frontend
-node_modules/
+# No trailing slash: "node_modules/" only matches real directories, so a
+# node_modules SYMLINK (used to share one install between git worktrees) slips
+# through and gets committed as an absolute path that breaks every other checkout.
+node_modules
 npm-debug.log
 yarn-error.log
 dist/
@@ -46,3 +49,9 @@ dist/
 *.db
 *.sqlite
 *.sqlite3
+
+# git worktrees
+.worktrees/
+
+# Auto-trader local config (never commit — may reflect live-mode intent/keys)
+auto_trader_config.json

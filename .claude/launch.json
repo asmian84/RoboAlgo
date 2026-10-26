@@ -10,7 +10,7 @@
     {
       "name": "frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "/Users/asmian/RoboAlgo/frontend"],
+      "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
       "port": 5173
     }
   ]

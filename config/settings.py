@@ -8,7 +8,31 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://asmian@localhost:5432/roboalgo")
+def _pin_postgres_driver(url: str) -> str:
+    """Name the Postgres driver explicitly instead of trusting SQLAlchemy's default.
+
+    A bare ``postgresql://`` URL leaves the driver choice to SQLAlchemy, and the
+    default changed between releases: 2.0.x loads psycopg2, 2.1.x loads psycopg
+    (v3). requirements.txt ships only ``psycopg2-binary`` and is unpinned, so a
+    fresh install resolves SQLAlchemy 2.1 and every connection fails with
+    ``ModuleNotFoundError: No module named 'psycopg'``. Render's
+    ``fromDatabase: connectionString`` hands out exactly that bare URL. Locally
+    nothing showed it, because the venv predates 2.1, and the tests never opened
+    a connection: callers log the failure as a warning and carry on.
+
+    Only bare schemes are rewritten. A URL that already names a driver, such as
+    ``postgresql+psycopg://``, is left alone. Render and Heroku also emit the
+    older ``postgres://`` scheme, which SQLAlchemy has not accepted since 1.4.
+    """
+    for bare in ("postgres://", "postgresql://"):
+        if url.startswith(bare):
+            return "postgresql+psycopg2://" + url[len(bare):]
+    return url
+
+
+DATABASE_URL = _pin_postgres_driver(
+    os.getenv("DATABASE_URL", "postgresql://asmian@localhost:5432/roboalgo")
+)
 
 # ── Instrument Universe ──────────────────────────────────────────────────
 

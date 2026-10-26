@@ -89,8 +89,6 @@ def find_pivots(
     pivots: list[Pivot] = []
     L, R    = left_bars, right_bars
 
-    # Pre-compute rolling max/min with stride tricks for speed
-    # We use a simple vectorised approach: compare each bar to its window.
     for i in range(L, n - R):
         h_win = high[i - L : i + R + 1]
         l_win = low[i  - L : i + R + 1]
@@ -99,7 +97,6 @@ def find_pivots(
         if low[i] == l_win.min():
             pivots.append(Pivot(idx=i, price=float(low[i]),  kind="L"))
 
-    # Sort and deduplicate overlapping pivots (prefer the more extreme one)
     pivots.sort(key=lambda p: p.idx)
     deduplicated: list[Pivot] = []
     seen_idx: set[int] = set()
@@ -109,6 +106,85 @@ def find_pivots(
             seen_idx.add(pv.idx)
 
     return deduplicated
+
+
+def dc_pivots(
+    close: np.ndarray,
+    high:  np.ndarray,
+    low:   np.ndarray,
+    sigma: float | None = None,
+) -> list[Pivot]:
+    """
+    Directional Change (DC) sigma-adaptive zigzag pivot detector.
+
+    Unlike the fixed left/right bars approach, DC uses a percentage-retrace
+    threshold (sigma) to confirm swing points.  When price retraces sigma%
+    from a running extreme, a confirmed pivot is recorded and the direction
+    flips.  This makes the algorithm self-calibrating:
+
+        Equities:  sigma ≈ 0.010  (1% retrace confirms a swing)
+        Crypto:    sigma ≈ 0.025  (2.5% retrace — higher volatility)
+
+    If sigma is None it is estimated automatically from recent volatility
+    (median |daily return| × 8), providing instrument-agnostic detection
+    without manual tuning.
+
+    Algorithm (Glattfelder et al., 2011):
+      1. Track a running extreme (max for potential high, min for potential low)
+         and its bar index.
+      2. When close retraces sigma from the running extreme, record the extreme
+         bar as a confirmed Pivot and flip direction.
+      3. The confirmed extreme is the actual high/low candle, not the
+         confirmation bar — so pivots are precise, not lagged.
+
+    Returns list[Pivot] sorted by idx — same interface as find_pivots().
+    """
+    n = len(close)
+    if n < 10:
+        return []
+
+    # Auto-calibrate sigma from median absolute daily return × 8
+    if sigma is None:
+        returns = np.abs(np.diff(close) / np.where(close[:-1] != 0, close[:-1], 1))
+        median_ret = float(np.median(returns[-60:])) if len(returns) >= 5 else 0.01
+        sigma = max(median_ret * 8.0, 0.005)   # floor at 0.5%
+
+    pivots: list[Pivot] = []
+
+    # Initialise: find first direction from bar 1
+    direction: Literal["H", "L"] = "H" if close[1] >= close[0] else "L"
+    extreme_price = float(high[0] if direction == "H" else low[0])
+    extreme_idx   = 0
+
+    for i in range(1, n):
+        if direction == "H":
+            # Tracking potential high — update extreme if new high seen
+            if float(high[i]) > extreme_price:
+                extreme_price = float(high[i])
+                extreme_idx   = i
+            # Confirmed top: close retraces sigma below the extreme
+            elif extreme_price > 0 and (extreme_price - float(close[i])) / extreme_price >= sigma:
+                pivots.append(Pivot(idx=extreme_idx, price=extreme_price, kind="H"))
+                direction     = "L"
+                extreme_price = float(low[i])
+                extreme_idx   = i
+        else:
+            # Tracking potential low — update extreme if new low seen
+            if float(low[i]) < extreme_price:
+                extreme_price = float(low[i])
+                extreme_idx   = i
+            # Confirmed bottom: close retraces sigma above the extreme
+            elif extreme_price > 0 and (float(close[i]) - extreme_price) / extreme_price >= sigma:
+                pivots.append(Pivot(idx=extreme_idx, price=extreme_price, kind="L"))
+                direction     = "H"
+                extreme_price = float(high[i])
+                extreme_idx   = i
+
+    # Include the in-progress extreme at the end (unconfirmed but useful)
+    if extreme_idx not in {p.idx for p in pivots}:
+        pivots.append(Pivot(idx=extreme_idx, price=extreme_price, kind=direction))
+
+    return sorted(pivots, key=lambda p: p.idx)
 
 
 def _trendline(pivots: list[Pivot], n_bars: int) -> TrendLine | None:
@@ -184,7 +260,12 @@ class PivotEngine:
         c = close[-self.lookback:]
         v = volume[-self.lookback:] if volume is not None else np.ones(len(h))
 
-        pivots = find_pivots(h, l, self.left_bars, self.right_bars)
+        # DC zigzag is the primary pivot detector — sigma auto-calibrates to
+        # instrument volatility (equities ~1%, crypto ~2.5%).  Falls back to
+        # fixed-bar detection only if DC produces too few pivots.
+        pivots = dc_pivots(c, h, l)
+        if len(pivots) < self.min_pivots:
+            pivots = find_pivots(h, l, self.left_bars, self.right_bars)
         if len(pivots) < self.min_pivots:
             return []
 

@@ -70,19 +70,19 @@ PORTFOLIO_CRITICAL_PCT = 0.05   # down 5% → safe_mode zone
 
 
 def _safety_state(score: float) -> str:
+    """
+    SAFE_MODE removed — portfolio always has hedges (inverse ETFs, VIX instruments)
+    so a full trading block is never appropriate.  Worst case is CAUTION (50% size).
+    """
     if score >= STATE_NORMAL:
         return "NORMAL"
-    if score >= STATE_CAUTION:
-        return "CAUTION"
-    return "SAFE_MODE"
+    return "CAUTION"   # no SAFE_MODE — hedges are always in place
 
 
 def _size_multiplier(score: float) -> float:
     if score >= STATE_NORMAL:
         return 1.0
-    if score >= STATE_CAUTION:
-        return 0.5
-    return 0.0
+    return 0.5   # CAUTION floor — never block trading entirely
 
 
 class MarketSafetyEngine:

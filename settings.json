@@ -1,0 +1,23 @@
+{
+  "alphavantage": {
+    "api_key": "H1F3HH0CLFRSVU51",
+    "rpm": 75,
+    "tier": "premium",
+    "enabled": true
+  },
+  "finnhub": {
+    "api_key": "d6l5ovhr01qptf3ou9g0d6l5ovhr01qptf3ou9gg",
+    "enabled": true
+  },
+  "alpaca": {
+    "api_key": "",
+    "api_secret": "",
+    "base_url": "https://data.alpaca.markets",
+    "enabled": false
+  },
+  "data_sources": {
+    "intraday_mtf": "alphavantage",
+    "daily_ohlcv":  "alphavantage",
+    "options":      "yahoo"
+  }
+}

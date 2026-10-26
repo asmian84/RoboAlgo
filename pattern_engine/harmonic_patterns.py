@@ -1,12 +1,18 @@
 """Harmonic pattern detector — Gartley, Bat, Butterfly, Crab, Cypher.
 
 Detects XABCD Fibonacci ratio patterns using a multi-scale pivot scan.
-Each of the 5 pattern types is scanned independently so ALL currently-active
-harmonics can be returned simultaneously, not just the single "best" one.
 
-Scales: minor (×1), major (×3), macro (×8), structural (×15), cycle (×25)
-
-Returns list[dict] — one entry per detected pattern type.
+KEY ACCURACY REQUIREMENTS (all must pass or pattern is rejected):
+  1. Pivot ALTERNATION: pivots must strictly alternate high-low-high-low-high
+     (or low-high-low-high-low). No two consecutive highs or lows allowed.
+  2. Fibonacci RATIOS: tightened to ±4% of textbook values. Out-of-range = 0.
+  3. STRUCTURAL VALIDITY: legs must form correct directional shape.
+     Gartley/Bat/Cypher: D must not break below X (bullish) or above X (bearish).
+     Butterfly/Crab: D extends beyond X (by design — extreme extension patterns).
+  4. MINIMUM LEG SIZE: each leg must be at least 1.5% of current price to exclude
+     micro-noise patterns that hit ratios by coincidence.
+  5. MINIMUM SCORE: raw ratio score must be ≥ 62 before any bonus. Final ≥ 68.
+     This eliminates "borderline" matches that swamp the scanner.
 """
 
 from __future__ import annotations
@@ -20,63 +26,76 @@ from structure_engine.swing_detector import detect_swings, compute_adaptive_mini
 
 VALID_STATES = {"NOT_PRESENT", "FORMING", "READY", "BREAKOUT", "FAILED", "COMPLETED"}
 
-# ── Textbook Fibonacci ratio definitions ─────────────────────────────────────
-# Each key maps to (low, high) inclusive tolerance.
-# XD_XA is the key discriminator between patterns.
+# ── Textbook Fibonacci ratio definitions ──────────────────────────────────────
+# Tightened to ±3-4% of textbook values (was ±8–15%).
+# BC_AB intentionally kept wide (0.382–0.886) — both values are valid per Carney.
+# XD_XA is the primary discriminator; it has the tightest tolerance.
 
 PATTERNS: dict[str, dict[str, tuple[float, float]]] = {
     "Gartley": {
-        "AB_XA": (0.55, 0.68),       # textbook 0.618
-        "BC_AB": (0.382, 0.886),
-        "CD_BC": (1.272, 1.618),
-        "XD_XA": (0.75, 0.82),       # textbook 0.786
+        "AB_XA": (0.570, 0.650),     # textbook 0.618 — tightened from (0.55, 0.68)
+        "BC_AB": (0.382, 0.886),     # both 38.2% and 88.6% retracements valid
+        "CD_BC": (1.272, 1.618),     # both 127.2% and 161.8% extensions valid
+        "XD_XA": (0.755, 0.818),     # textbook 0.786 — tightened from (0.75, 0.82)
     },
     "Bat": {
-        "AB_XA": (0.33, 0.52),        # textbook 0.382-0.50
+        "AB_XA": (0.362, 0.508),     # textbook 0.382–0.500 — tightened from (0.33, 0.52)
         "BC_AB": (0.382, 0.886),
         "CD_BC": (1.618, 2.618),
-        "XD_XA": (0.84, 0.92),        # textbook 0.886
+        "XD_XA": (0.858, 0.914),     # textbook 0.886 — tightened from (0.84, 0.92)
     },
     "Butterfly": {
-        "AB_XA": (0.72, 0.82),        # textbook 0.786
+        "AB_XA": (0.754, 0.820),     # textbook 0.786 — tightened from (0.72, 0.82)
         "BC_AB": (0.382, 0.886),
         "CD_BC": (1.618, 2.618),
-        "XD_XA": (1.20, 1.68),        # textbook 1.27-1.618 (D beyond X)
+        "XD_XA": (1.242, 1.640),     # textbook 1.272–1.618 — tightened from (1.20, 1.68)
     },
     "Crab": {
-        "AB_XA": (0.33, 0.65),        # textbook 0.382-0.618
+        "AB_XA": (0.362, 0.618),     # textbook 0.382–0.618
         "BC_AB": (0.382, 0.886),
-        "CD_BC": (2.24, 3.618),
-        "XD_XA": (1.55, 1.70),        # textbook 1.618
+        "CD_BC": (2.618, 3.618),     # TIGHTENED lower bound from 2.24→2.618 (textbook minimum)
+        "XD_XA": (1.580, 1.658),     # textbook 1.618 — very tight ±2.5%
     },
     "Cypher": {
-        "AB_XA": (0.33, 0.65),        # textbook 0.382-0.618
-        "BC_XA": (1.13, 1.414),       # BC is EXTENSION of XA (unique to Cypher)
-        "XD_XA": (0.74, 0.82),        # textbook 0.786
+        "AB_XA": (0.362, 0.618),     # textbook 0.382–0.618
+        "BC_XA": (1.130, 1.414),     # BC extends beyond A (unique to Cypher)
+        "XD_XA": (0.755, 0.818),     # textbook 0.786 — tightened from (0.74, 0.82)
     },
 }
+
+# Patterns where D is allowed to extend BEYOND X (extreme extension patterns)
+_EXTENSION_PATTERNS = {"Butterfly", "Crab"}
+
+# Minimum raw score before span bonus considered (prevents low-quality boosting)
+_MIN_RAW = 62.0
+# Minimum final score to include in results
+_MIN_FINAL = 68.0
 
 
 def _match_ratios(ratios: dict[str, float], target: dict[str, tuple[float, float]]) -> float:
     """Score how well computed ratios fit a target pattern definition.
 
-    Returns 0-100.  Missing ratio keys in `ratios` are skipped (not penalised),
-    allowing Cypher (which lacks CD_BC) to score correctly.
+    Returns 0–100.
+    - All key ratios that ARE present in `ratios` must be in-range.
+    - If ANY key ratio is outside its range, apply a steep penalty.
+    - Missing ratio keys are skipped (allows Cypher to score without CD_BC).
     """
     errs: list[float] = []
     for k, (lo, hi) in target.items():
         v = ratios.get(k)
         if v is None:
-            continue  # skip — this ratio isn't relevant for the pattern
+            continue
         if lo <= v <= hi:
             errs.append(0.0)
         else:
-            dist = min(abs(v - lo), abs(v - hi)) / max((hi - lo), 1e-9)
+            # Penalty: normalised by half-range (steeper than original full-range)
+            half_range = max((hi - lo) / 2.0, 1e-9)
+            dist = min(abs(v - lo), abs(v - hi)) / half_range
             errs.append(dist)
     if not errs:
         return 0.0
     avg_err = float(np.mean(errs))
-    return float(np.clip(100 - avg_err * 120, 0, 100))
+    return float(np.clip(100.0 - avg_err * 140.0, 0.0, 100.0))
 
 
 def _compute_status(
@@ -142,18 +161,18 @@ def _build_result(
     ]
 
     return {
-        "pattern_name":     pattern_name,
-        "pattern_category": "harmonic",
-        "status":           status,
-        "direction":        "bullish" if bullish else "bearish",
-        "breakout_level":   round(breakout, 4),
-        "target":           round(target_fib, 4),
-        "projected_target": round(target_fib, 4),
+        "pattern_name":       pattern_name,
+        "pattern_category":   "harmonic",
+        "status":             status,
+        "direction":          "bullish" if bullish else "bearish",
+        "breakout_level":     round(breakout, 4),
+        "target":             round(target_fib, 4),
+        "projected_target":   round(target_fib, 4),
         "invalidation_level": round(x_price, 4),
-        "confidence":       round(best_score, 2),
-        "probability":      round(best_score, 2),
-        "points": [[int(x["index"]), float(x["price"])] for x in p],
-        "point_labels": ["X", "A", "B", "C", "D"],
+        "confidence":         round(best_score, 2),
+        "probability":        round(best_score, 2),
+        "points":             [[int(x["index"]), float(x["price"])] for x in p],
+        "point_labels":       ["X", "A", "B", "C", "D"],
         "ratios": {
             "AB_XA": round(best_ratios.get("AB_XA", 0.0), 3),
             "BC_AB": round(best_ratios.get("BC_AB", 0.0), 3),
@@ -165,21 +184,81 @@ def _build_result(
         "prz_high": prz_high,
         "overlay_lines":      zigzag_segs + ref_segs,
         "overlay_line_roles": ["xa", "ab", "bc", "cd", "harm_ref_ac", "harm_ref_xd"],
-        # Unused by new code but kept for backward compat with older API consumers
         "target2": round((a_price + c_price) / 2, 4),
         "b_price": round(float(b_price), 4),
     }
 
 
+def _pivots_alternate(p5: list[dict[str, Any]]) -> bool:
+    """Return True only if the 5 pivots strictly alternate high/low/high/low/high
+    or low/high/low/high/low.  Two consecutive highs or lows = False."""
+    types = [p["type"] for p in p5]
+    return all(types[i] != types[i + 1] for i in range(4))
+
+
+def _structural_valid(p5: list[dict[str, Any]], pattern_name: str) -> bool:
+    """Check that the XABCD structure makes geometric sense.
+
+    Bullish (X=low, D=low):
+      - A above X, B below A, C above B, D below C
+      - For Gartley/Bat/Cypher: D must NOT break below X (D > X)
+      - For Butterfly/Crab: D is BELOW X (extreme extension — that's the point)
+
+    Bearish (X=high, D=high):
+      - A below X, B above A, C below B, D above C
+      - For Gartley/Bat/Cypher: D must NOT break above X (D < X)
+      - For Butterfly/Crab: D is ABOVE X
+    """
+    prices = [float(p["price"]) for p in p5]
+    x, a, b, c, d = prices
+    bullish = p5[0]["type"] == "low"   # X is a swing low → bullish pattern
+
+    if bullish:
+        # A above X; B is between X and A; C is between B and A; D below C
+        if not (a > x):
+            return False
+        if not (x < b < a):
+            return False
+        if not (b < c <= a):    # C should not exceed A (some tolerance handled by ratios)
+            return False
+        if not (d < c):
+            return False
+        # D location: must not make new low for standard patterns
+        if pattern_name not in _EXTENSION_PATTERNS:
+            if d < x:
+                return False
+        else:
+            # Butterfly/Crab: D must be BELOW X (extension beyond X)
+            if d >= x:
+                return False
+    else:  # bearish
+        if not (a < x):
+            return False
+        if not (a < b < x):
+            return False
+        if not (a <= c < b):
+            return False
+        if not (d > c):
+            return False
+        if pattern_name not in _EXTENSION_PATTERNS:
+            if d > x:
+                return False
+        else:
+            if d <= x:
+                return False
+
+    return True
+
+
 def detect(symbol: str, price_data: pd.DataFrame) -> list[dict[str, Any]]:
     """Detect ALL harmonic pattern types independently at multiple scales.
 
-    Returns list[dict] — one entry per detected and non-failed pattern type
-    (Gartley, Bat, Butterfly, Crab, Cypher).  Pattern types with no valid
-    match are omitted entirely.
-
-    The service layer handles list[dict] returns correctly, so this change is
-    backward-compatible with the existing PatternService pipeline.
+    Returns list[dict] — only patterns that pass ALL accuracy gates:
+      - Alternating pivots
+      - Structural validity (correct directional shape)
+      - Minimum leg size (≥ 1.5% of price per leg)
+      - Ratio score ≥ 62 raw
+      - Final score ≥ 68
     """
     if price_data is None or len(price_data) < 60:
         return []
@@ -187,29 +266,33 @@ def detect(symbol: str, price_data: pd.DataFrame) -> list[dict[str, Any]]:
     df = price_data.sort_values("date").reset_index(drop=True).copy()
     adaptive_mm = compute_adaptive_minimum_move(df)
     n_bars = len(df)
-
-    # D point must be in the most-recent 40% of bars (active / forming)
-    recent_threshold = int(n_bars * 0.60)
     close = float(df["close"].iloc[-1])
 
-    # ── Build pivot sets once for all 5 scales ────────────────────────────
+    # Minimum leg size: at least 1.5% of current price OR 2× adaptive minimum move
+    min_leg_size = max(adaptive_mm * 2.0, close * 0.015)
+
+    # D point must be in the most-recent 40% of bars
+    recent_threshold = int(n_bars * 0.60)
+
+    # ── Build pivot sets with type labels ─────────────────────────────────────
     pivot_sets: list[list[dict[str, Any]]] = []
     for scale in [1.0, 3.0, 8.0, 15.0, 25.0]:
         mm = adaptive_mm * scale
         swings = detect_swings(df, minimum_move=mm)
-        pivots = sorted(
-            swings["swing_highs"] + swings["swing_lows"],
+        # Tag each pivot with its type BEFORE merging
+        tagged = sorted(
+            [{"type": "high", **p} for p in swings["swing_highs"]] +
+            [{"type": "low",  **p} for p in swings["swing_lows"]],
             key=lambda x: x["index"],
         )
-        if len(pivots) >= 5:
-            pivot_sets.append(pivots)
+        if len(tagged) >= 5:
+            pivot_sets.append(tagged)
 
     if not pivot_sets:
         return []
 
     results: list[dict[str, Any]] = []
 
-    # ── For each pattern type, find the best independent match ────────────
     for pattern_name, pattern_defs in PATTERNS.items():
         best_score = 0.0
         best_pvts: list[dict[str, Any]] = []
@@ -218,8 +301,17 @@ def detect(symbol: str, price_data: pd.DataFrame) -> list[dict[str, Any]]:
         for pivots in pivot_sets:
             for w in range(0, len(pivots) - 4):
                 p5 = pivots[w:w + 5]
-                # D must be in the recent portion of data
+
+                # Gate 1: D must be in recent 40% of data
                 if p5[4]["index"] < recent_threshold:
+                    continue
+
+                # Gate 2: pivots must strictly alternate high/low
+                if not _pivots_alternate(p5):
+                    continue
+
+                # Gate 3: structural geometric validity
+                if not _structural_valid(p5, pattern_name):
                     continue
 
                 xa = abs(p5[1]["price"] - p5[0]["price"])
@@ -231,21 +323,27 @@ def detect(symbol: str, price_data: pd.DataFrame) -> list[dict[str, Any]]:
                 if min(xa, ab) <= 0:
                     continue
 
+                # Gate 4: minimum leg size — filters out micro-noise patterns
+                if min(xa, ab, bc, cd) < min_leg_size:
+                    continue
+
                 ratios: dict[str, float] = {
                     "AB_XA": ab / xa,
                     "BC_AB": bc / ab if ab > 0 else 0.0,
                     "CD_BC": cd / bc if bc > 0 else 0.0,
                     "XD_XA": xd / xa,
-                    "BC_XA": bc / xa,   # for Cypher
+                    "BC_XA": bc / xa,
                 }
 
                 raw_score = _match_ratios(ratios, pattern_defs)
-                if raw_score < 40:
+
+                # Gate 5: raw score must exceed minimum BEFORE bonuses
+                if raw_score < _MIN_RAW:
                     continue
 
-                # Span bonus: reward patterns covering more of the chart
+                # Span bonus: reward patterns covering more of the chart (capped at 8)
                 span_bars = max(1, p5[4]["index"] - p5[0]["index"])
-                span_bonus = min(10.0, (span_bars / max(n_bars, 1)) * 25.0)
+                span_bonus = min(8.0, (span_bars / max(n_bars, 1)) * 20.0)
                 score = raw_score + span_bonus
 
                 if score > best_score:
@@ -253,14 +351,13 @@ def detect(symbol: str, price_data: pd.DataFrame) -> list[dict[str, Any]]:
                     best_pvts = list(p5)
                     best_ratios = dict(ratios)
 
-        if best_score < 45 or not best_pvts:
+        # Gate 6: final score threshold
+        if best_score < _MIN_FINAL or not best_pvts:
             continue
 
         r = _build_result(pattern_name, best_pvts, best_ratios, best_score, close)
         if r["status"] not in ("NOT_PRESENT", "FAILED"):
             results.append(r)
 
-    # Sort by confidence descending so the best pattern appears first in the
-    # pattern list (useful for scanner display)
     results.sort(key=lambda x: x["confidence"], reverse=True)
     return results

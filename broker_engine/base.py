@@ -56,6 +56,7 @@ class OrderResult:
     filled_qty:    int = 0
     submitted_at:  Optional[datetime] = None
     broker:        str = ""
+    client_order_id: Optional[str] = None
     raw:           dict = field(default_factory=dict)  # raw broker response
 
 
@@ -139,6 +140,7 @@ class BrokerBase(ABC):
         limit_price: float,
         take_profit: float,
         stop_loss:   float,
+        client_order_id: Optional[str] = None,
     ) -> OrderResult:
         """
         Place a bracket order: entry limit + auto take-profit + auto stop-loss.
@@ -160,6 +162,10 @@ class BrokerBase(ABC):
     @abstractmethod
     def get_open_orders(self) -> list[OrderResult]:
         """Return all currently open/pending orders."""
+
+    def get_order_by_client_id(self, client_order_id: str) -> Optional[OrderResult]:
+        """Look up an order by its client-supplied id. Adapters that can't: return None."""
+        return None
 
     # ── Connectivity ─────────────────────────────────────────────────────────
 

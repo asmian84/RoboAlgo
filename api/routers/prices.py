@@ -2,21 +2,45 @@
 Price data and combined chart endpoints.
 
 For symbols that exist in the database the DB path is used (fast, pre-computed
-indicators).  For any other ticker a yfinance fallback fetches full daily history
-(period="max", back to IPO / 1980s) and computes all indicators on-the-fly so
-that ANY publicly-traded stock, ETF, index, or crypto pair works without needing
-to be in the instruments table.
+indicators).  For any other ticker a yfinance fallback fetches 2 years of daily
+history and computes all indicators on-the-fly so that ANY publicly-traded
+stock, ETF, index, or crypto pair works without needing to be in the
+instruments table.
+
+Cache: in-memory per (symbol, interval) with a 5-minute TTL — eliminates
+repeated network/DB hits for chart navigation between tabs.
 """
 
 from __future__ import annotations
 
+import logging
+import time
+from typing import Any
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 
 from data_engine.loader import DataLoader
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 loader = DataLoader()
+
+# ── Chart response cache ───────────────────────────────────────────────────────
+_CHART_TTL = 300   # 5 minutes
+_chart_cache: dict[str, dict[str, Any]] = {}   # key → {"ts": float, "data": dict}
+
+def _cache_key(symbol: str, interval: str) -> str:
+    return f"{symbol}:{interval}"
+
+def _cache_get(symbol: str, interval: str) -> dict | None:
+    entry = _chart_cache.get(_cache_key(symbol, interval))
+    if entry and time.time() - entry["ts"] < _CHART_TTL:
+        return entry["data"]
+    return None
+
+def _cache_set(symbol: str, interval: str, data: dict) -> None:
+    _chart_cache[_cache_key(symbol, interval)] = {"ts": time.time(), "data": data}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -93,21 +117,34 @@ def _compute_indicators(prices: pd.DataFrame) -> pd.DataFrame:
     return df[ind_cols]
 
 
-def _yfinance_fetch(symbol: str, limit: int = 500, yf_interval: str = "1d") -> tuple[pd.DataFrame, pd.DataFrame]:
+def _yfinance_fetch(
+    symbol: str,
+    limit: int = 500,
+    yf_interval: str = "1d",
+    period_override: str | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Fetch OHLCV from yfinance for any bar resolution (1d / 1wk / 1mo).
     Returns (prices_df, indicators_df) both indexed by timezone-naive date.
     Returns (empty, empty) if the symbol is unknown or has no data.
+
+    period_override lets a caller ask for deeper history than the default —
+    used when replacing a stale DB series, where dropping to the 2y default
+    would silently throw away years of chart history.
     """
     try:
         import yfinance as yf
 
-        if yf_interval == "1wk":
-            period = "max"   # Full weekly history back to IPO
+        # 2 years is enough for daily charting (MA200 + all TF views up to 2Y)
+        # Weekly/monthly use max to give meaningful multi-year bar charts
+        if period_override:
+            period = period_override
+        elif yf_interval == "1wk":
+            period = "10y"
         elif yf_interval == "1mo":
-            period = "max"   # Full monthly history back to IPO
+            period = "max"
         else:
-            period = "max"  # Full daily history back to IPO
+            period = "2y"   # daily: 2 years ≈ 500 bars — fast and sufficient
 
         hist   = yf.Ticker(symbol).history(period=period, interval=yf_interval, auto_adjust=True)
 
@@ -185,46 +222,77 @@ def _alphavantage_fetch(symbol: str, limit: int = 500) -> tuple[pd.DataFrame, pd
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+# Daily bars go stale over weekends and holidays, so "yesterday" is not a usable
+# threshold. 5 calendar days covers a Fri close + a Mon holiday and still catches
+# an ingestion pipeline that has actually stopped.
+_MAX_DB_AGE_DAYS = 5
+
+
+def _db_age_days(prices: pd.DataFrame) -> int | None:
+    """Calendar days between the newest DB bar and today, or None if unknown."""
+    if prices.empty:
+        return None
+    try:
+        last = pd.Timestamp(prices.index[-1]).normalize()
+        return int((pd.Timestamp.now().normalize() - last).days)
+    except Exception:
+        return None
+
+
 def _fetch_any(symbol: str, limit: int = 500) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Data fetching strategy: Alpha Vantage first (full history) → yfinance → DB cache.
+    Data fetching priority: DB (fastest) → yfinance → Alpha Vantage (fallback).
 
-    For limit=0 (full-history / 'All' TF):
-      - Alpha Vantage with outputsize="full" returns ALL available data back to IPO
-      - Fallback to yfinance if AV is rate-limited
+    The DB tier is only trusted when it is FRESH. It previously short-circuited
+    on `not prices.empty` alone, so once the ingestion pipeline stopped, this
+    endpoint kept happily serving months-old bars and never fell through — the
+    chart showed a stale series next to a live quote header.
 
-    For limit != 0 (partial history):
-      - Use DB cache if available (fastest)
-      - Fallback to yfinance, then Alpha Vantage
+    limit=0 is treated identically to limit=500 here — the caller (df_to_records)
+    handles the row cap.  AV is only called as a last resort to avoid slow API
+    calls on every chart load.
     """
-    # Full-history requests: use Alpha Vantage (complete data) or yfinance as fallback
-    if limit == 0:
-        # 1. Alpha Vantage with full output (back to IPO)
-        prices, indicators = _alphavantage_fetch(symbol, 0)
-        if not prices.empty:
-            return prices, indicators
+    # 1. Database — pre-computed, sub-millisecond, but only if it is current
+    db_prices = loader.get_prices(symbol)
+    age = _db_age_days(db_prices)
 
-        # 2. yfinance as fallback (if AV is rate-limited)
-        prices, indicators = _yfinance_fetch(symbol, 0)
-        return prices, indicators
-
-    # Partial history: use DB cache if available (fast), then fallback
-    # 1. Database (pre-computed, fastest)
-    prices = loader.get_prices(symbol)
-    if not prices.empty:
+    if not db_prices.empty and age is not None and age <= _MAX_DB_AGE_DAYS:
         indicators = loader.get_indicators(symbol)
         if indicators.empty:
-            indicators = _compute_indicators(prices)
-        return prices, indicators
+            indicators = _compute_indicators(db_prices)
+        return db_prices, indicators
 
-    # 2. yfinance
-    prices, indicators = _yfinance_fetch(symbol, limit)
+    if not db_prices.empty:
+        logger.warning(
+            "prices: DB series for %s is %s days stale (last bar %s) — "
+            "falling through to yfinance",
+            symbol, age, db_prices.index[-1],
+        )
+
+    # 2. yfinance. When we are REPLACING a stale DB series, ask for full history:
+    #    the DB had years of bars and silently dropping to the 2y default would
+    #    gut the chart. Splicing fresh bars onto the stale ones is deliberately
+    #    avoided — the two sources adjust for splits/dividends differently, so a
+    #    join would put a fake price step in the middle of the series.
+    period_override = "max" if not db_prices.empty else None
+    prices, indicators = _yfinance_fetch(symbol, limit, period_override=period_override)
     if not prices.empty:
         return prices, indicators
 
-    # 3. Alpha Vantage
+    # 3. Alpha Vantage — last resort for symbols yfinance doesn't cover
     prices, indicators = _alphavantage_fetch(symbol, limit)
-    return prices, indicators
+    if not prices.empty:
+        return prices, indicators
+
+    # 4. Everything live failed. Stale data beats a 404 — serve it rather than
+    #    breaking the chart, having already logged the staleness above.
+    if not db_prices.empty:
+        indicators = loader.get_indicators(symbol)
+        if indicators.empty:
+            indicators = _compute_indicators(db_prices)
+        return db_prices, indicators
+
+    return pd.DataFrame(), pd.DataFrame()
 
 
 @router.get("/prices/{symbol}")
@@ -241,18 +309,20 @@ def get_prices(symbol: str, limit: int = 500):
 def get_chart_data(symbol: str, limit: int = 0, interval: str = "daily"):
     """
     Combined prices + indicators for charting.
-    Works for ANY ticker via three-tier fallback:
-      1. DB (pre-computed)  — daily only
-      2. yfinance (all NYSE/Nasdaq/Russell/ETF/Crypto/Indices)
-      3. Alpha Vantage (additional coverage for OTC/international)
+    Cached per (symbol, interval) for 5 minutes — eliminates repeated fetches.
+    Works for ANY ticker via three-tier fallback: DB → yfinance → Alpha Vantage.
 
     interval: "daily" | "weekly" | "monthly"
-      - weekly / monthly bypass DB and fetch directly from yfinance so we get
-        true weekly/monthly OHLCV bars (not resampled daily data).
-    limit: 0 = no cap (return all available history)
+    limit: rows to return (0 = all available, default cap is 500 via df_to_records)
     """
     sym = symbol.upper()
 
+    # ── Serve from cache if fresh ──────────────────────────────────────────────
+    cached = _cache_get(sym, interval)
+    if cached is not None:
+        return cached
+
+    # ── Fetch fresh data ───────────────────────────────────────────────────────
     if interval == "weekly":
         prices, indicators = _yfinance_fetch(sym, limit, yf_interval="1wk")
     elif interval == "monthly":
@@ -263,7 +333,9 @@ def get_chart_data(symbol: str, limit: int = 0, interval: str = "daily"):
     if prices.empty:
         raise HTTPException(404, f"No data for {symbol}")
 
-    return {
+    result = {
         "prices":     df_to_records(prices,     limit),
         "indicators": df_to_records(indicators, limit),
     }
+    _cache_set(sym, interval, result)
+    return result

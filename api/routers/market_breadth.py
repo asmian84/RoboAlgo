@@ -192,27 +192,66 @@ def get_market_breadth():
         except Exception:
             result["spy_momentum"] = None
 
-        # ── Fear / Greed — CNN official index (real data) ────────────────────
+        # ── Fear / Greed — CNN official index (real data + all 7 components) ───
         try:
             import httpx as _httpx
             _headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                 "Accept": "application/json",
+                "Referer": "https://www.cnn.com/",
             }
-            with _httpx.Client(timeout=5, headers=_headers) as _hc:
+            with _httpx.Client(timeout=8, headers=_headers) as _hc:
                 _r = _hc.get("https://production.dataviz.cnn.io/index/fearandgreed/graphdata")
             _r.raise_for_status()
             _data = _r.json()
-            fg = float(_data["fear_and_greed"]["score"])
-            result["fear_greed"] = int(round(fg))
-            result["fear_greed_label"] = (
-                "Extreme Fear"  if fg < 20 else
-                "Fear"          if fg < 40 else
-                "Neutral"       if fg < 60 else
-                "Greed"         if fg < 80 else
-                "Extreme Greed"
-            )
+
+            fg_raw = _data.get("fear_and_greed", {})
+            fg = float(fg_raw["score"])
+
+            def _fg_label(v: float) -> str:
+                return ("Extreme Fear" if v < 20 else "Fear" if v < 40 else
+                        "Neutral" if v < 60 else "Greed" if v < 80 else "Extreme Greed")
+
+            result["fear_greed"]           = round(fg, 1)
+            result["fear_greed_label"]     = _fg_label(fg)
             result["fear_greed_direction"] = "bearish" if fg < 45 else "bullish" if fg > 55 else "neutral"
+            result["fear_greed_prev_close"]= fg_raw.get("previous_close")
+            result["fear_greed_prev_1w"]   = fg_raw.get("previous_1_week")
+            result["fear_greed_prev_1m"]   = fg_raw.get("previous_1_month")
+            result["fear_greed_prev_1y"]   = fg_raw.get("previous_1_year")
+
+            # Historical sparkline — last 60 daily data points (~3 months)
+            hist = _data.get("fear_and_greed_historical", {}).get("data", [])
+            result["fear_greed_history"] = [
+                {"x": int(p["x"]), "y": round(float(p["y"]), 1)}
+                for p in hist[-60:]
+            ]
+
+            # 7 component indicators
+            _COMPONENTS = [
+                ("market_momentum_sp500",  "Market Momentum",      "S&P 500 vs 125-day moving average"),
+                ("stock_price_strength",   "Stock Price Strength", "NYSE 52-week highs vs lows"),
+                ("stock_price_breadth",    "Stock Price Breadth",  "McClellan volume summation index"),
+                ("put_call_options",       "Put & Call Options",   "5-day put/call ratio"),
+                ("market_volatility_vix",  "Market Volatility",    "VIX vs 50-day moving average"),
+                ("junk_bond_demand",       "Junk Bond Demand",     "Investment grade vs junk bond yield spread"),
+                ("safe_haven_demand",      "Safe Haven Demand",    "20-day stock vs bond return differential"),
+            ]
+            components = []
+            for key, label, description in _COMPONENTS:
+                comp = _data.get(key, {})
+                raw_score = comp.get("score")
+                comp_pts  = comp.get("data", [])[-30:]
+                components.append({
+                    "key":         key,
+                    "label":       label,
+                    "description": description,
+                    "score":       round(float(raw_score), 1) if raw_score is not None else None,
+                    "rating":      comp.get("rating", ""),
+                    "spark":       [{"x": int(p["x"]), "y": round(float(p["y"]), 4)} for p in comp_pts],
+                })
+            result["fear_greed_components"] = components
+
         except Exception:
             # Fallback: synthetic composite (VIX 50% + MCO 30% + SPY mom 20%)
             try:

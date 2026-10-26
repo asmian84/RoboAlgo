@@ -50,8 +50,43 @@ def _get_finnhub():
     return _finnhub_client
 
 
+# Finnhub moved daily candles behind a paid tier, so a key that works for quotes
+# can still 403 on every candle request. Without this, a 235-symbol run makes 235
+# guaranteed-failing API calls before falling back to yfinance each time. After a
+# couple of auth failures we stop asking for the rest of the process's life.
+_FINNHUB_AUTH_FAILURES = 0
+_FINNHUB_AUTH_FAILURE_LIMIT = 3
+_FINNHUB_DISABLED = False
+
+
+def _finnhub_unavailable() -> bool:
+    return _FINNHUB_DISABLED
+
+
+def _note_finnhub_failure(exc: Exception) -> None:
+    """Disable Finnhub for this process after repeated auth/permission errors.
+
+    Only auth-shaped failures count. A single symbol 404-ing or rate-limiting is
+    normal and must not disable a working key.
+    """
+    global _FINNHUB_AUTH_FAILURES, _FINNHUB_DISABLED
+    text = str(exc)
+    if not any(code in text for code in ("403", "401")):
+        return
+    _FINNHUB_AUTH_FAILURES += 1
+    if _FINNHUB_AUTH_FAILURES >= _FINNHUB_AUTH_FAILURE_LIMIT and not _FINNHUB_DISABLED:
+        _FINNHUB_DISABLED = True
+        logger.warning(
+            "Finnhub returned auth errors %d times (key lacks candle access); "
+            "skipping Finnhub for the rest of this run and using yfinance directly.",
+            _FINNHUB_AUTH_FAILURES,
+        )
+
+
 def _download_finnhub(symbol: str, start_date: str) -> pd.DataFrame | None:
     """Download OHLCV daily candles from Finnhub."""
+    if _FINNHUB_DISABLED:
+        return None
     client = _get_finnhub()
     if client is None:
         return None
@@ -73,7 +108,10 @@ def _download_finnhub(symbol: str, start_date: str) -> pd.DataFrame | None:
         logger.info(f"Finnhub: {len(df)} rows for {symbol}")
         return df
     except Exception as e:
-        logger.warning(f"Finnhub error for {symbol}: {e}")
+        _note_finnhub_failure(e)
+        # Once disabled we have already explained why; don't repeat per symbol.
+        if not _FINNHUB_DISABLED:
+            logger.warning(f"Finnhub error for {symbol}: {e}")
         return None
 
 
@@ -101,6 +139,30 @@ def _download_yfinance(symbol: str, start_date: str) -> pd.DataFrame | None:
     except Exception as e:
         logger.error(f"yfinance error for {symbol}: {e}")
         return None
+
+
+_PRICE_FIELDS = ["open", "high", "low", "close"]
+
+
+def drop_incomplete_bars(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Remove bars whose open, high, low or close is missing. Returns (clean, n_dropped).
+
+    A source can return a row that has a volume but no prices: seen on 2026-10-06, when 115
+    of 230 tracked instruments got such a row for the day just closed. Storing it is worse
+    than a gap in two ways:
+
+      * Every stage downstream left-joins on price and skips NaN bars, so the instrument
+        silently drops out of indicators, volatility, compression and the Finder with no
+        error. A fresh DATE hid it from the staleness checks, which only look at dates.
+      * The upsert below is ``DO UPDATE SET close = excluded.close`` and stage 1 re-fetches
+        the last few days on every run, so a partial row for a day already stored would
+        OVERWRITE a good bar with NULLs.
+
+    An instrument that has no bar for a day is honestly one day stale. One with an empty
+    bar looks current and is not.
+    """
+    complete = df[_PRICE_FIELDS].notna().all(axis=1)
+    return df[complete], int((~complete).sum())
 
 
 class MarketDataDownloader:
@@ -186,6 +248,13 @@ class MarketDataDownloader:
         return _download_yfinance(symbol, self.start_date)
 
     def _store_prices(self, session, instrument_id: int, df: pd.DataFrame):
+        df, dropped = drop_incomplete_bars(df)
+        if dropped:
+            logger.warning(
+                "instrument %s: skipped %d bar(s) with a missing open/high/low/close "
+                "(source returned a partial row); stored bars were left untouched",
+                instrument_id, dropped,
+            )
         records = []
         for _, row in df.iterrows():
             records.append({

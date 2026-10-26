@@ -109,13 +109,51 @@ export function usePatternCatalogue() {
   })
 }
 
+// ── localStorage cache helpers — pattern scan + confluence ────────────────────
+const _SCAN_LS_PREFIX = 'roboalgo:pattern-scan-v1'
+const _CONF_LS_KEY    = 'roboalgo:confluence-top-v1'
+
+function _lsRead<T>(key: string): T | undefined {
+  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) as T : undefined }
+  catch { return undefined }
+}
+function _lsWrite(key: string, d: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(d)) } catch {}
+}
+
 export function usePatternScan(enabled = true, tf?: string) {
+  const lsKey     = `${_SCAN_LS_PREFIX}:${tf ?? 'daily'}`
+  const initialData = _lsRead<PatternScanEntry[]>(lsKey)
+
   return useQuery<PatternScanEntry[]>({
     queryKey: ['patterns', 'scan', tf ?? 'daily'],
-    queryFn: () => api.get('/patterns/scan', { params: tf ? { tf } : {} }).then(r => r.data),
+    queryFn: async () => {
+      const d = await api.get('/patterns/scan', { params: tf ? { tf } : {} }).then(r => r.data)
+      _lsWrite(lsKey, d)
+      return d
+    },
     enabled,
-    staleTime: 5 * 60_000,   // matches backend 5-min TTL cache
-    gcTime:    10 * 60_000,
+    staleTime:            5 * 60_000,
+    gcTime:               10 * 60_000,
+    initialData,
+    initialDataUpdatedAt: initialData ? 0 : undefined,   // treat cache as stale → refetch immediately
+  })
+}
+
+export function useTopConfluenceSignals(tier = 'WATCH', limit = 60) {
+  const lsKey     = `${_CONF_LS_KEY}:${tier}:${limit}`
+  const initialData = _lsRead<ConfluenceResult[]>(lsKey)
+
+  return useQuery<ConfluenceResult[]>({
+    queryKey: ['confluence', 'top', tier, limit],
+    queryFn: async () => {
+      const d = await api.get('/confluence/top', { params: { tier, limit } }).then(r => r.data?.signals ?? [])
+      _lsWrite(lsKey, d)
+      return d
+    },
+    staleTime:            2 * 60_000,
+    initialData,
+    initialDataUpdatedAt: initialData ? 0 : undefined,
   })
 }
 
@@ -248,12 +286,36 @@ export function useBullBearAnalysis() {
   })
 }
 
+const _CMD_LS_KEY = 'roboalgo:cmd-center-v1'
+
+function _cmdReadCache(): CommandCenterData | undefined {
+  try {
+    const raw = localStorage.getItem(_CMD_LS_KEY)
+    return raw ? JSON.parse(raw) as CommandCenterData : undefined
+  } catch { return undefined }
+}
+
+function _cmdWriteCache(d: CommandCenterData) {
+  try { localStorage.setItem(_CMD_LS_KEY, JSON.stringify(d)) } catch {}
+}
+
 export function useCommandCenter() {
+  // Serve stale localStorage data instantly while the network request runs
+  const initialData = _cmdReadCache()
+
   return useQuery<CommandCenterData>({
     queryKey: ['command-center'],
-    queryFn: () => api.get('/command-center').then(r => r.data),
+    queryFn: async () => {
+      const r = await api.get('/command-center')
+      _cmdWriteCache(r.data)          // persist fresh data for next load
+      return r.data
+    },
     staleTime: 30_000,
     refetchInterval: 60_000,
+    initialData,
+    // If we have cache, treat it as stale (0 ms old → refetch immediately but show cache)
+    initialDataUpdatedAt: initialData ? 0 : undefined,
+    retry: 2,
   })
 }
 
@@ -490,10 +552,26 @@ export interface MarketBreadthData {
   // SPY momentum
   spy_momentum:         number | null
   spy_above_ma:         boolean | null
-  // Fear/Greed composite
+  // Fear/Greed — CNN live index
   fear_greed:           number | null
   fear_greed_label:     string
   fear_greed_direction: 'bullish' | 'bearish' | 'neutral'
+  // Previous period comparisons
+  fear_greed_prev_close?: number | null
+  fear_greed_prev_1w?:    number | null
+  fear_greed_prev_1m?:    number | null
+  fear_greed_prev_1y?:    number | null
+  // Historical sparkline (last 60 days)
+  fear_greed_history?: { x: number; y: number }[]
+  // 7 component indicators
+  fear_greed_components?: {
+    key:         string
+    label:       string
+    description: string
+    score:       number | null
+    rating:      string
+    spark:       { x: number; y: number }[]
+  }[]
   error?:               string
 }
 

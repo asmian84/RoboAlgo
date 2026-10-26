@@ -25,17 +25,37 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_AV_KEY  = os.getenv("ALPHAVANTAGE_API_KEY", "UPSSIQEAMIJFI6RS")
+# No hardcoded fallback. There used to be a literal key here, which meant a
+# deployment that forgot ALPHAVANTAGE_API_KEY did not fail — it quietly ran on
+# a committed free-tier key at 5 req/min and looked like a slow network. A
+# missing key should be visible. That key is in this repo's git history and in
+# settings.json, so treat it as public and rotate it.
+_AV_KEY  = os.getenv("ALPHAVANTAGE_API_KEY", "")
 _AV_BASE = "https://www.alphavantage.co/query"
+
+if not _AV_KEY:
+    logger.warning(
+        "ALPHAVANTAGE_API_KEY is not set — every AlphaVantage request will be "
+        "rejected. Price ingestion will fall through to yfinance only."
+    )
+
+# ── Rate limiting ──────────────────────────────────────────────────────────
+# AV Free = 5 req/min → delay 0.25s/call
+# AV Premium Standard = 75 req/min → delay 0.80s/call (conservative)
+# AV Premium Professional = 600 req/min → delay 0.10s/call
+_AV_RPM        = int(os.getenv("ALPHAVANTAGE_RPM", "5"))   # default free tier
+_REQUEST_DELAY = max(0.10, 60.0 / max(_AV_RPM, 1))        # seconds between calls
+_IS_PREMIUM    = _AV_RPM >= 30                             # premium if 30+ req/min
 
 # ── Cache ──────────────────────────────────────────────────────────────────
 _price_cache:    dict[str, tuple[pd.DataFrame, float]] = {}
 _universe_cache: tuple[list[str], float] | None = None
+_intraday_cache: dict[str, tuple[pd.DataFrame, float]] = {}  # (sym_interval): (df, ts)
 
 _PRICE_TTL    = 3_600        # 1 h
 _UNIVERSE_TTL = 21_600       # 6 h
-_REQUEST_DELAY = 0.25        # seconds between AV calls (< 5 req/s free tier)
-_MAX_WORKERS   = 8
+_INTRADAY_TTL = 300          # 5 min — intraday data changes quickly
+_MAX_WORKERS  = 8 if _IS_PREMIUM else 4
 
 
 # ── Stage-1 Filter Thresholds ─────────────────────────────────────────────
@@ -84,10 +104,19 @@ def fetch_active_listing() -> list[dict]:
         r = requests.get(url, timeout=30)
         r.raise_for_status()
         from io import StringIO
-        df = pd.read_csv(StringIO(r.text))
+        # keep_default_na=False is load-bearing, not a style choice. Several
+        # real tickers are strings pandas treats as null by default — "NA"
+        # (Nano Labs), "NAN", "NULL". Parsed as NaN they poison every
+        # downstream consumer that expects a string: callers doing
+        # `"." not in row["symbol"]` raise TypeError on a float, and a single
+        # such row was enough to make the whole 14k-symbol universe fetch fail
+        # and silently fall back to a 361-ticker hardcoded list.
+        df = pd.read_csv(StringIO(r.text), keep_default_na=False, na_values=[""])
         df.columns = [c.strip() for c in df.columns]
-        active = df[df.get("status", pd.Series(dtype=str)).str.lower() == "active"]
-        return active.to_dict("records")
+        active = df[df.get("status", pd.Series(dtype=str)).astype(str).str.lower() == "active"]
+        records = active.to_dict("records")
+        # Belt and braces: never hand a caller a non-string symbol.
+        return [r for r in records if isinstance(r.get("symbol"), str) and r["symbol"].strip()]
     except Exception as exc:
         logger.warning("fetch_active_listing failed: %s", exc)
         return []
@@ -232,7 +261,24 @@ def fetch_daily_ohlcv(
 
     ts = data.get("Time Series (Daily)", {})
     if not ts:
-        logger.debug("No price data for %s", symbol)
+        # AlphaVantage answers HTTP 200 for refusals and puts the reason in
+        # "Information" / "Note" / "Error Message". Logging this at debug as
+        # "no price data" made a permanent, fixable fault ("this is a premium
+        # endpoint") indistinguishable from a symbol that genuinely has no
+        # bars, and every caller just saw an empty DataFrame.
+        #
+        # TIME_SERIES_DAILY_ADJUSTED above is premium-only. On a free key this
+        # function cannot succeed for ANY symbol, however many times it is
+        # called. Surface that instead of swallowing it.
+        reason = (
+            data.get("Information")
+            or data.get("Note")
+            or data.get("Error Message")
+        )
+        if reason:
+            logger.warning("AlphaVantage refused %s: %s", symbol, reason)
+        else:
+            logger.debug("No price data for %s", symbol)
         return pd.DataFrame()
 
     rows = []
@@ -359,3 +405,103 @@ def load_ohlcv_from_db(
         results.update(av_data)
 
     return results
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Intraday OHLCV (Premium feature — 15min / 60min bars)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fetch_intraday_ohlcv(
+    symbol: str,
+    interval: str = "15min",   # "1min" | "5min" | "15min" | "30min" | "60min"
+    bars: int = 100,
+    force_refresh: bool = False,
+) -> pd.DataFrame:
+    """
+    Fetch intraday OHLCV bars from Alpha Vantage TIME_SERIES_INTRADAY.
+
+    Requires AV Premium for reliable access (free tier may return errors
+    or throttle heavily). Returns empty DataFrame on failure — callers
+    should fall back to yfinance in that case.
+
+    Args:
+        symbol:   Ticker symbol (e.g. "AAPL")
+        interval: Bar size — "15min" | "60min" etc.
+        bars:     Number of recent bars to return (max 100 for compact)
+
+    Returns:
+        DataFrame indexed by datetime with columns [open, high, low, close, volume]
+    """
+    cache_key = f"{symbol.upper()}_{interval}"
+    now = time.time()
+    cached = _intraday_cache.get(cache_key)
+    if not force_refresh and cached and (now - cached[1]) < _INTRADAY_TTL:
+        return cached[0].iloc[-bars:].copy()
+
+    output_size = "full" if bars > 100 else "compact"
+    data = _rate_limited_get({
+        "function":    "TIME_SERIES_INTRADAY",
+        "symbol":      symbol.upper(),
+        "interval":    interval,
+        "outputsize":  output_size,
+        "datatype":    "json",
+        "extended_hours": "false",   # market hours only — cleaner alignment
+    })
+
+    ts_key = f"Time Series ({interval})"
+    ts = data.get(ts_key, {})
+    if not ts:
+        # AV may return a "Note" about API call frequency on free tier
+        note = data.get("Note") or data.get("Information", "")
+        if note:
+            logger.warning("AV intraday throttled for %s/%s: %s", symbol, interval, note[:80])
+        return pd.DataFrame()
+
+    rows = []
+    for dt_str, bar in ts.items():
+        try:
+            rows.append({
+                "datetime": pd.Timestamp(dt_str),
+                "open":     float(bar["1. open"]),
+                "high":     float(bar["2. high"]),
+                "low":      float(bar["3. low"]),
+                "close":    float(bar["4. close"]),
+                "volume":   float(bar["5. volume"]),
+            })
+        except (KeyError, ValueError):
+            pass
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = (
+        pd.DataFrame(rows)
+        .sort_values("datetime")
+        .set_index("datetime")
+    )
+    _intraday_cache[cache_key] = (df, now)
+    logger.debug("AV intraday %s/%s: %d bars", symbol, interval, len(df))
+    return df.iloc[-bars:].copy()
+
+
+def fetch_mtf_bars(symbol: str) -> dict[str, pd.DataFrame]:
+    """
+    Fetch multi-timeframe bars for a symbol using AV intraday (Premium).
+
+    Returns dict with keys "15min" and "60min" containing DataFrames
+    with columns [open, high, low, close, volume], or empty DataFrames
+    if the fetch fails.
+
+    The caller can resample "15min" to "4H" if needed.
+    Only uses 2 AV API calls (15min + 60min) for the full MTF picture.
+    Falls back gracefully — callers should detect empty DataFrames.
+    """
+    return {
+        "15min": fetch_intraday_ohlcv(symbol, interval="15min", bars=100),
+        "60min": fetch_intraday_ohlcv(symbol, interval="60min", bars=100),
+    }
+
+
+def is_premium() -> bool:
+    """Return True if configured AV key is premium (30+ req/min)."""
+    return _IS_PREMIUM

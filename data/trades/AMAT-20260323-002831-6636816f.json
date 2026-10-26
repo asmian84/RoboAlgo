@@ -1,0 +1,21 @@
+{
+  "trade_id": "AMAT-20260323-002831-6636816f",
+  "symbol": "AMAT",
+  "timeframe": "daily",
+  "entry_time": "2026-03-23T00:28:31.777295Z",
+  "entry_price": 357.24,
+  "target_price": 0.0,
+  "stop_price": 0.0,
+  "signals": {},
+  "screenshot": null,
+  "outcome": {
+    "status": "open",
+    "exit_time": null,
+    "exit_price": null,
+    "pnl": null,
+    "pnl_percent": null,
+    "bars_held": null,
+    "reason": null
+  },
+  "notes": ""
+}

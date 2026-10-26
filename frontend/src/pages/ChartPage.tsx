@@ -24,8 +24,20 @@ export default function ChartPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const symbol = searchParams.get('symbol') || 'TQQQ'
 
+  // ── Company name (cached, fetched on symbol change) ────────────────────────
+  const [companyName, setCompanyName] = useState<string | null>(null)
+  useEffect(() => {
+    setCompanyName(null)
+    let cancelled = false
+    fetch(`/api/company/${symbol}`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled && d?.name) setCompanyName(d.name) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [symbol])
+
   // tf must be declared before usePatterns so we can pass it below
-  const [tf, setTf] = useState<TF>('1Y')
+  const [tf, setTf] = useState<TF>('6M')
   const isIntraday  = (INTRADAY_TFS as readonly string[]).includes(tf)
   const isBarTF     = (BAR_TFS     as readonly string[]).includes(tf)
   // Map tf → API interval param (daily is default, W/M fetch different bar resolutions)
@@ -94,7 +106,7 @@ export default function ChartPage() {
 
   const [showBB,                setShowBB]                = useState(false)
   const [showMA,                setShowMA]                = useState(false)
-  const [showTrendlines,        setShowTrendlines]        = useState(false)
+  const [showTrendlines,        setShowTrendlines]        = useState(true)
   const [trendlineTF] = useState<'short' | 'medium' | 'long'>('medium')
   const [showGaps,              setShowGaps]              = useState(false)
   const [showPriceZones,        setShowPriceZones]        = useState(false)
@@ -140,6 +152,22 @@ export default function ChartPage() {
   const [acOpen,  setAcOpen]    = useState(false)
   const acRef = useRef<HTMLDivElement>(null)
   const acInputRef = useRef<HTMLInputElement>(null)
+
+  // Fetch company name while user types (for the "go to" row in autocomplete)
+  const [acCompanyName, setAcCompanyName] = useState<string | null>(null)
+  useEffect(() => {
+    const q = acInput.trim().toUpperCase()
+    if (!q || q === symbol) { setAcCompanyName(null); return }
+    let cancelled = false
+    const t = setTimeout(() => {
+      fetch(`/api/company/${q}`)
+        .then(r => r.json())
+        .then(d => { if (!cancelled && d?.name) setAcCompanyName(d.name) })
+        .catch(() => {})
+    }, 300)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [acInput, symbol])
+
   // Only render pattern overlay when the user has explicitly selected one
   const showPatterns = !!activePatternName
   const intradayResolution = isIntraday ? (INTRADAY_RESOLUTION[tf] ?? 5) : 5
@@ -247,6 +275,9 @@ export default function ChartPage() {
 
   // Sync autocomplete input when URL symbol changes
   useEffect(() => { setAcInput(symbol) }, [symbol])
+
+  // Auto-zoom to 6M and enable trendlines on every new symbol — ROBO default
+  useEffect(() => { setTf('6M'); setShowTrendlines(true) }, [symbol])
 
   // Close autocomplete on outside click
   useEffect(() => {
@@ -755,14 +786,14 @@ export default function ChartPage() {
       for (const line of tfData.resistance.slice(-3)) {
         const pts = [...line.points]; if (line.projected) pts.push(line.projected)
         if (pts.length >= 2) {
-          chart.addLineSeries({ color: 'rgba(239,68,68,0.7)', lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, crosshairMarkerVisible: false, lastValueVisible: false })
+          chart.addLineSeries({ color: 'rgba(239,68,68,0.9)', lineWidth: 2, lineStyle: LineStyle.Solid, priceLineVisible: false, crosshairMarkerVisible: false, lastValueVisible: false })
             .setData(pts.map(p => ({ time: p.date as import('lightweight-charts').Time, value: p.value })))
         }
       }
       for (const line of tfData.support.slice(-3)) {
         const pts = [...line.points]; if (line.projected) pts.push(line.projected)
         if (pts.length >= 2) {
-          chart.addLineSeries({ color: 'rgba(34,197,94,0.7)', lineWidth: 1, lineStyle: LineStyle.Dashed, priceLineVisible: false, crosshairMarkerVisible: false, lastValueVisible: false })
+          chart.addLineSeries({ color: 'rgba(34,197,94,0.9)', lineWidth: 2, lineStyle: LineStyle.Solid, priceLineVisible: false, crosshairMarkerVisible: false, lastValueVisible: false })
             .setData(pts.map(p => ({ time: p.date as import('lightweight-charts').Time, value: p.value })))
         }
       }
@@ -777,6 +808,14 @@ export default function ChartPage() {
       const selected: PatternEntry[] = []
       const active = eligible.find(p => p.pattern_name === activePatternName)
       if (active) selected.push(active)
+
+      // Clear CDL arrow marker whenever we switch to a non-candlestick pattern
+      if (active && candlestick) {
+        const activeKind = classifyPattern(active)
+        if (activeKind !== 'candlestick') {
+          try { candlestick.setMarkers([]) } catch { /* ignore */ }
+        }
+      }
 
       // Shared time converter: date string (primary) or legacy numeric index
       const toTime = (coord: unknown): import('lightweight-charts').Time | null => {
@@ -1142,30 +1181,152 @@ export default function ChartPage() {
           }
         }
 
-        // ── Target + Stop projection for chart patterns ───────────────────
-        if (kind === 'chart') {
-          const pAny = p as unknown as Record<string, unknown>
-          const tgt = pAny.projected_target as number | undefined
-          const inv = pAny.invalidation_level as number | undefined
-          if (tgt && tgt > 0) {
+        // ── CDL on-candle arrow markers ───────────────────────────────────
+        // For candlestick patterns: draw a coloured arrowUp/arrowDown marker
+        // directly on the signal bar so the pattern is unmistakable at a glance.
+        if (kind === 'candlestick' && p.points && p.points.length >= 1 && candlestick) {
+          const ptRaw = (p.points as unknown[][])[0]
+          const ptTime = ptRaw ? toTime(ptRaw[0]) : null
+          if (ptTime) {
+            try {
+              const isBull = p.direction === 'bullish'
+              candlestick.setMarkers([{
+                time: ptTime,
+                position: isBull ? 'belowBar' : 'aboveBar',
+                shape:     isBull ? 'arrowUp'  : 'arrowDown',
+                color:     isBull ? '#22c55e'  : '#ef4444',
+                text:      p.pattern_name,
+                size:      2,
+              }])
+            } catch { /* series not ready */ }
+          }
+        }
+
+        // ── Universal Entry zone + Target / Stop bands ────────────────────
+        // Applies to ALL pattern categories (not just 'chart').
+        // Entry zone:  semi-transparent band around the breakout level (±1%).
+        // Target band: thin green band at the measured-move target.
+        // Stop band:   thin red band at the invalidation level.
+        {
+          const pAny     = p as unknown as Record<string, unknown>
+          const breakout = (pAny.breakout_level ?? pAny.projected_target) as number | undefined
+          const tgt      = (pAny.target ?? pAny.projected_target) as number | undefined
+          const inv      = (pAny.invalidation_level) as number | undefined
+          const isBull   = p.direction === 'bullish'
+          const todayStr = candles[candles.length - 1]?.time as import('lightweight-charts').Time | undefined
+
+          // Entry zone band — 1% band around the breakout level
+          if (breakout && breakout > 0 && todayStr) {
+            const entryHi = breakout * 1.010
+            const entryLo = breakout * 0.990
+            try {
+              chart.addBaselineSeries({
+                baseValue:       { type: 'price', price: entryLo },
+                topLineColor:    isBull ? 'rgba(34,197,94,0.6)'  : 'rgba(239,68,68,0.6)',
+                topFillColor1:   isBull ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)',
+                topFillColor2:   isBull ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)',
+                bottomLineColor: 'rgba(0,0,0,0)',
+                bottomFillColor1: 'rgba(0,0,0,0)',
+                bottomFillColor2: 'rgba(0,0,0,0)',
+                priceLineVisible: false, crosshairMarkerVisible: false, lastValueVisible: false,
+              }).setData([
+                { time: candles[Math.max(0, candles.length - 40)]?.time as import('lightweight-charts').Time, value: entryHi },
+                { time: todayStr, value: entryHi },
+              ])
+            } catch { /* skip */ }
             candlestick.createPriceLine({
-              price: tgt,
-              color: p.direction === 'bullish' ? '#22c55e' : '#ef4444',
-              lineWidth: 1,
-              lineStyle: LineStyle.Dotted,
+              price: breakout,
+              color: isBull ? '#22c55e' : '#ef4444',
+              lineWidth: 2,
+              lineStyle: LineStyle.Solid,
               axisLabelVisible: true,
-              title: 'Target',
+              title: '⚡ Entry',
             })
           }
+
+          // Target band
+          if (tgt && tgt > 0) {
+            const tgtColor = isBull ? '#22c55e' : '#ef4444'
+            try {
+              chart.addBaselineSeries({
+                baseValue:        { type: 'price', price: tgt * 0.997 },
+                topLineColor:     tgtColor + '80',
+                topFillColor1:    tgtColor + '30',
+                topFillColor2:    tgtColor + '08',
+                bottomLineColor:  'rgba(0,0,0,0)',
+                bottomFillColor1: 'rgba(0,0,0,0)',
+                bottomFillColor2: 'rgba(0,0,0,0)',
+                priceLineVisible: false, crosshairMarkerVisible: false, lastValueVisible: false,
+              }).setData([
+                { time: candles[Math.max(0, candles.length - 30)]?.time as import('lightweight-charts').Time, value: tgt * 1.003 },
+                { time: (todayStr ?? candles[candles.length-1]?.time) as import('lightweight-charts').Time, value: tgt * 1.003 },
+              ])
+            } catch { /* skip */ }
+            candlestick.createPriceLine({
+              price: tgt,
+              color: tgtColor,
+              lineWidth: 1,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: true,
+              title: '🎯 Target',
+            })
+          }
+
+          // Stop band
           if (inv && inv > 0) {
+            try {
+              chart.addBaselineSeries({
+                baseValue:        { type: 'price', price: inv * 0.997 },
+                topLineColor:     'rgba(239,68,68,0.55)',
+                topFillColor1:    'rgba(239,68,68,0.20)',
+                topFillColor2:    'rgba(239,68,68,0.05)',
+                bottomLineColor:  'rgba(0,0,0,0)',
+                bottomFillColor1: 'rgba(0,0,0,0)',
+                bottomFillColor2: 'rgba(0,0,0,0)',
+                priceLineVisible: false, crosshairMarkerVisible: false, lastValueVisible: false,
+              }).setData([
+                { time: candles[Math.max(0, candles.length - 30)]?.time as import('lightweight-charts').Time, value: inv * 1.003 },
+                { time: (todayStr ?? candles[candles.length-1]?.time) as import('lightweight-charts').Time, value: inv * 1.003 },
+              ])
+            } catch { /* skip */ }
             candlestick.createPriceLine({
               price: inv,
-              color: 'rgba(239,68,68,0.45)',
+              color: 'rgba(239,68,68,0.85)',
               lineWidth: 1,
-              lineStyle: LineStyle.Dotted,
+              lineStyle: LineStyle.Dashed,
               axisLabelVisible: true,
-              title: 'Stop',
+              title: '🛑 Stop',
             })
+          }
+        }
+
+        // ── VCP compression box ───────────────────────────────────────────
+        // Draws a shaded box showing the contraction range so traders see
+        // the tightening base structure and know exactly where to set alerts.
+        if (p.pattern_name?.includes('VCP') && p.points && p.points.length >= 2 && candlestick) {
+          const vcpPrices = (p.points as unknown[][]).map(pt => Number(pt[1])).filter(v => v > 0)
+          if (vcpPrices.length >= 2) {
+            const boxLo = Math.min(...vcpPrices)
+            const boxHi = Math.max(...vcpPrices)
+            const startTime = toTime((p.points as unknown[][])[0][0])
+            const endTime   = candles[candles.length - 1]?.time as import('lightweight-charts').Time | undefined
+            if (startTime && endTime) {
+              try {
+                chart.addBaselineSeries({
+                  baseValue:        { type: 'price', price: boxLo },
+                  topLineColor:     'rgba(168,85,247,0.5)',
+                  topFillColor1:    'rgba(168,85,247,0.15)',
+                  topFillColor2:    'rgba(168,85,247,0.05)',
+                  bottomLineColor:  'rgba(168,85,247,0.3)',
+                  bottomFillColor1: 'rgba(0,0,0,0)',
+                  bottomFillColor2: 'rgba(0,0,0,0)',
+                  priceLineVisible: false, crosshairMarkerVisible: false, lastValueVisible: false,
+                }).setData([
+                  { time: startTime, value: boxHi },
+                  { time: endTime,   value: boxHi },
+                ])
+              } catch { /* skip */ }
+            }
           }
         }
 
@@ -1748,10 +1909,22 @@ export default function ChartPage() {
       if (isIntraday || isBarTF || tf === 'All') {
         api.timeScale().fitContent()
       } else {
-        const days = TF_DAYS[tf]
-        const to = new Date(); const from = new Date(to.getTime() - days * 86_400_000)
-        const fmt = (d: Date) => d.toISOString().split('T')[0]
-        api.timeScale().setVisibleRange({ from: fmt(from) as never, to: fmt(to) as never })
+        // Use bar-count zoom so candle width stays consistent regardless of
+        // how many calendar days fall in the range (weekends, holidays, gaps).
+        // Target: ~130 bars visible → ~6–7 px per bar at typical chart width.
+        const BAR_COUNTS: Record<string, number> = {
+          '1M': 22, '3M': 65, '6M': 130, '1Y': 252, '2Y': 504,
+        }
+        const count      = BAR_COUNTS[tf] ?? 130
+        const totalBars  = chartData?.prices?.length ?? 0
+        const rightPad   = 8   // extra bars on right so latest candle isn't flush against edge
+        if (totalBars > 0) {
+          const from = Math.max(-1, totalBars - count) - 1
+          const to   = totalBars - 1 + rightPad
+          try { api.timeScale().setVisibleLogicalRange({ from, to }) } catch { /* disposed */ }
+        } else {
+          api.timeScale().fitContent()
+        }
       }
     }
     applyZoom(chartApi.current)
@@ -1828,7 +2001,12 @@ export default function ChartPage() {
           {/* ── Row 1: Symbol info + autocomplete + MTF dots ── */}
           <div className="flex items-center gap-2 flex-wrap">
             {/* Symbol header with full name + watchlist toggle */}
-            <h2 className="text-2xl font-bold font-mono">{symbol}</h2>
+            <div className="flex flex-col leading-none">
+              <h2 className="text-2xl font-bold font-mono">{symbol}</h2>
+              {companyName && (
+                <span className="text-[10px] text-gray-500 mt-0.5 font-normal tracking-wide truncate max-w-[200px]">{companyName}</span>
+              )}
+            </div>
             <button
               onClick={() => watchlistToggle.mutate({ symbol, watching: isWatching })}
               title={isWatching ? 'Remove from watchlist' : 'Add to watchlist'}
@@ -1883,7 +2061,12 @@ export default function ChartPage() {
                       <span className="font-mono font-bold text-emerald-400 text-sm w-20 flex-shrink-0">
                         {acInput.trim().toUpperCase()}
                       </span>
-                      <span className="text-[11px] text-gray-500 group-hover:text-gray-300">→ go to this symbol</span>
+                      <div className="flex flex-col min-w-0">
+                        {acCompanyName
+                          ? <span className="text-[11px] text-gray-200 truncate">{acCompanyName}</span>
+                          : <span className="text-[11px] text-gray-500 group-hover:text-gray-300">→ go to this symbol</span>
+                        }
+                      </div>
                     </button>
                   )}
                   {acSuggestions.map((s, idx) => (

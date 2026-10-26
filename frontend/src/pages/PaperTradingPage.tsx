@@ -1,296 +1,367 @@
-/**
- * Paper Trading — simulated trading with full persistence, token-gated resets,
- * configurable starting balance, and pre-fill from the Intelligence page.
- *
- * State is persisted in localStorage so positions survive refresh.
- * Resets cost tokens (doubling cost per reset within a 30-day window).
- * Starting balance is configurable: $10K · $25K · $100K · $250K · $1M · custom.
- */
+// frontend/src/pages/PaperTradingPage.tsx
+//
+// PAPER — the mock account, and the auto-trader engine that trades into it,
+// as two tabs on one page. The standalone AUTO page is retired; its control
+// surface (status, kill switch, risk limits, cycles, decisions,
+// discrepancies) moves here under the AUTO-TRADER tab.
+//
+// ACCOUNT reads/administers the local simulated broker directly —
+// `/api/paper-account/*` (api/routers/paper_account.py) → PaperBroker
+// (broker_engine/paper.py), backed by the `paper_account` / `paper_positions`
+// / `paper_trades` tables. This is a DIFFERENT account than `/api/paper/*`
+// (paper_trading.py → paper_engine/trader.py), which is a historical
+// backtest simulator with different accounting semantics (it treats
+// `ending_balance` as equity; PaperBroker treats it as a cash ledger and
+// derives equity as cash + open position market value on every read). The
+// two are not interchangeable — this page reads PaperBroker exclusively.
+//
+// This account is monitored, not hand-traded from here: the auto-trader
+// places the orders, this page shows what it did and lets an operator mark
+// positions to market or wipe the simulation. There is no manual order
+// entry and no token/credit economy — those described capabilities the
+// backend never had.
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 
-import { useState, useEffect, useCallback } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+// ── Shared formatting ───────────────────────────────────────────────────────
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface PaperOrder {
-  id:          number
-  symbol:      string
-  direction:   'buy' | 'sell'
-  size:        number
-  entry:       number
-  stop:        number
-  target:      number
-  timestamp:   string
-  status:      'open' | 'closed'
-  exitPrice?:  number
-  exitTime?:   string
-  pnl?:        number
-  stageScore?: number   // confluence score at time of entry
+function fmtMoney(n: number | null | undefined, digits = 2): string {
+  if (n == null || Number.isNaN(n)) return '—'
+  return n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
 }
 
-interface ResetRecord {
-  timestamp:        string
-  balanceAtReset:   number
-  tokensSpent:      number
-  winRate:          string
+function fmtSigned(n: number | null | undefined, digits = 2): string {
+  if (n == null || Number.isNaN(n)) return '—'
+  return `${n >= 0 ? '+' : '-'}$${fmtMoney(Math.abs(n), digits)}`
 }
 
-interface PaperAccount {
-  startingBalance:  number
-  currentBalance:   number
-  tokens:           number
-  resetCount:       number           // lifetime
-  resetsThisWindow: number           // within rolling 30-day window
-  windowStart:      string           // ISO date of first reset in current window
-  resetHistory:     ResetRecord[]
-  orders:           PaperOrder[]
-  nextId:           number
-  createdAt:        string
+function fmtNum(n: number | null | undefined, digits = 2): string {
+  if (n == null || Number.isNaN(n)) return '—'
+  return n.toFixed(digits)
 }
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const ACCOUNT_KEY   = 'roboalgo_paper_account'
-const BALANCE_OPTS  = [10_000, 25_000, 100_000, 250_000, 1_000_000]
-const INITIAL_TOKENS = 10
-const MONTHLY_TOKENS =  5
-const WINDOW_DAYS    = 30
-
-function resetCost(resetsThisWindow: number): number {
-  // 1st reset = 3 tokens, 2nd = 6, 3rd = 12, 4th = 24 …
-  return 3 * Math.pow(2, resetsThisWindow)
+// `iso` — an ISO datetime string, as returned by auto_trader.audit (`_iso()`).
+function timeAgo(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return '—'
+  return timeAgoMs(t)
 }
 
-function defaultAccount(balance: number): PaperAccount {
-  return {
-    startingBalance:  balance,
-    currentBalance:   balance,
-    tokens:           INITIAL_TOKENS,
-    resetCount:       0,
-    resetsThisWindow: 0,
-    windowStart:      new Date().toISOString(),
-    resetHistory:     [],
-    orders:           [],
-    nextId:           1,
-    createdAt:        new Date().toISOString(),
-  }
+// `sec` — unix epoch SECONDS, as returned by auto_trader.state (`time.time()`
+// in kill_meta.ts) — not an ISO string. Verified against the real response:
+// {"on":false,"reason":"","actor":"api","ts":1790707852.07}
+function timeAgoEpoch(sec: number | null | undefined): string {
+  if (sec == null) return '—'
+  return timeAgoMs(sec * 1000)
 }
 
-function loadAccount(): PaperAccount | null {
+function timeAgoMs(t: number): string {
+  const secs = Math.max(0, Math.floor((Date.now() - t) / 1000))
+  if (secs < 60) return `${secs}s ago`
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`
+  return `${Math.floor(secs / 86400)}d ago`
+}
+
+// ── ACCOUNT tab — types (verified with curl against a live backend) ────────
+//
+//   GET  /api/paper-account/account
+//     {"account_id":"paper-1","cash":95000.0,"equity":98611.0,
+//      "buying_power":95000.0,"broker":"paper","currency":"USD","is_paper":true}
+//   GET  /api/paper-account/positions
+//     [{"symbol":"TEST","qty":100,"avg_cost":50.0,"market_value":3611.0,
+//       "unrealized_pnl":-1389.0,"unrealized_pct":-27.78,"side":"long",
+//       "stop":45.0,"target":60.0,"entry_date":"2026-09-29"}]
+//   GET  /api/paper-account/trades
+//     [] (empty in this environment; shape per api/routers/paper_account.py:
+//        id, symbol, entry_date, exit_date, entry_price, exit_price,
+//        position_size, direction, pnl, return_percent, exit_reason)
+//   POST /api/paper-account/mark-to-market
+//     {"checked":1,"closed":[{"symbol":"TEST","exit_reason":"stop",
+//      "exit_price":45.0,"pnl":-500.0}],"skipped_no_quote":0,"still_open":0}
+//   POST /api/paper-account/reset  (optional body: {starting_balance})
+//     {"status":"reset","account_id":"paper-1","cash":100000.0,"equity":100000.0}
+
+interface Account {
+  account_id: string
+  cash: number
+  equity: number
+  buying_power: number
+  broker: string
+  currency: string
+  is_paper: boolean
+}
+
+interface Position {
+  symbol: string
+  qty: number
+  avg_cost: number
+  market_value: number
+  unrealized_pnl: number
+  unrealized_pct: number
+  side: string
+  stop: number | null
+  target: number | null
+  entry_date: string | null
+}
+
+interface Trade {
+  id: number
+  symbol: string
+  entry_date: string
+  exit_date: string
+  entry_price: number
+  exit_price: number
+  position_size: number
+  direction: string
+  pnl: number
+  return_percent: number
+  exit_reason: string | null
+}
+
+interface MarkToMarketResult {
+  checked: number
+  closed: { symbol: string; exit_reason: string; exit_price: number; pnl: number }[]
+  skipped_no_quote: number
+  still_open?: number
+  error?: string
+}
+
+const PAPER_API = '/api/paper-account'
+const BALANCE_OPTS = [10_000, 25_000, 100_000, 250_000, 1_000_000]
+
+// ── AUTO-TRADER tab — types (verified with curl) ────────────────────────────
+//
+//   GET /api/auto-trader/status
+//     {"enabled":false,"running":true,"kill_switch":false,
+//      "kill_meta":{"on":false,"reason":"","actor":"api","ts":1790707852.07},
+//      "mode":"paper","broker":"alpaca","is_paper":null,
+//      "broker_error":"ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in .env",
+//      "redis_available":true,"lock":null,"last_cycle":null}
+//   GET /api/auto-trader/config
+//     {"enabled":false,"mode":"paper","live_confirmed":false,"broker":"alpaca",
+//      "asset_class":"equity","profile":"SWING","symbols":[],"max_symbols":30,
+//      "max_workers":2,"max_new_positions_per_cycle":2,
+//      "ignore_market_hours":false,"dry_run":true,
+//      "risk":{"max_open_positions":5,"max_total_exposure_pct":60.0,
+//               "per_trade_risk_pct":1.0,"daily_loss_limit_pct":3.0,
+//               "consecutive_loss_halt":3,"max_position_size_pct":20.0}}
+//   GET /api/auto-trader/cycles → {"cycles":[...]}  — fields per
+//     auto_trader/audit.py `_cycle_to_dict`: id, cycle_id, started_at,
+//     finished_at, mode, broker, status, symbols_scanned, candidates,
+//     orders_placed, orders_rejected, equity_start, equity_end,
+//     day_start_equity, regime, positions, halt_reason, error, created_at.
+//     (NOT `time`/`scanned`/`placed`/`rejected`/`equity_delta` — those field
+//     names don't exist on this row; equity_delta is derived here.)
+//   GET /api/auto-trader/decisions → {"decisions":[...]} — fields per
+//     `_decision_to_dict`: id, cycle_id, ts, symbol, action, verdict,
+//     direction, score, confidence, entry, stop, target, qty, risk_amount,
+//     realized_pnl, reason, governor_rule, broker_order_id, client_order_id.
+//   GET /api/auto-trader/discrepancies → {"discrepancies":[...]}
+
+interface KillMeta {
+  on?: boolean
+  reason?: string | null
+  actor?: string | null
+  ts?: number | null   // unix epoch SECONDS, not ISO — see timeAgoEpoch
+}
+
+interface StatusData {
+  enabled: boolean
+  running: boolean
+  kill_switch: boolean
+  kill_meta: KillMeta | null
+  mode: string
+  broker: string | null
+  is_paper: boolean | null
+  broker_error: string | null
+  redis_available: boolean
+  lock: boolean | string | null
+  last_cycle: unknown
+}
+
+interface AutoTraderConfig {
+  risk: Record<string, unknown>
+  [key: string]: unknown
+}
+
+interface Cycle {
+  id?: number
+  cycle_id: string | number
+  started_at?: string | null
+  finished_at?: string | null
+  mode?: string | null
+  broker?: string | null
+  status?: string | null
+  symbols_scanned?: number | null
+  candidates?: number | null
+  orders_placed?: number | null
+  orders_rejected?: number | null
+  equity_start?: number | null
+  equity_end?: number | null
+  halt_reason?: string | null
+  error?: string | null
+}
+
+interface Decision {
+  id?: string | number
+  cycle_id?: string | number
+  symbol?: string
+  action?: string
+  qty?: number | null
+  entry?: number | null
+  stop?: number | null
+  target?: number | null
+  governor_rule?: string | null
+  reason?: string | null
+}
+
+interface Discrepancy {
+  kind?: string
+  symbol?: string
+  expected?: string | number
+  actual?: string | number
+  resolution?: string
+}
+
+const AUTO_API = '/api/auto-trader'
+const TOKEN_KEY = 'roboalgo_control_token'
+const ACTIONS = ['', 'PLACE', 'REJECT', 'SKIP', 'DRY_RUN', 'HALT', 'NO_ACTION'] as const
+
+function loadToken(): string {
+  try { return localStorage.getItem(TOKEN_KEY) ?? '' } catch { return '' }
+}
+function persistToken(v: string) {
+  try { localStorage.setItem(TOKEN_KEY, v) } catch { /* private window etc — non-fatal */ }
+}
+
+// Distinguishes "not configured" (503) from "wrong token" (403) per the
+// auth-asymmetry contract documented in api/routers/trading_control.py.
+async function guarded(path: string, token: string, init: RequestInit = {}) {
   try {
-    const raw = localStorage.getItem(ACCOUNT_KEY)
-    if (!raw) return null
-    return JSON.parse(raw) as PaperAccount
-  } catch { return null }
-}
-
-function saveAccount(acct: PaperAccount) {
-  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(acct))
-}
-
-function isWindowExpired(windowStart: string): boolean {
-  const start = new Date(windowStart).getTime()
-  const now   = Date.now()
-  return (now - start) > WINDOW_DAYS * 24 * 60 * 60 * 1000
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmt(n: number | undefined | null, d = 2) {
-  if (n == null || isNaN(n)) return '—'
-  return n.toFixed(d)
-}
-
-function fmtDollar(n: number) {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`
-  return `$${n.toFixed(2)}`
-}
-
-// ── Account Setup ─────────────────────────────────────────────────────────────
-
-function AccountSetup({ onCreate }: { onCreate: (balance: number) => void }) {
-  const [selected, setSelected] = useState<number>(100_000)
-  const [custom,   setCustom]   = useState('')
-  const [useCustom, setUseCustom] = useState(false)
-
-  function handleCreate() {
-    const bal = useCustom ? parseFloat(custom.replace(/,/g, '')) : selected
-    if (!bal || isNaN(bal) || bal < 1000) return
-    onCreate(bal)
+    const res = await fetch(`${AUTO_API}${path}`, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}), 'X-RoboAlgo-Control-Token': token },
+    })
+    if (res.status === 503) {
+      return { ok: false as const, error: 'Control token not configured on the server (missing env var) — guarded actions are disabled until an operator sets it.' }
+    }
+    if (res.status === 403) {
+      return { ok: false as const, error: 'Wrong control token — check the value and try again.' }
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      return { ok: false as const, error: body?.detail ?? `HTTP ${res.status}` }
+    }
+    const data = await res.json().catch(() => null)
+    return { ok: true as const, data }
+  } catch (err) {
+    return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
   }
-
-  return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8">
-      <div className="text-center">
-        <h2 className="text-2xl font-black text-white">Set Your Paper Account</h2>
-        <p className="text-sm text-gray-500 mt-1">Choose a starting balance — all trades tracked from here</p>
-      </div>
-
-      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 max-w-sm w-full space-y-6">
-        <div className="space-y-2">
-          <p className="text-xs text-gray-500 uppercase tracking-widest">Starting Balance</p>
-          <div className="grid grid-cols-3 gap-2">
-            {BALANCE_OPTS.map(b => (
-              <button key={b}
-                onClick={() => { setSelected(b); setUseCustom(false) }}
-                className={`py-2.5 rounded-xl text-sm font-bold transition-all ${
-                  selected === b && !useCustom
-                    ? 'bg-emerald-700 text-white ring-1 ring-emerald-500'
-                    : 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                }`}>
-                {fmtDollar(b)}
-              </button>
-            ))}
-            <button
-              onClick={() => setUseCustom(true)}
-              className={`py-2.5 rounded-xl text-sm font-bold transition-all col-span-3 ${
-                useCustom ? 'bg-gray-700 text-gray-200 ring-1 ring-gray-500' : 'bg-gray-800 text-gray-500 hover:text-gray-300'
-              }`}>
-              Custom
-            </button>
-          </div>
-          {useCustom && (
-            <input
-              autoFocus
-              value={custom}
-              onChange={e => setCustom(e.target.value)}
-              placeholder="Enter amount, e.g. 50000"
-              className="w-full mt-2 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm font-mono text-gray-200 focus:outline-none focus:border-emerald-500"
-            />
-          )}
-        </div>
-
-        <div className="bg-gray-800/50 rounded-xl p-3 text-xs text-gray-500 space-y-1">
-          <p>● {INITIAL_TOKENS} tokens included — used for account resets</p>
-          <p>● Reset cost doubles each time within 30 days</p>
-          <p>● All trades tracked — history preserved across resets</p>
-        </div>
-
-        <button
-          onClick={handleCreate}
-          className="w-full py-3 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-xl transition-colors text-sm"
-        >
-          Create Paper Account →
-        </button>
-      </div>
-    </div>
-  )
 }
 
-// ── Close Position Modal ───────────────────────────────────────────────────────
+// ── Small presentational pieces (shared) ────────────────────────────────────
 
-function CloseModal({
-  order, onClose, onCancel,
+// Checks/pills: passed and failed are both subtle — colour never encodes
+// pass/fail, only the glyph does. Not-evaluated is a dimmed dash, never red.
+function CheckMark({ v }: { v: boolean | undefined | null }) {
+  if (v === undefined || v === null) {
+    return <span className="text-[color:var(--text-muted)] opacity-50">–</span>
+  }
+  return <span className="text-[color:var(--text-secondary)]">{v ? '✓' : '✕'}</span>
+}
+
+function Stat({
+  label, value, tone, money = true,
 }: {
-  order: PaperOrder
-  onClose: (exitPrice: number) => void
-  onCancel: () => void
+  label: string
+  value: number | string | null
+  tone?: 'up' | 'down'
+  money?: boolean
 }) {
-  const [exitPrice, setExitPrice] = useState(
-    order.direction === 'buy' ? order.target : order.stop
-  )
-  const pnl = (exitPrice - order.entry) * order.size * (order.direction === 'buy' ? 1 : -1)
-
+  const color = tone === 'up' ? 'text-[color:var(--up)]' : tone === 'down' ? 'text-[color:var(--down)]' : 'text-[color:var(--text-primary)]'
+  const display = value == null
+    ? '—'
+    : typeof value === 'string'
+      ? value
+      : money
+        ? (tone ? fmtSigned(value) : `$${fmtMoney(value)}`)
+        : String(value)
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm space-y-4">
-        <h3 className="text-sm font-bold text-gray-200">Close {order.symbol} Position</h3>
-        <div className="space-y-1 text-xs text-gray-500">
-          <div className="flex justify-between">
-            <span>Entry</span><span className="font-mono text-gray-300">${fmt(order.entry)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Size</span><span className="font-mono text-gray-300">{order.size} shares</span>
-          </div>
-        </div>
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">Exit Price</label>
-          <input
-            type="number" step="0.01"
-            value={exitPrice || ''}
-            onChange={e => setExitPrice(parseFloat(e.target.value) || 0)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm font-mono text-gray-200 focus:outline-none focus:border-emerald-500"
-          />
-        </div>
-        <div className={`text-center text-xl font-bold font-mono ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-          {pnl >= 0 ? '+' : ''}${fmt(pnl)}
-        </div>
-        <div className="flex gap-2">
-          <button onClick={onCancel} className="flex-1 py-2 bg-gray-800 text-gray-400 rounded-xl text-sm hover:bg-gray-700 transition-colors">Cancel</button>
-          <button
-            onClick={() => onClose(exitPrice)}
-            className="flex-1 py-2 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm transition-colors"
-          >
-            Confirm Close
-          </button>
-        </div>
-      </div>
+    <div>
+      <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">{label}</div>
+      <div className={`num mt-1 text-[length:var(--text-xl)] font-[var(--weight-medium)] ${color}`}>{display}</div>
     </div>
   )
 }
 
-// ── Reset Modal ───────────────────────────────────────────────────────────────
+function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-panel)] overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[color:var(--line-subtle)]">
+        <h2 className="text-[length:var(--text-xs)] font-[var(--weight-bold)] text-[color:var(--text-secondary)] uppercase tracking-wider">{title}</h2>
+        {action}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// ── Reset modal (shared by ACCOUNT tab) ─────────────────────────────────────
 
 function ResetModal({
-  account, onReset, onCancel,
+  onConfirm, onCancel, busy,
 }: {
-  account: PaperAccount
-  onReset: () => void
+  onConfirm: (startingBalance: number | null) => void
   onCancel: () => void
+  busy: boolean
 }) {
-  const cost     = resetCost(account.resetsThisWindow)
-  const canAfford = account.tokens >= cost
-  const closed   = account.orders.filter(o => o.status === 'closed')
-  const wins     = closed.filter(o => (o.pnl ?? 0) > 0).length
-  const winRate  = closed.length > 0 ? `${Math.round(wins / closed.length * 100)}%` : 'N/A'
+  const [choice, setChoice] = useState<number | 'default'>('default')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm space-y-4">
-        <h3 className="text-sm font-bold text-red-400">Reset Paper Account</h3>
-        <div className="bg-gray-800 rounded-xl p-4 space-y-2 text-xs">
-          <div className="flex justify-between text-gray-400">
-            <span>Current Balance</span>
-            <span className={`font-mono font-bold ${account.currentBalance >= account.startingBalance ? 'text-emerald-400' : 'text-red-400'}`}>
-              {fmtDollar(account.currentBalance)}
-            </span>
-          </div>
-          <div className="flex justify-between text-gray-400">
-            <span>Win Rate (this session)</span>
-            <span className="font-mono text-gray-200">{winRate}</span>
-          </div>
-          <div className="flex justify-between text-gray-400">
-            <span>Lifetime Resets</span>
-            <span className="font-mono text-gray-200">{account.resetCount}</span>
-          </div>
-          <div className="flex justify-between text-gray-400">
-            <span>Resets this 30-day window</span>
-            <span className="font-mono text-amber-400">{account.resetsThisWindow}</span>
-          </div>
-          <div className="border-t border-gray-700 pt-2 flex justify-between">
-            <span className="text-red-400 font-semibold">Token cost</span>
-            <span className="font-mono font-bold text-red-400">{cost} tokens</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Your tokens</span>
-            <span className={`font-mono font-bold ${canAfford ? 'text-gray-200' : 'text-red-500'}`}>
-              {account.tokens} tokens
-            </span>
+      <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-overlay)] p-6 w-full max-w-sm space-y-4">
+        <h3 className="text-[length:var(--text-sm)] font-[var(--weight-bold)] text-[color:var(--text-primary)]">Reset paper account</h3>
+        <p className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
+          This wipes every open position and every closed trade and restores the opening cash balance. It cannot be undone.
+        </p>
+        <div className="space-y-1.5">
+          <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">Starting balance</div>
+          <div className="grid grid-cols-3 gap-1.5">
+            <button
+              onClick={() => setChoice('default')}
+              className={`py-2 rounded-[var(--radius-md)] text-[length:var(--text-xs)] font-[var(--weight-bold)] transition-colors ${
+                choice === 'default' ? 'bg-[color:var(--accent)] text-[color:var(--accent-fg)]' : 'bg-[color:var(--bg-raised)] text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]'
+              }`}
+            >
+              Keep current
+            </button>
+            {BALANCE_OPTS.map(b => (
+              <button
+                key={b}
+                onClick={() => setChoice(b)}
+                className={`py-2 rounded-[var(--radius-md)] text-[length:var(--text-xs)] font-[var(--weight-bold)] num transition-colors ${
+                  choice === b ? 'bg-[color:var(--accent)] text-[color:var(--accent-fg)]' : 'bg-[color:var(--bg-raised)] text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]'
+                }`}
+              >
+                ${b >= 1_000_000 ? `${b / 1_000_000}M` : `${b / 1000}K`}
+              </button>
+            ))}
           </div>
         </div>
-        {!canAfford && (
-          <p className="text-xs text-red-400 text-center">Not enough tokens. Trade more to earn tokens.</p>
-        )}
-        <p className="text-xs text-gray-600 text-center">Your trade history will be preserved. Balance and open positions reset.</p>
-        <div className="flex gap-2">
-          <button onClick={onCancel} className="flex-1 py-2 bg-gray-800 text-gray-400 rounded-xl text-sm hover:bg-gray-700 transition-colors">Cancel</button>
+        <div className="flex gap-2 pt-1">
           <button
-            onClick={onReset}
-            disabled={!canAfford}
-            className="flex-1 py-2 bg-red-800 hover:bg-red-700 text-white font-bold rounded-xl text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            onClick={onCancel}
+            className="flex-1 py-2 rounded-[var(--radius-md)] bg-[color:var(--bg-raised)] text-[color:var(--text-secondary)] text-[length:var(--text-sm)] hover:text-[color:var(--text-primary)] transition-colors"
           >
-            Reset ({cost} tokens)
+            Cancel
+          </button>
+          <button
+            onClick={() => onConfirm(choice === 'default' ? null : choice)}
+            disabled={busy}
+            className="flex-1 py-2 rounded-[var(--radius-md)] bg-[color:var(--accent)] text-[color:var(--accent-fg)] font-[var(--weight-bold)] text-[length:var(--text-sm)] disabled:opacity-50 transition-opacity"
+          >
+            {busy ? 'Resetting…' : 'Reset'}
           </button>
         </div>
       </div>
@@ -298,510 +369,810 @@ function ResetModal({
   )
 }
 
-// ── Quick Trade Panel ─────────────────────────────────────────────────────────
+// ── ACCOUNT tab ──────────────────────────────────────────────────────────────
 
-function QuickTradePanel({
-  account,
-  onSubmit,
-  prefill,
-}: {
-  account: PaperAccount
-  onSubmit: (order: Omit<PaperOrder, 'id' | 'timestamp' | 'status'>) => void
-  prefill: { symbol?: string; direction?: 'buy' | 'sell'; entry?: number; stop?: number; target?: number }
-}) {
-  const [symbol,    setSymbol]    = useState(prefill.symbol    ?? 'AAPL')
-  const [direction, setDirection] = useState<'buy' | 'sell'>(prefill.direction ?? 'buy')
-  const [entry,     setEntry]     = useState(prefill.entry     ?? 0)
-  const [stop,      setStop]      = useState(prefill.stop      ?? 0)
-  const [target,    setTarget]    = useState(prefill.target    ?? 0)
-  const [riskPct,   setRiskPct]   = useState(1.0)  // % of account to risk
+function AccountTab() {
+  const [account, setAccount] = useState<Account | null>(null)
+  const [positions, setPositions] = useState<Position[]>([])
+  const [trades, setTrades] = useState<Trade[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Update when prefill changes (e.g., navigating from Intel page)
-  useEffect(() => {
-    if (prefill.symbol)    setSymbol(prefill.symbol)
-    if (prefill.direction) setDirection(prefill.direction)
-    if (prefill.entry)     setEntry(prefill.entry)
-    if (prefill.stop)      setStop(prefill.stop)
-    if (prefill.target)    setTarget(prefill.target)
-  }, [prefill.symbol, prefill.direction, prefill.entry, prefill.stop, prefill.target])
+  const [mtmBusy, setMtmBusy] = useState(false)
+  const [mtmResult, setMtmResult] = useState<MarkToMarketResult | null>(null)
 
-  // Auto-size based on risk %
-  const riskPerShare  = entry > 0 && stop > 0 ? Math.abs(entry - stop) : 0
-  const accountRisk   = account.currentBalance * (riskPct / 100)
-  const autoSize      = riskPerShare > 0 ? Math.floor(accountRisk / riskPerShare) : 0
-  const [size, setSize] = useState(0)
-  const effectiveSize = size > 0 ? size : autoSize
+  const [showReset, setShowReset] = useState(false)
+  const [resetBusy, setResetBusy] = useState(false)
 
-  const positionValue = effectiveSize * entry
-  const riskAmount    = effectiveSize * riskPerShare
-  const rewardAmount  = entry > 0 && target > 0 ? Math.abs(target - entry) * effectiveSize : 0
-  const rrRatio       = riskAmount > 0 ? (rewardAmount / riskAmount).toFixed(1) : null
+  const loadAll = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [acctRes, posRes, tradesRes] = await Promise.all([
+        fetch(`${PAPER_API}/account`),
+        fetch(`${PAPER_API}/positions`),
+        fetch(`${PAPER_API}/trades?limit=100`),
+      ])
+      if (!acctRes.ok) throw new Error(`account: HTTP ${acctRes.status}`)
+      if (!posRes.ok) throw new Error(`positions: HTTP ${posRes.status}`)
+      if (!tradesRes.ok) throw new Error(`trades: HTTP ${tradesRes.status}`)
+      setAccount(await acctRes.json())
+      setPositions(await posRes.json())
+      setTrades(await tradesRes.json())
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!symbol || !entry || !stop || !target || effectiveSize <= 0) return
-    onSubmit({ symbol: symbol.toUpperCase(), direction, size: effectiveSize, entry, stop, target, pnl: undefined })
-    setEntry(0); setStop(0); setTarget(0); setSize(0)
+  useEffect(() => { loadAll() }, [loadAll])
+
+  async function doMarkToMarket() {
+    setMtmBusy(true)
+    try {
+      const res = await fetch(`${PAPER_API}/mark-to-market`, { method: 'POST' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data: MarkToMarketResult = await res.json()
+      setMtmResult(data)
+      await loadAll()
+    } catch (err) {
+      setMtmResult({ checked: 0, closed: [], skipped_no_quote: 0, error: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setMtmBusy(false)
+    }
+  }
+
+  async function doReset(startingBalance: number | null) {
+    setResetBusy(true)
+    try {
+      const res = await fetch(`${PAPER_API}/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(startingBalance != null ? { starting_balance: startingBalance } : {}),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setShowReset(false)
+      setMtmResult(null)
+      await loadAll()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setResetBusy(false)
+    }
+  }
+
+  const openPnl = positions.reduce((a, p) => a + (p.unrealized_pnl ?? 0), 0)
+  const closedPnl = trades.reduce((a, t) => a + (t.pnl ?? 0), 0)
+  const wins = trades.filter(t => (t.pnl ?? 0) > 0).length
+
+  if (loading && !account) {
+    return <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-panel)] p-8 text-center text-[length:var(--text-sm)] text-[color:var(--text-secondary)]">Loading account…</div>
+  }
+
+  if (error && !account) {
+    return (
+      <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-panel)] border border-[color:var(--line-strong)] p-4 text-[length:var(--text-sm)] text-[color:var(--text-secondary)]">
+        Could not load the paper account: {error}
+      </div>
+    )
   }
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
-      <h3 className="text-sm font-semibold text-gray-100">New Paper Trade</h3>
+    <div className="space-y-4">
+      {showReset && <ResetModal onConfirm={doReset} onCancel={() => setShowReset(false)} busy={resetBusy} />}
 
-      {prefill.symbol && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-emerald-900/20 border border-emerald-800/30 rounded-lg text-xs text-emerald-300">
-          ◉ Pre-filled from Intelligence — {prefill.symbol}
+      {/* Hero */}
+      <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-panel)] p-6">
+        <div className="flex flex-wrap items-end justify-between gap-6">
+          <div>
+            <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">Equity</div>
+            <div className="num mt-1 text-[length:var(--text-2xl)] font-[var(--weight-bold)] text-[color:var(--text-primary)]">
+              ${fmtMoney(account?.equity)}
+            </div>
+            <div className="mt-1 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
+              {account ? `${account.broker} · ${account.is_paper ? 'simulated' : 'live'} · ${account.currency}` : '—'}
+            </div>
+          </div>
+          <div className="flex items-end gap-8 flex-wrap">
+            <Stat label="Cash" value={account?.cash ?? null} />
+            <Stat label="Open P&L" value={positions.length ? openPnl : null} tone={openPnl >= 0 ? 'up' : 'down'} />
+            <Stat label="Positions" value={positions.length} money={false} />
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          <button
+            onClick={doMarkToMarket}
+            disabled={mtmBusy}
+            className="px-4 py-2 rounded-[var(--radius-md)] bg-[color:var(--accent)] text-[color:var(--accent-fg)] font-[var(--weight-bold)] text-[length:var(--text-xs)] tracking-wide uppercase disabled:opacity-50 transition-opacity"
+          >
+            {mtmBusy ? 'Marking…' : 'Mark to market'}
+          </button>
+          <button
+            onClick={() => setShowReset(true)}
+            className="px-4 py-2 rounded-[var(--radius-md)] bg-[color:var(--bg-raised)] text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] font-[var(--weight-bold)] text-[length:var(--text-xs)] tracking-wide uppercase transition-colors"
+          >
+            Reset
+          </button>
+          {mtmResult && (
+            <span className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
+              {mtmResult.error
+                ? `mark-to-market failed: ${mtmResult.error}`
+                : `checked ${mtmResult.checked} · closed ${mtmResult.closed.length}${mtmResult.skipped_no_quote ? ` · ${mtmResult.skipped_no_quote} skipped (no quote)` : ''}`}
+            </span>
+          )}
+        </div>
+        {mtmResult && mtmResult.closed.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[length:var(--text-xs)] text-[color:var(--text-secondary)]">
+            {mtmResult.closed.map((c, i) => (
+              <span key={i} className="num">
+                {c.symbol} {c.exit_reason} @ {fmtNum(c.exit_price)}{' '}
+                <span className={c.pnl >= 0 ? 'text-[color:var(--up)]' : 'text-[color:var(--down)]'}>{fmtSigned(c.pnl)}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Open positions */}
+      <Section title="Open positions" action={<span className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">{positions.length} open</span>}>
+        {positions.length === 0 ? (
+          <p className="p-4 text-[length:var(--text-sm)] text-[color:var(--text-muted)]">No open positions.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[length:var(--text-sm)]">
+              <thead>
+                <tr className="border-b border-[color:var(--line-subtle)] text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">
+                  <th className="text-left px-4 py-2 font-[var(--weight-medium)]">Symbol</th>
+                  <th className="text-left px-3 py-2 font-[var(--weight-medium)]">Side</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Qty</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Avg cost</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Current</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Mkt value</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Unrealized P&L</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Stop</th>
+                  <th className="text-right px-4 py-2 font-[var(--weight-medium)]">Target</th>
+                </tr>
+              </thead>
+              <tbody>
+                {positions.map(p => {
+                  const current = p.qty ? p.market_value / p.qty : null
+                  const up = p.side === 'long'
+                  return (
+                    <tr key={p.symbol} className="border-b border-[color:var(--line-subtle)] last:border-0">
+                      <td className="px-4 py-2 font-[var(--weight-bold)] text-[color:var(--text-primary)]">{p.symbol}</td>
+                      <td className="px-3 py-2">
+                        <span className={up ? 'text-[color:var(--up)]' : 'text-[color:var(--down)]'}>{up ? '▲ LONG' : '▼ SHORT'}</span>
+                      </td>
+                      <td className="px-3 py-2 text-right num text-[color:var(--text-secondary)]">{p.qty}</td>
+                      <td className="px-3 py-2 text-right num text-[color:var(--text-secondary)]">${fmtMoney(p.avg_cost)}</td>
+                      <td className="px-3 py-2 text-right num text-[color:var(--text-secondary)]">{current == null ? '—' : `$${fmtMoney(current)}`}</td>
+                      <td className="px-3 py-2 text-right num text-[color:var(--text-secondary)]">${fmtMoney(p.market_value)}</td>
+                      <td className={`px-3 py-2 text-right num font-[var(--weight-medium)] ${p.unrealized_pnl >= 0 ? 'text-[color:var(--up)]' : 'text-[color:var(--down)]'}`}>
+                        {fmtSigned(p.unrealized_pnl)} ({fmtNum(p.unrealized_pct, 1)}%)
+                      </td>
+                      <td className="px-3 py-2 text-right num text-[color:var(--down)]">{p.stop == null ? '—' : `$${fmtMoney(p.stop)}`}</td>
+                      <td className="px-4 py-2 text-right num text-[color:var(--up)]">{p.target == null ? '—' : `$${fmtMoney(p.target)}`}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+
+      {/* Closed trades */}
+      <Section
+        title="Closed trades"
+        action={
+          trades.length > 0 ? (
+            <span className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
+              {wins}/{trades.length} won ·{' '}
+              <span className={closedPnl >= 0 ? 'text-[color:var(--up)]' : 'text-[color:var(--down)]'}>{fmtSigned(closedPnl)}</span> realized
+            </span>
+          ) : undefined
+        }
+      >
+        {trades.length === 0 ? (
+          <p className="p-4 text-[length:var(--text-sm)] text-[color:var(--text-muted)]">No closed trades yet.</p>
+        ) : (
+          <div className="overflow-x-auto max-h-96">
+            <table className="w-full text-[length:var(--text-sm)]">
+              <thead>
+                <tr className="border-b border-[color:var(--line-subtle)] text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide sticky top-0 bg-[color:var(--bg-panel)]">
+                  <th className="text-left px-4 py-2 font-[var(--weight-medium)]">Symbol</th>
+                  <th className="text-left px-3 py-2 font-[var(--weight-medium)]">Side</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Entry</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Exit</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Size</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">P&L</th>
+                  <th className="text-left px-3 py-2 font-[var(--weight-medium)]">Reason</th>
+                  <th className="text-right px-4 py-2 font-[var(--weight-medium)]">Exit date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map(t => {
+                  const up = t.direction === 'long'
+                  return (
+                    <tr key={t.id} className="border-b border-[color:var(--line-subtle)] last:border-0">
+                      <td className="px-4 py-2 font-[var(--weight-bold)] text-[color:var(--text-primary)]">{t.symbol}</td>
+                      <td className="px-3 py-2">
+                        <span className={up ? 'text-[color:var(--up)]' : 'text-[color:var(--down)]'}>{up ? '▲' : '▼'}</span>
+                      </td>
+                      <td className="px-3 py-2 text-right num text-[color:var(--text-secondary)]">${fmtMoney(t.entry_price)}</td>
+                      <td className="px-3 py-2 text-right num text-[color:var(--text-secondary)]">${fmtMoney(t.exit_price)}</td>
+                      <td className="px-3 py-2 text-right num text-[color:var(--text-secondary)]">{t.position_size}</td>
+                      <td className={`px-3 py-2 text-right num font-[var(--weight-medium)] ${t.pnl >= 0 ? 'text-[color:var(--up)]' : 'text-[color:var(--down)]'}`}>
+                        {fmtSigned(t.pnl)} ({fmtNum(t.return_percent, 1)}%)
+                      </td>
+                      <td className="px-3 py-2 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">{t.exit_reason ?? '—'}</td>
+                      <td className="px-4 py-2 text-right text-[length:var(--text-xs)] text-[color:var(--text-muted)]">{t.exit_date}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+    </div>
+  )
+}
+
+// ── AUTO-TRADER tab ──────────────────────────────────────────────────────────
+
+function AutoTraderTab() {
+  const [token, setToken] = useState<string>(loadToken)
+
+  const [status, setStatus] = useState<StatusData | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
+
+  const [config, setConfig] = useState<AutoTraderConfig | null>(null)
+  const [riskEdits, setRiskEdits] = useState<Record<string, unknown>>({})
+  const [configMsg, setConfigMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [savingConfig, setSavingConfig] = useState(false)
+
+  const [killReason, setKillReason] = useState('')
+  const [actionMsg, setActionMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const [cycles, setCycles] = useState<Cycle[]>([])
+  const [cyclesLoading, setCyclesLoading] = useState(false)
+  const [selectedCycle, setSelectedCycle] = useState<string | number | null>(null)
+
+  const [decisions, setDecisions] = useState<Decision[]>([])
+  const [decisionsLoading, setDecisionsLoading] = useState(false)
+  const [actionFilter, setActionFilter] = useState<string>('')
+
+  const [discrepancies, setDiscrepancies] = useState<Discrepancy[]>([])
+  const [discLoading, setDiscLoading] = useState(false)
+
+  useEffect(() => { persistToken(token) }, [token])
+
+  const fetchStatus = useCallback(() => {
+    fetch(`${AUTO_API}/status`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
+      .then(d => { setStatus(d); setStatusError(null) })
+      .catch(err => setStatusError(err instanceof Error ? err.message : String(err)))
+  }, [])
+
+  useEffect(() => {
+    fetchStatus()
+    const id = setInterval(fetchStatus, 5000)
+    return () => clearInterval(id)
+  }, [fetchStatus])
+
+  const loadConfig = useCallback(() => {
+    fetch(`${AUTO_API}/config`)
+      .then(r => r.json())
+      .then(d => { setConfig(d); setRiskEdits(d?.risk ?? {}) })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => { loadConfig() }, [loadConfig])
+
+  async function saveRisk() {
+    setSavingConfig(true); setConfigMsg(null)
+    const res = await guarded('/config', token, { method: 'POST', body: JSON.stringify({ risk: riskEdits }) })
+    if (res.ok) { setConfigMsg({ ok: true, text: 'Saved.' }); loadConfig() }
+    else setConfigMsg({ ok: false, text: res.error })
+    setSavingConfig(false)
+  }
+
+  async function doKillOn() {
+    setBusy('kill'); setActionMsg(null)
+    try {
+      const res = await fetch(`${AUTO_API}/kill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ on: true, reason: killReason.trim() || 'Manual kill from PAPER / AUTO-TRADER' }),
+      })
+      if (!res.ok) { const b = await res.json().catch(() => null); throw new Error(b?.detail ?? `HTTP ${res.status}`) }
+      setActionMsg({ ok: true, text: 'Kill switch engaged.' })
+      fetchStatus()
+    } catch (err) {
+      setActionMsg({ ok: false, text: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function doKillOff() {
+    setBusy('unkill'); setActionMsg(null)
+    const res = await guarded('/kill', token, { method: 'POST', body: JSON.stringify({ on: false, reason: 'Cleared from PAPER / AUTO-TRADER' }) })
+    setActionMsg(res.ok ? { ok: true, text: 'Kill switch cleared.' } : { ok: false, text: res.error })
+    if (res.ok) fetchStatus()
+    setBusy(null)
+  }
+
+  async function doStart() {
+    setBusy('start'); setActionMsg(null)
+    const res = await guarded('/start', token, { method: 'POST' })
+    setActionMsg(res.ok ? { ok: true, text: 'Started.' } : { ok: false, text: res.error })
+    if (res.ok) fetchStatus()
+    setBusy(null)
+  }
+
+  async function doStop() {
+    setBusy('stop'); setActionMsg(null)
+    try {
+      const res = await fetch(`${AUTO_API}/stop`, { method: 'POST' })
+      if (!res.ok) { const b = await res.json().catch(() => null); throw new Error(b?.detail ?? `HTTP ${res.status}`) }
+      setActionMsg({ ok: true, text: 'Stopped.' })
+      fetchStatus()
+    } catch (err) {
+      setActionMsg({ ok: false, text: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const loadCycles = useCallback(() => {
+    setCyclesLoading(true)
+    fetch(`${AUTO_API}/cycles?limit=50`)
+      .then(r => r.json())
+      .then(d => setCycles(d?.cycles ?? (Array.isArray(d) ? d : [])))
+      .catch(() => {})
+      .finally(() => setCyclesLoading(false))
+  }, [])
+
+  useEffect(() => { loadCycles() }, [loadCycles])
+
+  const loadGlobalDecisions = useCallback(() => {
+    setDecisionsLoading(true); setSelectedCycle(null)
+    const qs = new URLSearchParams({ limit: '200' })
+    if (actionFilter) qs.set('action', actionFilter)
+    fetch(`${AUTO_API}/decisions?${qs.toString()}`)
+      .then(r => r.json())
+      .then(d => setDecisions(d?.decisions ?? (Array.isArray(d) ? d : [])))
+      .catch(() => {})
+      .finally(() => setDecisionsLoading(false))
+  }, [actionFilter])
+
+  useEffect(() => { loadGlobalDecisions() }, [loadGlobalDecisions])
+
+  function loadCycleDecisions(id: string | number) {
+    setDecisionsLoading(true); setSelectedCycle(id)
+    fetch(`${AUTO_API}/cycles/${id}/decisions`)
+      .then(r => r.json())
+      .then(d => setDecisions(d?.decisions ?? (Array.isArray(d) ? d : [])))
+      .catch(() => {})
+      .finally(() => setDecisionsLoading(false))
+  }
+
+  const loadDiscrepancies = useCallback(() => {
+    setDiscLoading(true)
+    fetch(`${AUTO_API}/discrepancies?limit=100`)
+      .then(r => r.json())
+      .then(d => setDiscrepancies(d?.discrepancies ?? (Array.isArray(d) ? d : [])))
+      .catch(() => {})
+      .finally(() => setDiscLoading(false))
+  }, [])
+
+  useEffect(() => { loadDiscrepancies() }, [loadDiscrepancies])
+
+  const filteredDecisions = selectedCycle !== null && actionFilter
+    ? decisions.filter(d => d.action === actionFilter)
+    : decisions
+
+  const isLive = status ? (status.mode?.toLowerCase().includes('live') || status.is_paper === false) : false
+
+  return (
+    <div className="space-y-4">
+      {/* Kill switch banner — follows FinderPage's warning-banner precedent: the
+          single accent colour, not a bespoke red, since --down is reserved
+          for P&L direction only. */}
+      {status?.kill_switch && (
+        <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-raised)] border border-[color:var(--line-strong)] p-3">
+          <div className="flex items-start gap-2">
+            <span className="text-[color:var(--accent)] text-[length:var(--text-sm)]">⛔</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-[length:var(--text-xs)] font-[var(--weight-bold)] text-[color:var(--accent)] tracking-wide">KILL SWITCH ENGAGED</div>
+              <div className="mt-1 text-[length:var(--text-xs)] text-[color:var(--text-secondary)]">
+                {status.kill_meta?.reason || 'no reason given'}
+                {status.kill_meta?.actor && <span className="text-[color:var(--text-muted)]"> · by {status.kill_meta.actor}</span>}
+                {status.kill_meta?.ts != null && <span className="text-[color:var(--text-muted)]"> · {timeAgoEpoch(status.kill_meta.ts)}</span>}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-3">
-        {/* Symbol + Direction */}
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Symbol</label>
-            <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-sm font-mono text-gray-200 focus:outline-none focus:border-emerald-600"
-              placeholder="AAPL" />
-          </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Direction</label>
-            <div className="flex gap-1">
-              {(['buy', 'sell'] as const).map(d => (
-                <button key={d} type="button" onClick={() => setDirection(d)}
-                  className={`flex-1 py-1.5 rounded-lg text-sm font-bold uppercase transition-colors ${
-                    direction === d
-                      ? d === 'buy' ? 'bg-emerald-700 text-white' : 'bg-red-700 text-white'
-                      : 'bg-gray-800 text-gray-500 hover:text-gray-300'
-                  }`}>
-                  {d === 'buy' ? '▲' : '▼'}
-                </button>
-              ))}
+      {status && !status.redis_available && (
+        <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-raised)] border border-[color:var(--line-strong)] p-3">
+          <div className="flex items-start gap-2">
+            <span className="text-[color:var(--accent)] text-[length:var(--text-sm)]">⚠</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-[length:var(--text-xs)] font-[var(--weight-bold)] text-[color:var(--accent)] tracking-wide">DEGRADED — REDIS UNAVAILABLE</div>
+              <p className="mt-1 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
+                Running single-host; the loop force-downgrades to dry-run until Redis is back.
+              </p>
             </div>
           </div>
         </div>
+      )}
 
-        {/* Prices */}
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            { label: 'Entry',  value: entry,  setter: setEntry,  color: '#f3f4f6' },
-            { label: 'Stop',   value: stop,   setter: setStop,   color: '#ef4444' },
-            { label: 'Target', value: target, setter: setTarget, color: '#22c55e' },
-          ].map(({ label, value, setter, color }) => (
-            <div key={label}>
-              <label className="text-xs block mb-1" style={{ color }}>{label}</label>
-              <input type="number" step="0.01" value={value || ''}
-                onChange={e => setter(parseFloat(e.target.value) || 0)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs font-mono text-gray-200 focus:outline-none focus:border-emerald-600" />
-            </div>
-          ))}
-        </div>
+      {statusError && (
+        <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">Status poll failing: {statusError}</div>
+      )}
 
-        {/* Risk % + Size */}
-        <div className="grid grid-cols-2 gap-2">
+      {/* Status bar */}
+      <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-panel)] p-4">
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
           <div>
-            <label className="text-xs text-gray-500 block mb-1">Risk % of account</label>
-            <div className="flex gap-1">
-              {[0.5, 1, 2, 3].map(r => (
-                <button key={r} type="button" onClick={() => setRiskPct(r)}
-                  className={`flex-1 py-1 rounded text-xs font-mono transition-colors ${riskPct === r ? 'bg-gray-700 text-gray-200' : 'bg-gray-800 text-gray-500 hover:text-gray-300'}`}>
-                  {r}%
-                </button>
-              ))}
+            <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">Loop</div>
+            <div className={`mt-1 text-[length:var(--text-sm)] font-[var(--weight-bold)] ${status?.running ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-muted)]'}`}>
+              {status?.running ? 'RUNNING' : 'STOPPED'}
             </div>
           </div>
           <div>
-            <label className="text-xs text-gray-500 block mb-1">
-              Shares {autoSize > 0 ? <span className="text-gray-600">(auto: {autoSize})</span> : ''}
-            </label>
-            <input type="number" value={size || ''}
-              onChange={e => setSize(parseInt(e.target.value) || 0)}
-              placeholder={autoSize > 0 ? String(autoSize) : '0'}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-gray-200 focus:outline-none focus:border-emerald-600" />
+            <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">Mode</div>
+            <div className="mt-1 num text-[length:var(--text-sm)] text-[color:var(--text-secondary)]">{status?.mode ?? '—'}</div>
+          </div>
+          <div>
+            <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">Broker</div>
+            <div className="mt-1 num text-[length:var(--text-sm)] text-[color:var(--text-secondary)]">
+              {status?.broker ?? '—'}
+              {status?.is_paper === true && <span className="ml-1.5 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">simulated</span>}
+              {status?.is_paper === false && <span className="ml-1.5 text-[length:var(--text-xs)] font-[var(--weight-bold)] text-[color:var(--accent)]">LIVE</span>}
+            </div>
+            {status?.is_paper === null && status?.broker_error && (
+              <div className="mt-0.5 text-[length:var(--text-xs)] text-[color:var(--text-muted)] max-w-[240px]">account type unknown — {status.broker_error}</div>
+            )}
+          </div>
+          <div>
+            <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">Redis</div>
+            <div className="mt-1 text-[length:var(--text-sm)] text-[color:var(--text-secondary)]">
+              <CheckMark v={status?.redis_available} /> {status?.redis_available ? 'up' : 'down'}
+            </div>
+          </div>
+          <div>
+            <div className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">Lock</div>
+            <div className="mt-1 num text-[length:var(--text-sm)] text-[color:var(--text-muted)]">{status?.lock ? String(status.lock) : 'free'}</div>
           </div>
         </div>
+      </div>
 
-        {/* Metrics */}
-        {entry > 0 && stop > 0 && effectiveSize > 0 && (
-          <div className="grid grid-cols-3 gap-2 text-xs bg-gray-800/50 rounded-lg px-3 py-2">
-            <div>
-              <p className="text-gray-600">Position</p>
-              <p className="font-mono text-gray-300">${(positionValue / 1000).toFixed(1)}K</p>
-            </div>
-            <div>
-              <p className="text-gray-600">Risk</p>
-              <p className="font-mono text-red-400">${fmt(riskAmount, 0)}</p>
-            </div>
-            <div>
-              <p className="text-gray-600">R:R</p>
-              <p className="font-mono text-emerald-400">{rrRatio ? `1:${rrRatio}` : '—'}</p>
-            </div>
+      {/* Kill / start / stop */}
+      <div className="rounded-[var(--radius-lg)] bg-[color:var(--bg-panel)] p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex-1 min-w-[220px]">
+            <label className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">Kill reason (optional)</label>
+            <input
+              value={killReason}
+              onChange={e => setKillReason(e.target.value)}
+              placeholder="e.g. broker outage, manual halt"
+              className="mt-1 w-full px-3 py-2 rounded-[var(--radius-md)] bg-[color:var(--bg-raised)] text-[length:var(--text-sm)] text-[color:var(--text-primary)] placeholder:text-[color:var(--text-muted)] focus:outline-none"
+            />
           </div>
+          <button
+            onClick={doKillOn}
+            disabled={busy === 'kill'}
+            className="px-6 py-2.5 rounded-[var(--radius-md)] bg-[color:var(--accent)] text-[color:var(--accent-fg)] text-[length:var(--text-sm)] font-[var(--weight-bold)] tracking-widest disabled:opacity-50 transition-opacity"
+          >
+            {busy === 'kill' ? 'KILLING…' : '⛔ KILL'}
+          </button>
+          <button
+            onClick={doKillOff}
+            disabled={busy === 'unkill' || !status?.kill_switch}
+            title="Requires control token"
+            className="px-4 py-2 rounded-[var(--radius-md)] bg-[color:var(--bg-raised)] text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)] disabled:opacity-40 text-[length:var(--text-xs)] font-[var(--weight-bold)] tracking-wide transition-colors"
+          >
+            {busy === 'unkill' ? 'CLEARING…' : 'CLEAR KILL'}
+          </button>
+          <div className="flex-1" />
+          <button
+            onClick={doStart}
+            disabled={busy === 'start' || !!status?.running}
+            title="Requires control token"
+            className="px-5 py-2 rounded-[var(--radius-md)] bg-[color:var(--bg-raised)] text-[color:var(--accent)] disabled:text-[color:var(--text-muted)] disabled:opacity-60 text-[length:var(--text-xs)] font-[var(--weight-bold)] tracking-wide transition-colors"
+          >
+            {busy === 'start' ? 'STARTING…' : 'START'}
+          </button>
+          <button
+            onClick={doStop}
+            disabled={busy === 'stop' || !status?.running}
+            className="px-5 py-2 rounded-[var(--radius-md)] bg-[color:var(--bg-raised)] text-[color:var(--text-secondary)] disabled:opacity-40 text-[length:var(--text-xs)] font-[var(--weight-bold)] tracking-wide transition-colors"
+          >
+            {busy === 'stop' ? 'STOPPING…' : 'STOP'}
+          </button>
+        </div>
+
+        {actionMsg && (
+          <p className={`mt-3 text-[length:var(--text-xs)] ${actionMsg.ok ? 'text-[color:var(--up)]' : 'text-[color:var(--down)]'}`}>{actionMsg.text}</p>
         )}
 
-        <button type="submit"
-          className={`w-full py-2.5 rounded-xl text-sm font-bold uppercase transition-colors ${
-            direction === 'buy' ? 'bg-emerald-700 hover:bg-emerald-600 text-white' : 'bg-red-700 hover:bg-red-600 text-white'
-          }`}>
-          {direction === 'buy' ? '▲ Place Long' : '▼ Place Short'}
-        </button>
-      </form>
+        <div className="mt-4 pt-3 border-t border-[color:var(--line-subtle)]">
+          <label className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">Control token (for guarded actions)</label>
+          <input
+            type="password"
+            value={token}
+            onChange={e => setToken(e.target.value)}
+            placeholder="X-RoboAlgo-Control-Token"
+            className="mt-1 w-full max-w-sm px-3 py-2 rounded-[var(--radius-md)] bg-[color:var(--bg-raised)] text-[length:var(--text-sm)] text-[color:var(--text-primary)] placeholder:text-[color:var(--text-muted)] focus:outline-none"
+          />
+          <p className="mt-1 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
+            Stored locally in this browser only. Guarded endpoints return 503 if the server has no token configured, 403 if this one is wrong.
+          </p>
+        </div>
+      </div>
+
+      {/* Risk limits */}
+      <Section
+        title="Risk limits"
+        action={
+          <button
+            onClick={saveRisk}
+            disabled={savingConfig}
+            className="px-4 py-1.5 rounded-[var(--radius-md)] bg-[color:var(--accent)] text-[color:var(--accent-fg)] text-[length:var(--text-xs)] font-[var(--weight-bold)] tracking-wide disabled:opacity-50 transition-opacity"
+          >
+            {savingConfig ? 'SAVING…' : 'SAVE'}
+          </button>
+        }
+      >
+        <div className="p-4">
+          {!config ? (
+            <p className="text-[length:var(--text-sm)] text-[color:var(--text-muted)]">Loading config…</p>
+          ) : Object.keys(riskEdits).length === 0 ? (
+            <p className="text-[length:var(--text-sm)] text-[color:var(--text-muted)]">No risk config found.</p>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {Object.entries(riskEdits).map(([key, value]) => {
+                const isBool = typeof value === 'boolean'
+                const isNum = typeof value === 'number'
+                return (
+                  <div key={key}>
+                    <label className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide truncate block">{key}</label>
+                    {isBool ? (
+                      <label className="mt-1 flex items-center gap-1.5 text-[length:var(--text-sm)] text-[color:var(--text-secondary)] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={value as boolean}
+                          onChange={e => setRiskEdits(r => ({ ...r, [key]: e.target.checked }))}
+                        />
+                        {(value as boolean) ? 'true' : 'false'}
+                      </label>
+                    ) : (
+                      <input
+                        type={isNum ? 'number' : 'text'}
+                        value={value == null ? '' : String(value)}
+                        onChange={e => setRiskEdits(r => ({ ...r, [key]: isNum ? Number(e.target.value) : e.target.value }))}
+                        className="mt-1 w-full px-2.5 py-1.5 rounded-[var(--radius-md)] bg-[color:var(--bg-raised)] num text-[length:var(--text-sm)] text-[color:var(--text-primary)] focus:outline-none"
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {configMsg && (
+            <p className={`mt-3 text-[length:var(--text-xs)] ${configMsg.ok ? 'text-[color:var(--up)]' : 'text-[color:var(--down)]'}`}>{configMsg.text}</p>
+          )}
+        </div>
+      </Section>
+
+      {/* Cycles */}
+      <Section
+        title="Cycles"
+        action={
+          <button onClick={loadCycles} className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] hover:text-[color:var(--text-secondary)] transition-colors">
+            {cyclesLoading ? 'LOADING…' : '↻ REFRESH'}
+          </button>
+        }
+      >
+        {cycles.length === 0 ? (
+          <p className="p-4 text-[length:var(--text-sm)] text-[color:var(--text-muted)]">No cycles recorded yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[length:var(--text-sm)]">
+              <thead>
+                <tr className="border-b border-[color:var(--line-subtle)] text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">
+                  <th className="text-left px-4 py-2 font-[var(--weight-medium)]">Started</th>
+                  <th className="text-left px-3 py-2 font-[var(--weight-medium)]">Status</th>
+                  <th className="text-left px-3 py-2 font-[var(--weight-medium)]">Mode</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Scanned</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Candidates</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Placed</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Rejected</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Equity Δ</th>
+                  <th className="text-left px-4 py-2 font-[var(--weight-medium)]">Halt reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cycles.map(c => {
+                  const halted = (c.status ?? '').toLowerCase() === 'halted'
+                  const selected = selectedCycle === c.cycle_id
+                  const equityDelta = c.equity_end != null && c.equity_start != null ? c.equity_end - c.equity_start : null
+                  return (
+                    <tr
+                      key={c.cycle_id}
+                      onClick={() => loadCycleDecisions(c.cycle_id)}
+                      className={`border-b border-[color:var(--line-subtle)] last:border-0 cursor-pointer hover:bg-[color:var(--bg-raised)] transition-colors ${
+                        selected ? 'bg-[color:var(--bg-raised)]' : ''
+                      }`}
+                    >
+                      <td className="px-4 py-2 num text-[color:var(--text-muted)]">{timeAgo(c.started_at)}</td>
+                      <td className="px-3 py-2 text-[color:var(--text-secondary)]">{(c.status ?? '—').toUpperCase()}{halted ? ' ⚠' : ''}</td>
+                      <td className="px-3 py-2 num text-[color:var(--text-muted)]">{c.mode ?? '—'}</td>
+                      <td className="px-3 py-2 text-right num text-[color:var(--text-secondary)]">{c.symbols_scanned ?? '—'}</td>
+                      <td className="px-3 py-2 text-right num text-[color:var(--text-secondary)]">{c.candidates ?? '—'}</td>
+                      <td className="px-3 py-2 text-right num text-[color:var(--text-secondary)]">{c.orders_placed ?? '—'}</td>
+                      <td className="px-3 py-2 text-right num text-[color:var(--text-secondary)]">{c.orders_rejected ?? '—'}</td>
+                      <td className="px-3 py-2 text-right num">
+                        {equityDelta == null
+                          ? <span className="text-[color:var(--text-muted)]">—</span>
+                          : <span className={equityDelta >= 0 ? 'text-[color:var(--up)]' : 'text-[color:var(--down)]'}>{fmtSigned(equityDelta)}</span>}
+                      </td>
+                      <td className="px-4 py-2 text-[color:var(--text-muted)] truncate max-w-[220px]">{c.halt_reason ?? c.error ?? '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+
+      {/* Decisions */}
+      <Section
+        title={`Decisions${selectedCycle !== null ? ` — cycle ${selectedCycle}` : ''}`}
+        action={
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {ACTIONS.map(a => (
+              <button
+                key={a || 'ALL'}
+                onClick={() => setActionFilter(a)}
+                className={`px-2.5 py-1 rounded-[var(--radius-sm)] text-[length:var(--text-xs)] font-[var(--weight-bold)] tracking-wide transition-colors ${
+                  actionFilter === a ? 'bg-[color:var(--accent)] text-[color:var(--accent-fg)]' : 'bg-[color:var(--bg-raised)] text-[color:var(--text-muted)] hover:text-[color:var(--text-secondary)]'
+                }`}
+              >
+                {a || 'ALL'}
+              </button>
+            ))}
+            {selectedCycle !== null && (
+              <button onClick={loadGlobalDecisions} className="ml-2 text-[length:var(--text-xs)] text-[color:var(--text-muted)] hover:text-[color:var(--text-secondary)] underline">
+                back to feed
+              </button>
+            )}
+          </div>
+        }
+      >
+        {decisionsLoading ? (
+          <p className="p-4 text-[length:var(--text-sm)] text-[color:var(--text-muted)]">Loading…</p>
+        ) : filteredDecisions.length === 0 ? (
+          <p className="p-4 text-[length:var(--text-sm)] text-[color:var(--text-muted)]">No decisions.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[length:var(--text-sm)]">
+              <thead>
+                <tr className="border-b border-[color:var(--line-subtle)] text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">
+                  <th className="text-left px-4 py-2 font-[var(--weight-medium)]">Action</th>
+                  <th className="text-left px-3 py-2 font-[var(--weight-medium)]">Symbol</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Qty</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Entry</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Stop</th>
+                  <th className="text-right px-3 py-2 font-[var(--weight-medium)]">Target</th>
+                  <th className="text-left px-3 py-2 font-[var(--weight-medium)]">Governor rule</th>
+                  <th className="text-left px-4 py-2 font-[var(--weight-medium)]">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDecisions.map((d, i) => (
+                  <tr key={d.id ?? i} className="border-b border-[color:var(--line-subtle)] last:border-0">
+                    <td className="px-4 py-2 text-[length:var(--text-xs)] font-[var(--weight-bold)] text-[color:var(--text-secondary)] tracking-wide">{d.action ?? 'NO_ACTION'}</td>
+                    <td className="px-3 py-2 num text-[color:var(--text-primary)]">{d.symbol ?? '—'}</td>
+                    <td className="px-3 py-2 text-right num text-[color:var(--text-muted)]">{d.qty ?? '—'}</td>
+                    <td className="px-3 py-2 text-right num text-[color:var(--text-secondary)]">{fmtNum(d.entry)}</td>
+                    <td className="px-3 py-2 text-right num text-[color:var(--down)]">{fmtNum(d.stop)}</td>
+                    <td className="px-3 py-2 text-right num text-[color:var(--up)]">{fmtNum(d.target)}</td>
+                    <td className="px-3 py-2 num text-[color:var(--text-muted)]">{d.governor_rule ?? '—'}</td>
+                    <td className="px-4 py-2 text-[color:var(--text-muted)] truncate max-w-[260px]">{d.reason ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+
+      {/* Discrepancies */}
+      <Section
+        title="Discrepancies"
+        action={
+          <button onClick={loadDiscrepancies} className="text-[length:var(--text-xs)] text-[color:var(--text-muted)] hover:text-[color:var(--text-secondary)] transition-colors">
+            {discLoading ? 'LOADING…' : '↻ REFRESH'}
+          </button>
+        }
+      >
+        {discrepancies.length === 0 ? (
+          <p className="p-4 text-[length:var(--text-sm)] text-[color:var(--text-muted)]">No discrepancies logged.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[length:var(--text-sm)]">
+              <thead>
+                <tr className="border-b border-[color:var(--line-subtle)] text-[length:var(--text-xs)] text-[color:var(--text-muted)] uppercase tracking-wide">
+                  <th className="text-left px-4 py-2 font-[var(--weight-medium)]">Kind</th>
+                  <th className="text-left px-3 py-2 font-[var(--weight-medium)]">Symbol</th>
+                  <th className="text-left px-3 py-2 font-[var(--weight-medium)]">Expected</th>
+                  <th className="text-left px-3 py-2 font-[var(--weight-medium)]">Actual</th>
+                  <th className="text-left px-4 py-2 font-[var(--weight-medium)]">Resolution</th>
+                </tr>
+              </thead>
+              <tbody>
+                {discrepancies.map((d, i) => (
+                  <tr key={i} className="border-b border-[color:var(--line-subtle)] last:border-0">
+                    <td className="px-4 py-2 num text-[color:var(--text-secondary)]">{d.kind ?? '—'}</td>
+                    <td className="px-3 py-2 num text-[color:var(--text-primary)]">{d.symbol ?? '—'}</td>
+                    <td className="px-3 py-2 num text-[color:var(--text-muted)]">{d.expected ?? '—'}</td>
+                    <td className="px-3 py-2 num text-[color:var(--text-muted)]">{d.actual ?? '—'}</td>
+                    <td className="px-4 py-2 text-[color:var(--text-muted)]">{d.resolution ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
     </div>
   )
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
+type Tab = 'account' | 'auto-trader'
+
 export default function PaperTradingPage() {
-  const navigate          = useNavigate()
-  const [searchParams]    = useSearchParams()
-  const [account, setAccountRaw] = useState<PaperAccount | null>(null)
-  const [showSetup,  setShowSetup]  = useState(false)
-  const [closeOrder, setCloseOrder] = useState<PaperOrder | null>(null)
-  const [showReset,  setShowReset]  = useState(false)
-
-  // Read prefill from URL params (set by Intel page "Paper Trade" button)
-  const prefill = {
-    symbol:    searchParams.get('symbol')    ?? undefined,
-    direction: (searchParams.get('direction') as 'buy' | 'sell') ?? undefined,
-    entry:     parseFloat(searchParams.get('entry')  ?? '') || undefined,
-    stop:      parseFloat(searchParams.get('stop')   ?? '') || undefined,
-    target:    parseFloat(searchParams.get('target') ?? '') || undefined,
-  }
-
-  // Load account from localStorage on mount
-  useEffect(() => {
-    const saved = loadAccount()
-    if (saved) {
-      // Award monthly tokens if it's been a month since account was created
-      // Simple approach: add 5 tokens if tokens < 5 (floor refill)
-      const updated = { ...saved }
-      if (updated.tokens < MONTHLY_TOKENS) {
-        updated.tokens = Math.max(updated.tokens, MONTHLY_TOKENS)
-      }
-      setAccountRaw(updated)
-      saveAccount(updated)
-    } else {
-      setShowSetup(true)
-    }
-  }, [])
-
-  const setAccount = useCallback((acct: PaperAccount) => {
-    setAccountRaw(acct)
-    saveAccount(acct)
-  }, [])
-
-  function handleCreate(balance: number) {
-    const acct = defaultAccount(balance)
-    setAccount(acct)
-    setShowSetup(false)
-  }
-
-  function handleOrder(order: Omit<PaperOrder, 'id' | 'timestamp' | 'status'>) {
-    if (!account) return
-    const cost = order.size * order.entry
-    if (cost > account.currentBalance) {
-      alert(`Insufficient balance. Position costs $${cost.toFixed(0)}, balance is $${account.currentBalance.toFixed(0)}.`)
-      return
-    }
-    const newOrder: PaperOrder = {
-      ...order,
-      id:        account.nextId,
-      timestamp: new Date().toISOString(),
-      status:    'open',
-    }
-    setAccount({
-      ...account,
-      currentBalance: account.currentBalance - cost,   // reserve capital
-      orders:   [...account.orders, newOrder],
-      nextId:   account.nextId + 1,
-    })
-  }
-
-  function handleCloseConfirm(exitPrice: number) {
-    if (!account || !closeOrder) return
-    const { size, entry, direction } = closeOrder
-    const pnl      = (exitPrice - entry) * size * (direction === 'buy' ? 1 : -1)
-    const returned = size * entry   // return reserved capital
-    const updatedOrders = account.orders.map(o =>
-      o.id === closeOrder.id
-        ? { ...o, status: 'closed' as const, exitPrice, exitTime: new Date().toISOString(), pnl: parseFloat(pnl.toFixed(2)) }
-        : o
-    )
-    // Earn 1 token for every 5 winning trades (as a reward mechanic)
-    const wins    = updatedOrders.filter(o => o.status === 'closed' && (o.pnl ?? 0) > 0).length
-    const bonusToken = wins > 0 && wins % 5 === 0 ? 1 : 0
-    setAccount({
-      ...account,
-      currentBalance: account.currentBalance + returned + pnl,
-      tokens:         account.tokens + bonusToken,
-      orders:         updatedOrders,
-    })
-    setCloseOrder(null)
-  }
-
-  function handleReset() {
-    if (!account) return
-    const windowExpired = isWindowExpired(account.windowStart)
-    const resetsThisWindow = windowExpired ? 0 : account.resetsThisWindow
-    const cost  = resetCost(resetsThisWindow)
-    if (account.tokens < cost) return
-
-    const closed  = account.orders.filter(o => o.status === 'closed')
-    const wins    = closed.filter(o => (o.pnl ?? 0) > 0).length
-    const winRate = closed.length > 0 ? `${Math.round(wins / closed.length * 100)}%` : 'N/A'
-
-    const resetRecord: ResetRecord = {
-      timestamp:      new Date().toISOString(),
-      balanceAtReset: account.currentBalance,
-      tokensSpent:    cost,
-      winRate,
-    }
-
-    setAccount({
-      ...account,
-      currentBalance:   account.startingBalance,
-      tokens:           account.tokens - cost,
-      resetCount:       account.resetCount + 1,
-      resetsThisWindow: windowExpired ? 1 : resetsThisWindow + 1,
-      windowStart:      windowExpired ? new Date().toISOString() : account.windowStart,
-      resetHistory:     [...account.resetHistory, resetRecord],
-      orders:           account.orders.filter(o => o.status === 'closed'), // keep history, clear open
-    })
-    setShowReset(false)
-  }
-
-  if (showSetup || !account) return <AccountSetup onCreate={handleCreate} />
-
-  const open   = account.orders.filter(o => o.status === 'open')
-  const closed = account.orders.filter(o => o.status === 'closed')
-  const wins   = closed.filter(o => (o.pnl ?? 0) > 0).length
-  const totalPnl = closed.reduce((a, o) => a + (o.pnl ?? 0), 0)
-  const pnlPct   = ((account.currentBalance - account.startingBalance) / account.startingBalance) * 100
-  const winRate  = closed.length > 0 ? Math.round(wins / closed.length * 100) : 0
+  const [tab, setTab] = useState<Tab>('account')
 
   return (
     <div className="space-y-4">
-      {/* ── Modals ── */}
-      {closeOrder && (
-        <CloseModal order={closeOrder} onClose={handleCloseConfirm} onCancel={() => setCloseOrder(null)} />
-      )}
-      {showReset && (
-        <ResetModal account={account} onReset={handleReset} onCancel={() => setShowReset(false)} />
-      )}
-
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-gray-100">📋 Paper Trading</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Simulated — no real money · started {new Date(account.createdAt).toLocaleDateString()}
-          </p>
-        </div>
-
-        {/* Account stats */}
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className="text-center">
-            <p className="text-xs text-gray-500">Balance</p>
-            <p className={`font-mono font-bold text-sm ${account.currentBalance >= account.startingBalance ? 'text-emerald-400' : 'text-red-400'}`}>
-              {fmtDollar(account.currentBalance)}
-            </p>
-          </div>
-          <div className="text-center">
-            <p className="text-xs text-gray-500">P&L</p>
-            <p className={`font-mono font-bold text-sm ${pnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%
-            </p>
-          </div>
-          <div className="text-center">
-            <p className="text-xs text-gray-500">Win Rate</p>
-            <p className="font-mono font-bold text-sm text-gray-200">
-              {closed.length > 0 ? `${winRate}% (${wins}/${closed.length})` : '—'}
-            </p>
-          </div>
-          <div className="text-center">
-            <p className="text-xs text-gray-500">Tokens</p>
-            <p className="font-mono font-bold text-sm text-amber-400">{account.tokens} 🪙</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => navigate('/intel')}
-              className="px-3 py-1.5 bg-gray-800 text-gray-400 hover:text-gray-200 rounded-lg text-xs transition-colors">
-              ◉ Find Trade
-            </button>
-            <button onClick={() => setShowReset(true)}
-              className="px-3 py-1.5 bg-gray-800 text-red-500 hover:text-red-400 rounded-lg text-xs transition-colors">
-              ⟲ Reset
-            </button>
-          </div>
-        </div>
+      <div>
+        <h1 className="text-[length:var(--text-xl)] font-[var(--weight-bold)] text-[color:var(--text-primary)] tracking-tight">PAPER</h1>
+        <p className="mt-0.5 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
+          The mock account, and the auto-trader engine that trades into it.
+        </p>
       </div>
 
-      {/* ── Main layout ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-        {/* Left: Order entry */}
-        <div>
-          <QuickTradePanel account={account} onSubmit={handleOrder} prefill={prefill} />
-
-          {/* Reset history */}
-          {account.resetHistory.length > 0 && (
-            <div className="mt-4 bg-gray-900 border border-gray-800 rounded-xl p-4">
-              <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold mb-2">Reset History</p>
-              <div className="space-y-1.5">
-                {account.resetHistory.slice().reverse().slice(0, 5).map((r, i) => (
-                  <div key={i} className="flex items-center justify-between text-xs">
-                    <span className="text-gray-600">{new Date(r.timestamp).toLocaleDateString()}</span>
-                    <span className={`font-mono ${r.balanceAtReset >= account.startingBalance ? 'text-emerald-500' : 'text-red-500'}`}>
-                      {fmtDollar(r.balanceAtReset)}
-                    </span>
-                    <span className="text-gray-600">{r.winRate} WR</span>
-                    <span className="text-amber-600">-{r.tokensSpent}🪙</span>
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-gray-700 mt-2">Lifetime resets: {account.resetCount}</p>
-            </div>
-          )}
-        </div>
-
-        {/* Right: Positions + Journal */}
-        <div className="lg:col-span-2 space-y-4">
-
-          {/* Open positions */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-              <h3 className="text-sm font-semibold text-gray-100">Open Positions</h3>
-              <span className="text-xs text-gray-500">{open.length} open</span>
-            </div>
-            {open.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-24 text-xs text-gray-600 gap-1">
-                <span>No open positions</span>
-                <button onClick={() => navigate('/intel')} className="text-emerald-600 hover:text-emerald-400 transition-colors">
-                  Find a trade →
-                </button>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-gray-800 text-gray-500 uppercase">
-                      <th className="text-left px-4 py-2">Symbol</th>
-                      <th className="text-left px-4 py-2">Dir</th>
-                      <th className="text-right px-4 py-2">Size</th>
-                      <th className="text-right px-4 py-2">Entry</th>
-                      <th className="text-right px-4 py-2">Stop</th>
-                      <th className="text-right px-4 py-2">Target</th>
-                      <th className="text-right px-4 py-2">Date</th>
-                      <th className="px-4 py-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {open.map(o => (
-                      <tr key={o.id} className="border-b border-gray-800/40 hover:bg-gray-800/20">
-                        <td className="px-4 py-2 font-mono font-bold text-gray-100">
-                          <button onClick={() => navigate(`/intel?symbol=${o.symbol}`)} className="hover:text-emerald-400">
-                            {o.symbol}
-                          </button>
-                        </td>
-                        <td className="px-4 py-2">
-                          <span className={`font-bold ${o.direction === 'buy' ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {o.direction === 'buy' ? '▲ LONG' : '▼ SHORT'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2 text-right font-mono text-gray-300">{o.size}</td>
-                        <td className="px-4 py-2 text-right font-mono text-gray-200">${fmt(o.entry)}</td>
-                        <td className="px-4 py-2 text-right font-mono text-red-400">${fmt(o.stop)}</td>
-                        <td className="px-4 py-2 text-right font-mono text-emerald-400">${fmt(o.target)}</td>
-                        <td className="px-4 py-2 text-right text-gray-500">
-                          {new Date(o.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                        </td>
-                        <td className="px-4 py-2 flex gap-1">
-                          <button onClick={() => navigate(`/chart?symbol=${o.symbol}`)}
-                            className="px-2 py-0.5 rounded text-xs bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors">
-                            Chart
-                          </button>
-                          <button onClick={() => setCloseOrder(o)}
-                            className="px-2 py-0.5 rounded text-xs bg-gray-800 text-gray-400 hover:bg-red-900/30 hover:text-red-400 transition-colors">
-                            Close
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* Trade journal */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-              <h3 className="text-sm font-semibold text-gray-100">Trade Journal</h3>
-              {closed.length > 0 && (
-                <div className="flex items-center gap-3 text-xs">
-                  <span className="text-gray-500">
-                    W/L: <span className="text-emerald-400 font-mono">{wins}/{closed.length - wins}</span>
-                  </span>
-                  <span className="text-gray-500">
-                    Total: <span className={`font-mono font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
-                    </span>
-                  </span>
-                </div>
-              )}
-            </div>
-            {closed.length === 0 ? (
-              <div className="flex items-center justify-center h-20 text-xs text-gray-600">
-                No closed trades yet
-              </div>
-            ) : (
-              <div className="overflow-x-auto max-h-72">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-gray-800 text-gray-500 uppercase sticky top-0 bg-gray-900">
-                      <th className="text-left px-4 py-2">Symbol</th>
-                      <th className="text-left px-4 py-2">Dir</th>
-                      <th className="text-right px-4 py-2">Entry</th>
-                      <th className="text-right px-4 py-2">Exit</th>
-                      <th className="text-right px-4 py-2">Size</th>
-                      <th className="text-right px-4 py-2">P&L</th>
-                      <th className="text-right px-4 py-2">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...closed].reverse().map(o => {
-                      const pnl = o.pnl ?? 0
-                      return (
-                        <tr key={o.id} className="border-b border-gray-800/40 hover:bg-gray-800/10">
-                          <td className="px-4 py-2 font-mono font-bold text-gray-200">
-                            <button onClick={() => navigate(`/intel?symbol=${o.symbol}`)} className="hover:text-emerald-400">
-                              {o.symbol}
-                            </button>
-                          </td>
-                          <td className="px-4 py-2">
-                            <span className={o.direction === 'buy' ? 'text-emerald-400' : 'text-red-400'}>
-                              {o.direction === 'buy' ? '▲' : '▼'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2 text-right font-mono text-gray-400">${fmt(o.entry)}</td>
-                          <td className="px-4 py-2 text-right font-mono text-gray-400">${fmt(o.exitPrice)}</td>
-                          <td className="px-4 py-2 text-right font-mono text-gray-500">{o.size}</td>
-                          <td className="px-4 py-2 text-right font-mono font-bold"
-                            style={{ color: pnl >= 0 ? '#22c55e' : '#ef4444' }}>
-                            {pnl >= 0 ? '+' : ''}${fmt(pnl)}
-                          </td>
-                          <td className="px-4 py-2 text-right text-gray-600">
-                            {new Date(o.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
+      <div className="flex gap-2">
+        {([
+          { id: 'account' as const, label: 'Account' },
+          { id: 'auto-trader' as const, label: 'Auto-trader' },
+        ]).map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`px-4 py-2 rounded-[var(--radius-lg)] text-[length:var(--text-sm)] font-[var(--weight-bold)] transition-colors ${
+              tab === t.id ? 'bg-[color:var(--bg-raised)] text-[color:var(--accent)]' : 'bg-[color:var(--bg-panel)] text-[color:var(--text-muted)] hover:text-[color:var(--text-secondary)] hover:bg-[color:var(--bg-raised)]'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
+
+      {tab === 'account' ? <AccountTab /> : <AutoTraderTab />}
     </div>
   )
 }

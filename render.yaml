@@ -2,7 +2,7 @@ services:
   # FastAPI Backend
   - type: web
     name: roboalgo-api
-    env: python
+    runtime: python
     plan: standard
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
@@ -13,27 +13,166 @@ services:
         fromDatabase:
           name: postgres_db
           property: connectionString
+      - key: ROBOALGO_REDIS_URL
+        fromService:
+          name: roboalgo-redis
+          type: redis
+          property: connectionString
+      # Required for the auto-trader control guard. Without it every
+      # risk-increasing endpoint (/start, /config, /cycle/run) returns 503.
+      # Risk-reducing endpoints (/stop, /kill on=true) stay open regardless,
+      # so an operator can always halt the system.
+      - key: ROBOALGO_CONTROL_TOKEN
+        sync: false
+      # Read-path market data. The /api/av and /api/finder routers query
+      # AlphaVantage directly to serve live scans, so the web service needs
+      # the key too — see the note on roboalgo-worker for what happens
+      # without it.
+      - key: ALPHAVANTAGE_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      # Free tier — see the note on roboalgo-worker.
+      - key: ALPHAVANTAGE_RPM
+        value: "5"
+      # Deliberately NOT given ALPACA credentials: this service has no
+      # authentication layer and never places orders. Consequence:
+      # /status reports is_paper: null. Paper-vs-live is enforced in the
+      # worker by config.assert_mode_safe(), not by this display.
     disk:
       name: data
       mountPath: /data
       sizeGB: 10
 
   # React Frontend
-  - type: static_site
+  #
+  # Render has no `static_site` type: a static site is `type: web` with
+  # `runtime: static`.
+  #
+  # The browser calls the API through relative `/api/...` URLs. About 20 call
+  # sites (Finder, Paper, Settings, Chart, SideNav) hardcode that prefix and
+  # bypass the axios baseURL in src/api/client.ts, so on a static host they would
+  # hit this site instead of the API. `/api/*` is therefore proxied to the API
+  # service, which is what the dev proxy in frontend/vite.config.ts does locally.
+  # Order matters: the first matching rule wins, so the SPA fallback goes last.
+  #
+  # VITE_API_BASE_URL is deliberately NOT set. It would only redirect the
+  # hooks.ts calls, and the old value (https://roboalgo-api.onrender.com) lacked
+  # the `/api` suffix those paths need. It would also split traffic across two
+  # origins, and the API's CORS list only allows localhost and roboalgo.app.
+  #
+  # Unverified: that Render's rewrite proxy tolerates the >25 s scans
+  # (/api/finder/scan/wide). Check once deployed.
+  - type: web
     name: roboalgo-web
+    runtime: static
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: frontend/dist
     routes:
-      - path: /*
+      - type: rewrite
+        source: /api/*
+        destination: https://roboalgo-api.onrender.com/api/*
+      - type: rewrite
+        source: /*
         destination: /index.html
+    envVars:
+      # frontend/src/lib/supabase.ts calls createClient() at import time, and
+      # supabase-js throws "supabaseUrl is required" on an empty value. Without
+      # these two the bundle fails during evaluation and the page is blank.
+      # Vite inlines them at BUILD time, so changing them needs a redeploy.
+      # Never set VITE_DEV_SKIP_AUTH here: it bypasses authentication.
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
 
-  # PostgreSQL Database
-  - type: pserv
-    name: postgres_db
-    ipAllowList:
-      - source: 0.0.0.0/0
-        description: Allow all
+  # Redis (Celery broker/result backend)
+  - type: redis
+    name: roboalgo-redis
+    ipAllowList: []
 
-envVars:
-  - key: VITE_API_BASE_URL
-    value: https://roboalgo-api.onrender.com
+  # Celery Worker
+  - type: worker
+    name: roboalgo-worker
+    runtime: python
+    plan: standard
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A infrastructure.celery_app worker --loglevel=info --queues=pipeline,symbols,trading --concurrency=2
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: postgres_db
+          property: connectionString
+      - key: ROBOALGO_REDIS_URL
+        fromService:
+          name: roboalgo-redis
+          type: redis
+          property: connectionString
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_PAPER
+        sync: false
+      - key: ROBOALGO_CONTROL_TOKEN
+        sync: false
+      # Market data credentials. This service runs the `pipeline` queue, so it
+      # is the process that actually ingests prices — without these it has no
+      # Finnhub key at all and AlphaVantage silently falls back to the
+      # hardcoded free-tier default in data_engine/alphavantage_fetcher.py,
+      # leaving yfinance as the only working source in production.
+      - key: ALPHAVANTAGE_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      # Requests per minute allowed by the AlphaVantage plan. Not a secret, but
+      # it MUST match the plan or the code throttles itself wrongly in one
+      # direction or the other. The key currently in .env is free tier —
+      # verified by AV rejecting TIME_SERIES_DAILY_ADJUSTED with "this is a
+      # premium endpoint" — so 5 is correct. Raise this only when the plan is
+      # actually upgraded; 30+ also flips _IS_PREMIUM and doubles the thread
+      # pool in data_engine/alphavantage_fetcher.py.
+      - key: ALPHAVANTAGE_RPM
+        value: "5"
+
+  # Celery Beat
+  - type: worker
+    name: roboalgo-beat
+    runtime: python
+    plan: standard
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A infrastructure.scheduler beat --loglevel=info
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: postgres_db
+          property: connectionString
+      - key: ROBOALGO_REDIS_URL
+        fromService:
+          name: roboalgo-redis
+          type: redis
+          property: connectionString
+      # Least privilege: beat only enqueues scheduled tasks — it never calls a
+      # broker and never serves the control API, so it carries no broker
+      # credentials and no control token. Those live on roboalgo-worker only.
+
+# PostgreSQL. This replaces a `type: pserv` entry, which is a private service and
+# creates no database, leaving every `fromDatabase: postgres_db` reference above
+# unresolvable.
+#
+# DECIDE BEFORE SYNCING:
+#   * `plan` is deliberately unset. The schema states no default, and a free-plan
+#     database expires. Set it to match the instance you actually run.
+#   * If a database named postgres_db already exists (created by hand in the
+#     dashboard), read the sync preview first: this must not create a second,
+#     empty database and repoint DATABASE_URL at it.
+#   * ipAllowList is empty, meaning no external access. The services reach the
+#     database over Render's private network via connectionString. The old entry
+#     allowed 0.0.0.0/0. Add your own IP here if you need psql from a laptop.
+databases:
+  - name: postgres_db
+    ipAllowList: []

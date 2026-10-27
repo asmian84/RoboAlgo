@@ -202,8 +202,20 @@ class TestMediumConfidence:
 
 
 class TestLowConfidence:
-    def test_low_confidence_is_hold(self):
+    def test_low_confidence_still_buys_above_the_score_threshold(self):
+        """Confidence no longer decides the verdict: the score does.
+
+        The recommender used to downgrade LOW confidence to HOLD. It now keys BUY and
+        SELL off score >= 55, behind the minimum-gain gate, so a LOW-confidence signal
+        scoring 58 is still actionable.
+        """
         signal = _make_signal(direction="LONG", confidence="LOW", score=58.0)
+        rec = TradeRecommender().recommend(signal, atr=ATR, current_price=CURRENT_PRICE)
+        assert rec.verdict == "BUY"
+
+    def test_score_below_the_threshold_is_hold(self):
+        """Between 35 and 55 the signal is watchlist only, whatever the confidence says."""
+        signal = _make_signal(direction="LONG", confidence="HIGH", score=45.0)
         rec = TradeRecommender().recommend(signal, atr=ATR, current_price=CURRENT_PRICE)
         assert rec.verdict == "HOLD"
 
@@ -272,14 +284,22 @@ class TestProfitProjection:
         )
         assert rec.projected_profit > 0
 
-    def test_projected_profit_pct_consistent(self):
-        """projected_profit_pct should equal (projected_profit / account_size) * 100."""
+    def test_projected_profit_pct_is_the_move_from_entry_to_target(self):
+        """projected_profit_pct is the price move to target, not profit over the account.
+
+        The two coincide only when the position absorbs the whole account, so the old
+        (profit / account) assertion broke once sizing became risk-capped. The minimum
+        gain gate reads this field as a percentage move, which fixes its meaning.
+        """
         signal = _make_signal(direction="LONG", confidence="HIGH", score=85.0)
         rec = TradeRecommender().recommend(
             signal, atr=ATR, current_price=CURRENT_PRICE, account_size=ACCOUNT
         )
-        expected_pct = round(rec.projected_profit / ACCOUNT * 100, 2)
-        assert rec.projected_profit_pct == expected_pct
+        assert rec.projected_profit_pct == round((rec.target - rec.entry) / rec.entry * 100, 2)
+        # the dollar figure stays the per-share move times the size
+        assert rec.projected_profit == pytest.approx(
+            round(rec.position_size * (rec.target - rec.entry), 2)
+        )
 
     def test_higher_rr_profile_higher_profit(self):
         """POSITION profile (4:1 R:R) should produce more projected profit than SCALP (2.5:1)."""
@@ -401,12 +421,36 @@ class TestLevelPounceEntry:
         assert rec.level_source == "level_pounce"
         assert rec.entry == 148.5
 
-    def test_pounce_stop_and_target_used(self):
+    def test_pounce_stop_used_and_target_stretched_to_the_minimum(self):
+        """The pounce stop is taken as given; its target is raised to the profile's floor.
+
+        148.50 to 157.00 is a 5.7% move, under SWING's 10% minimum target, so the
+        recommender stretches the target to 163.35 and records why in the notes.
+        """
         rec = TradeRecommender().recommend(
             self._signal_with_pounce(), atr=ATR, current_price=CURRENT_PRICE
         )
         assert rec.stop == 146.0
-        assert rec.target == 157.0
+        assert rec.target == pytest.approx(163.35)
+        assert any("stretched" in note for note in rec.entry_notes)
+
+    def test_pounce_target_beyond_the_minimum_is_kept(self):
+        """A pounce target already past the floor is used unchanged."""
+        signal = _make_signal(
+            direction="LONG",
+            confidence="HIGH",
+            score=85.0,
+            component_details={
+                "levels": {
+                    "pounce_ideas": [
+                        {"entry": 148.5, "stop": 146.0, "target": 175.0}
+                    ]
+                }
+            },
+        )
+        rec = TradeRecommender().recommend(signal, atr=ATR, current_price=CURRENT_PRICE)
+        assert rec.target == 175.0
+        assert not any("stretched" in note for note in rec.entry_notes)
 
     def test_pounce_note_added(self):
         rec = TradeRecommender().recommend(

@@ -2,9 +2,12 @@
 DataCollector — fetches multi-timeframe OHLCV + options chain per symbol.
 
 For each trade profile (SCALP/SWING/POSITION), fetches the required timeframes:
-  SCALP:    5m (5d), 15m (10d), 1h (30d)
-  SWING:    1h (60d), 4h (60d), 1d (120d)
+  SCALP:    5m (5d), 15m (10d), 1h (30d), 1d (120d), 1wk (365d)
+  SWING:    15m (10d), 1h (60d), 4h (60d), 1d (180d), 1wk (365d)
   POSITION: 4h (60d), 1d (365d), 1wk (365d)
+
+SCALP and SWING carry daily and weekly bars because the scorer's stochastic setup gate
+reads 1wk/1d/4h for confluence: without them the gate can never pass.
 
 Data source priority:
   1. PostgreSQL DB (fastest — pre-cached daily bars)

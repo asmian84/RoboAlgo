@@ -1,4 +1,4 @@
-"""Tests for UnifiedScorer — 18-component weighted scorer."""
+"""Tests for UnifiedScorer — 20-component weighted scorer."""
 
 from __future__ import annotations
 
@@ -79,6 +79,41 @@ def _mock_all_engines_neutral():
     }
 
 
+def _passing_stoch_gate(direction: str = "LONG"):
+    """Force the scorer's only hard gate to pass.
+
+    compute_stoch_setup_gate() wants a fresh %K/%D cross out of an extreme zone on at
+    least two of 1wk/1d/4h. A synthetic trend never produces that, so without this patch
+    score() returns NO_TRADE with no components and nothing downstream runs at all. The
+    gate's own behaviour is covered by TestStochSetupGate.
+    """
+    gate = {
+        "pass": True,
+        "direction": direction,
+        "regime_tf": "1d",
+        "regime_score": 1.0,
+        "confluence_level": 4,
+        "confluence_label": "STRONG",
+        "entry_confirms": 1,
+        "entry_tfs": ["4h"],
+        "base": {"compressed": False},
+        "label": f"{direction} STRONG",
+        "tf_results": {},
+    }
+    return patch("trade_signal_engine.scorer.compute_stoch_setup_gate", return_value=gate)
+
+
+def _engines_with_mtf(alignment: float, bias: str = "LONG"):
+    """_mock_all_engines_neutral(), with the MTF engine's alignment score overridden."""
+    mods = _mock_all_engines_neutral()
+    inst = MagicMock()
+    inst.run.return_value = {"alignment_score": alignment, "bias_direction": bias}
+    mtf_mod = MagicMock()
+    mtf_mod.MTFAlignmentEngine.return_value = inst
+    mods["mtf_alignment.mtf_alignment_engine"] = mtf_mod
+    return mods
+
+
 def _make_uptrend_df(n: int = 100) -> pd.DataFrame:
     """Create a simple uptrending OHLCV DataFrame."""
     dates = pd.date_range("2024-01-01", periods=n, freq="h")
@@ -135,8 +170,8 @@ class TestConstants:
         total = sum(UNIFIED_WEIGHTS.values())
         assert abs(total - 1.0) < 1e-9, f"Weights sum to {total}, expected 1.0"
 
-    def test_unified_weights_has_18_components(self):
-        assert len(UNIFIED_WEIGHTS) == 18
+    def test_unified_weights_has_20_components(self):
+        assert len(UNIFIED_WEIGHTS) == 20
 
     def test_trade_profiles_has_required_keys(self):
         for key in ("SCALP", "SWING", "POSITION"):
@@ -214,7 +249,8 @@ class TestScoring:
             bars={"1h": _make_uptrend_df(100)},
             current_price=149.0,
         )
-        result = self.scorer.score(sd)
+        with _passing_stoch_gate():
+            result = self.scorer.score(sd)
         assert 0 <= result.score <= 100
         assert result.direction != "SHORT"
         assert len(result.components) > 0
@@ -241,7 +277,7 @@ class TestScoring:
     def test_components_populated(self):
         sd = MockSymbolData(bars={"1h": _make_uptrend_df(100)})
 
-        with patch.dict("sys.modules", _mock_all_engines_neutral()):
+        with _passing_stoch_gate(), patch.dict("sys.modules", _mock_all_engines_neutral()):
             result = self.scorer.score(sd)
         # At minimum the internal components should be populated
         for key in [
@@ -291,62 +327,79 @@ class TestHardGates:
     def setup_method(self):
         self.scorer = UnifiedScorer()
 
-    def test_mtf_below_040_blocks_trade(self):
-        """When MTF alignment returns < 0.40, the trade is blocked."""
+    def test_low_mtf_penalises_but_does_not_block(self):
+        """Weak MTF alignment is a scoring penalty now, not a hard kill.
+
+        It used to reject outright with "MTF alignment too low"; the scorer deliberately
+        downgraded it to 8 points off below 0.20 and 4 points off below 0.40, with the
+        stochastic setup dictating direction instead.
+        """
         sd = MockSymbolData(bars={"1h": _make_uptrend_df(100)})
 
-        mock_engine_instance = MagicMock()
-        mock_engine_instance.run.return_value = {
-            "alignment_score": 0.20,
-            "bias_direction": "NEUTRAL",
-        }
-        mock_mtf_module = MagicMock()
-        mock_mtf_module.MTFAlignmentEngine.return_value = mock_engine_instance
+        with _passing_stoch_gate(), patch.dict("sys.modules", _engines_with_mtf(0.15, "NEUTRAL")):
+            weak = self.scorer.score(sd)
+        with _passing_stoch_gate(), patch.dict("sys.modules", _engines_with_mtf(0.70, "LONG")):
+            strong = self.scorer.score(sd)
 
-        with patch.dict(
-            "sys.modules",
-            {
-                "mtf_alignment": MagicMock(),
-                "mtf_alignment.mtf_alignment_engine": mock_mtf_module,
-            },
-        ):
-            result = self.scorer.score(sd)
+        assert "MTF alignment too low" not in weak.rejection_reason
+        assert weak.components["mtf_alignment"] == pytest.approx(0.15)
+        assert weak.score < strong.score            # the penalty costs score, not the trade
 
-        assert result.direction == "NO_TRADE"
-        assert result.score < 40
-        assert "MTF alignment too low" in result.rejection_reason
+    def test_mtf_above_040_is_not_penalised_as_misaligned(self):
+        """MTF at or above 0.40 leaves the score free of the alignment penalty.
 
-    def test_mtf_above_040_passes_gate(self):
-        """When MTF alignment >= 0.40, the gate does not block."""
+        Written as a comparison because the old version asserted only that the rejection
+        reason lacked "MTF", which passed even when the stochastic gate had already
+        rejected the setup for an unrelated reason.
+        """
         sd = MockSymbolData(bars={"1h": _make_uptrend_df(100)})
 
-        mock_engine_instance = MagicMock()
-        mock_engine_instance.run.return_value = {
-            "alignment_score": 0.65,
-            "bias_direction": "LONG",
-        }
-        mock_mtf_module = MagicMock()
-        mock_mtf_module.MTFAlignmentEngine.return_value = mock_engine_instance
+        with _passing_stoch_gate(), patch.dict("sys.modules", _engines_with_mtf(0.65, "LONG")):
+            ok = self.scorer.score(sd)
+        with _passing_stoch_gate(), patch.dict("sys.modules", _engines_with_mtf(0.30, "LONG")):
+            middling = self.scorer.score(sd)
 
-        with patch.dict(
-            "sys.modules",
-            {
-                "mtf_alignment": MagicMock(),
-                "mtf_alignment.mtf_alignment_engine": mock_mtf_module,
-            },
-        ):
-            result = self.scorer.score(sd)
-
-        assert result.direction != "NO_TRADE" or "MTF" not in result.rejection_reason
+        assert ok.direction != "NO_TRADE"
+        assert "MTF" not in ok.rejection_reason
+        assert ok.score > middling.score
 
     def test_no_structure_confirmation_penalty(self):
         """When structure_shift is neutral (~0.50), score is reduced by 30%."""
         sd = MockSymbolData(bars={"1h": _make_uptrend_df(100)})
 
-        with patch.dict("sys.modules", _mock_all_engines_neutral()):
+        with _passing_stoch_gate(), patch.dict("sys.modules", _mock_all_engines_neutral()):
             result = self.scorer.score(sd)
         # Without SMC engine, structure_shift defaults to 0.50 -> penalty applied
         assert any("no structure confirmation" in b for b in result.bonuses)
+
+
+class TestStochSetupGate:
+    """The stochastic setup gate is the scorer's only hard gate."""
+
+    def setup_method(self):
+        self.scorer = UnifiedScorer()
+
+    def test_plain_trend_has_no_setup_and_is_rejected(self):
+        """A trend with no fresh extreme-zone cross never reaches the weighted scoring."""
+        sd = MockSymbolData(bars={"1h": _make_uptrend_df(100)}, current_price=149.0)
+
+        result = self.scorer.score(sd)
+
+        assert result.direction == "NO_TRADE"
+        assert result.score == 0
+        assert result.components == {}              # short-circuits before any component
+        assert "No setup" in result.rejection_reason
+        assert "stoch_gate" in result.component_details
+
+    def test_gate_direction_drives_the_signal(self):
+        """When the gate passes SHORT, the scorer does not come back LONG."""
+        sd = MockSymbolData(bars={"1h": _make_uptrend_df(100)}, current_price=149.0)
+
+        with _passing_stoch_gate("SHORT"), patch.dict("sys.modules", _mock_all_engines_neutral()):
+            result = self.scorer.score(sd)
+
+        assert result.direction != "LONG"
+        assert result.components
 
 
 # ── Tests: Helper Methods ──────────────────────────────────────────────────────

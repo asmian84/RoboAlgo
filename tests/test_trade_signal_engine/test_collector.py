@@ -26,11 +26,11 @@ class TestProfileTfs:
 
     def test_scalp_timeframes(self):
         tfs = [spec["tf"] for spec in PROFILE_TFS["SCALP"]]
-        assert tfs == ["5m", "15m", "1h"]
+        assert tfs == ["5m", "15m", "1h", "1d", "1wk"]
 
     def test_swing_timeframes(self):
         tfs = [spec["tf"] for spec in PROFILE_TFS["SWING"]]
-        assert tfs == ["1h", "4h", "1d"]
+        assert tfs == ["15m", "1h", "4h", "1d", "1wk"]
 
     def test_position_timeframes(self):
         tfs = [spec["tf"] for spec in PROFILE_TFS["POSITION"]]
@@ -50,9 +50,11 @@ class TestProfileTfs:
 
     def test_swing_periods(self):
         periods = {spec["tf"]: spec["period"] for spec in PROFILE_TFS["SWING"]}
+        assert periods["15m"] == "10d"
         assert periods["1h"] == "60d"
         assert periods["4h"] == "60d"
-        assert periods["1d"] == "120d"
+        assert periods["1d"] == "180d"
+        assert periods["1wk"] == "365d"
 
     def test_position_periods(self):
         periods = {spec["tf"]: spec["period"] for spec in PROFILE_TFS["POSITION"]}
@@ -60,9 +62,17 @@ class TestProfileTfs:
         assert periods["1d"] == "365d"
         assert periods["1wk"] == "365d"
 
-    def test_each_profile_has_exactly_three_timeframes(self):
+    def test_no_profile_repeats_a_timeframe(self):
         for profile, specs in PROFILE_TFS.items():
-            assert len(specs) == 3, f"{profile} should have 3 timeframe specs"
+            tfs = [spec["tf"] for spec in specs]
+            assert len(tfs) == len(set(tfs)), f"{profile} lists a timeframe twice"
+
+    def test_every_profile_covers_the_gate_timeframes(self):
+        """compute_stoch_setup_gate() reads 1wk/1d/4h for confluence, so every profile
+        has to fetch the daily and weekly context or the gate can never pass."""
+        for profile, specs in PROFILE_TFS.items():
+            tfs = {spec["tf"] for spec in specs}
+            assert {"1d", "1wk"} <= tfs, f"{profile} is missing daily or weekly bars"
 
 
 # ── SymbolData dataclass ──────────────────────────────────────────────────────
@@ -117,149 +127,87 @@ class TestSymbolData:
 # ── collect() — offline behaviour ────────────────────────────────────────────
 
 class TestCollectOffline:
-    def test_unknown_profile_returns_error(self, monkeypatch):
-        """collect() with an unrecognised profile must return immediately with an error."""
-        # Patch yf.Ticker to make sure no network call is made
+    """collect() with the timeframe fetcher stubbed out.
+
+    The engine no longer imports yfinance at module level: _fetch_tf_worker() tries the
+    DB, then AlphaVantage, then yfinance, each imported lazily inside the call. The seam
+    these tests patch is that worker, so no data source is ever reached.
+    """
+
+    @staticmethod
+    def _bars(close: float = 195.50, n: int = 1) -> pd.DataFrame:
+        """One timeframe's bars, in the lowercase column convention collect() returns."""
+        return pd.DataFrame(
+            {
+                "open": [close] * n,
+                "high": [close + 1] * n,
+                "low": [close - 1] * n,
+                "close": [close] * n,
+                "volume": [500] * n,
+            },
+            index=pd.date_range("2024-01-01", periods=n, freq="1h"),
+        )
+
+    def _patch_worker(self, monkeypatch, result):
+        """Point _fetch_tf_worker at `result(tf) -> DataFrame | None`, recording its calls."""
         import trade_signal_engine.collector as mod
 
-        class _FakeTicker:
-            def __init__(self, *a, **kw):
-                pass
+        calls = []
 
-        monkeypatch.setattr(mod.yf, "Ticker", _FakeTicker)
+        def _fake(symbol, tf, period, fast_mode):
+            calls.append((symbol, tf, period, fast_mode))
+            return tf, result(tf)
+
+        monkeypatch.setattr(mod, "_fetch_tf_worker", _fake)
+        return calls
+
+    def test_unknown_profile_returns_error(self, monkeypatch):
+        """collect() with an unrecognised profile must return before fetching anything."""
+        calls = self._patch_worker(monkeypatch, lambda tf: self._bars())
 
         sd = collect("AAPL", profile="UNKNOWN")
         assert sd.error is not None
         assert "Unknown profile" in sd.error
         assert sd.bars == {}
+        assert calls == []                        # no fetch was attempted
 
     def test_symbol_is_uppercased(self, monkeypatch):
         """collect() should normalise the symbol to uppercase."""
-        import trade_signal_engine.collector as mod
-
-        class _FakeTicker:
-            def __init__(self, *a, **kw):
-                pass
-            def history(self, **kw):
-                return pd.DataFrame()
-            @property
-            def info(self):
-                return {}
-
-        monkeypatch.setattr(mod.yf, "Ticker", _FakeTicker)
-
-        sd = collect("aapl", profile="SWING")
-        assert sd.symbol == "AAPL"
+        self._patch_worker(monkeypatch, lambda tf: None)
+        assert collect("aapl", profile="SWING").symbol == "AAPL"
 
     def test_profile_is_uppercased(self, monkeypatch):
         """collect() should normalise the profile to uppercase."""
-        import trade_signal_engine.collector as mod
-
-        class _FakeTicker:
-            def __init__(self, *a, **kw):
-                pass
-            def history(self, **kw):
-                return pd.DataFrame()
-            @property
-            def info(self):
-                return {}
-
-        monkeypatch.setattr(mod.yf, "Ticker", _FakeTicker)
-
-        sd = collect("AAPL", profile="swing")
-        assert sd.profile == "SWING"
+        self._patch_worker(monkeypatch, lambda tf: None)
+        assert collect("AAPL", profile="swing").profile == "SWING"
 
     def test_empty_history_sets_error(self, monkeypatch):
-        """When all history calls return empty DataFrames, sd.error should be set."""
-        import trade_signal_engine.collector as mod
-
-        class _FakeTicker:
-            def __init__(self, *a, **kw):
-                pass
-            def history(self, **kw):
-                return pd.DataFrame()
-            @property
-            def info(self):
-                return {}
-
-        monkeypatch.setattr(mod.yf, "Ticker", _FakeTicker)
+        """When every timeframe comes back empty, sd.error should be set."""
+        self._patch_worker(monkeypatch, lambda tf: pd.DataFrame())
 
         sd = collect("FAKE", profile="SWING")
         assert sd.error is not None
         assert "No price data" in sd.error
 
     def test_bars_populated_from_history(self, monkeypatch):
-        """When history returns data, bars dict should be populated."""
-        import trade_signal_engine.collector as mod
-
-        dummy = pd.DataFrame(
-            {"Open": [1.0], "High": [2.0], "Low": [0.5], "Close": [1.5], "Volume": [1000]},
-            index=pd.date_range("2024-01-01", periods=1, freq="1h"),
-        )
-
-        class _FakeTicker:
-            def __init__(self, *a, **kw):
-                pass
-            def history(self, period, interval, **kw):
-                # Return dummy data for non-4h intervals
-                if interval != "1h":
-                    return dummy.copy()
-                return dummy.copy()
-            @property
-            def info(self):
-                return {"marketCap": 1_000_000, "sector": "Technology"}
-
-        monkeypatch.setattr(mod.yf, "Ticker", _FakeTicker)
+        """Every timeframe that returns data lands in sd.bars under its own key."""
+        self._patch_worker(monkeypatch, lambda tf: self._bars())
 
         sd = collect("AAPL", profile="SWING")
-        # At least some bars should be populated (1h and 1d use direct history)
-        assert len(sd.bars) > 0
+        assert set(sd.bars) == {spec["tf"] for spec in PROFILE_TFS["SWING"]}
         assert sd.error is None
 
     def test_current_price_set_from_bars(self, monkeypatch):
-        """current_price should be taken from the first available tf's last close."""
-        import trade_signal_engine.collector as mod
-
+        """current_price is the last close of the first profile timeframe that has bars."""
         close_val = 195.50
-        dummy = pd.DataFrame(
-            {
-                "Open": [close_val],
-                "High": [close_val + 1],
-                "Low": [close_val - 1],
-                "Close": [close_val],
-                "Volume": [500],
-            },
-            index=pd.date_range("2024-01-01", periods=1, freq="1h"),
-        )
-
-        class _FakeTicker:
-            def __init__(self, *a, **kw):
-                pass
-            def history(self, **kw):
-                return dummy.copy()
-            @property
-            def info(self):
-                return {}
-
-        monkeypatch.setattr(mod.yf, "Ticker", _FakeTicker)
+        self._patch_worker(monkeypatch, lambda tf: self._bars(close_val) if tf == "1h" else None)
 
         sd = collect("AAPL", profile="SWING")
         assert sd.current_price == pytest.approx(close_val)
 
     def test_fetch_options_false_leaves_chain_none(self, monkeypatch):
         """With fetch_options=False, options_chain must remain None."""
-        import trade_signal_engine.collector as mod
-
-        class _FakeTicker:
-            def __init__(self, *a, **kw):
-                pass
-            def history(self, **kw):
-                return pd.DataFrame()
-            @property
-            def info(self):
-                return {}
-
-        monkeypatch.setattr(mod.yf, "Ticker", _FakeTicker)
+        self._patch_worker(monkeypatch, lambda tf: self._bars())
 
         sd = collect("AAPL", profile="SWING", fetch_options=False)
         assert sd.options_chain is None
